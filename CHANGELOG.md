@@ -2,12 +2,24 @@
 ## eureka
 
 ## [02/04/2025] - Eureka
+- Fixed console dashboard issues:
+  - Fixed _draw_candle_info method in console_dashboard.py
+  - Moved command info display to the top of the screen for better visibility
+  - Fixed syntax errors and incomplete method implementations
+  - Added mock candle data generation for visualization when real data is not available
+  - Implemented proper error handling in all drawing methods
+  - Fixed detailed view to properly display candle information
+
+## [02/04/2025] - Eureka
 - Fixed and enhanced console dashboard with advanced visualization features:
   - Fixed indentation error in console_dashboard.py (line 20)
   - Corrected ASCII art for ELVIS logo and Bitcoin symbol
   - Fixed dependency conflicts in requirements.txt
-  - Added real-time BTC price fetching from multiple APIs (Binance, Coinbase, Kraken)
-  - Implemented PriceFetcher class for reliable price data with fallback mechanisms
+  - Added real-time BTC price fetching using Binance WebSocket API for live updates
+  - Implemented PriceFetcher class with WebSocket connection for real-time candlestick data
+  - Added robust error handling for terminal resizing and display issues
+  - Added try-except blocks to all drawing methods to prevent crashes
+  - Fixed "addwstr() returned ERR" errors by adding boundary checks for terminal size
   - Added prominent testnet/production mode indicator with color coding
   - Added multiple view modes (standard, detailed, chart)
   - Created real-time price chart with candlestick visualization
@@ -18,6 +30,7 @@
   - Improved border styling with Unicode box-drawing characters
   - Added time-based labels for price history
   - Implemented dynamic data updates with smooth transitions
+  - Updated README.md with detailed documentation of console dashboard features
 
 ## [02/04/2025] - Eureka
 - Implemented comprehensive code review and improvement suggestions:

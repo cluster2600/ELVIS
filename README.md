@@ -132,17 +132,29 @@ ELVIS includes a real-time console dashboard for monitoring trading performance 
 - **Performance Metrics**: View key metrics like win rate, profit factor, and Sharpe ratio
 - **Recent Trades**: See your most recent trades with PnL information
 - **Strategy Signals**: Monitor buy/sell signals from your active strategy
+- **Real-time Candlestick Charts**: View live candlestick data with price movement visualization
+- **Market Statistics**: Monitor daily high/low, volume, and market sentiment
+- **System Statistics**: Track CPU/memory usage, uptime, and API calls
 
 The console dashboard features:
-- Color-coded information (green for positive values, red for negative)
-- Real-time updates as trades are executed
-- Compact display that fits in a standard terminal window
-- Low resource usage compared to web-based dashboards
+- **Multiple Views**: Standard, Detailed, and Candlestick Chart views
+- **Real-time WebSocket Data**: Direct connection to Binance for live price updates
+- **Color-coded Information**: Green for positive values, red for negative
+- **Real-time Updates**: Instant updates as trades are executed and prices change
+- **Compact Display**: Fits in a standard terminal window
+- **Low Resource Usage**: Efficient compared to web-based dashboards
+- **Error Handling**: Robust error handling for terminal resizing and display issues
 
 To use the console dashboard:
 1. Run the bot with the dashboard enabled using `./run_dashboard.sh`
 2. The dashboard will appear directly in your terminal
-3. Press 'q' to quit the dashboard and stop the bot
+3. Use number keys to switch between views:
+   - `1`: Standard view (portfolio, metrics, trades, signals)
+   - `2`: Detailed view (portfolio, market stats, system stats, candle info)
+   - `3`: Candlestick Chart view (real-time price chart)
+4. Press 'q' to quit the dashboard and stop the bot
+
+**Note**: The dashboard requires a terminal with support for Unicode box-drawing characters and a minimum size of 50x10 characters. For best results, use a terminal with a dark background.
 
 ```
 ┌─────────────────────── ELVIS Console Dashboard ───────────────────────┐

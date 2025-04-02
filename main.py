@@ -18,6 +18,7 @@ import sys
 import time
 import random
 import psutil
+import threading
 from datetime import datetime
 from utils import setup_logger, print_info, print_error
 from utils.console_dashboard import ConsoleDashboardManager
@@ -78,13 +79,9 @@ def initialize_bot(args, logger):
         return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
     raise ValueError(f"Invalid mode: {args.mode}")
 
-def run_dashboard_simulation(logger, args):
-    dashboard_manager = ConsoleDashboardManager(logger)
-    price_fetcher = PriceFetcher(logger, symbol=args.symbol, timeframe="1m")
-    
-    dashboard_manager.start_dashboard()
-    price_fetcher.start()
-    time.sleep(5)  # Increased delay to ensure WebSocket data starts flowing
+def run_simulation(dashboard_manager, price_fetcher, logger, args):
+    """Run simulation in a separate thread."""
+    time.sleep(5)  # Wait for initial WebSocket data
     
     portfolio_value = 10000.0
     position_size = 0.0
@@ -106,77 +103,89 @@ def run_dashboard_simulation(logger, args):
         'volatility': 0.0, 'sortino_ratio': 0.0, 'calmar_ratio': 0.0
     }
     
-    try:
-        iteration = 0
-        while True:
-            iteration += 1
-            current_candle = price_fetcher.get_current_candle()
-            current_price = current_candle['close']
-            logger.debug(f"Current candle in main: {current_candle}")
-            dashboard_manager.update_candle(current_candle)
-            
-            if current_price <= 0:
-                logger.warning("No valid price data received yet.")
-                time.sleep(1)
-                continue
-            
-            if position_size == 0 and random.random() > 0.8:
-                position_size = portfolio_value / current_price * 0.1
-                entry_price = current_price
-                portfolio_value -= position_size * entry_price
-                for strategy in signals:
-                    signals[strategy] = {'buy': False, 'sell': False}
-                chosen_strategy = random.choice(list(signals.keys()))
-                signals[chosen_strategy]['buy'] = True
-                dashboard_manager.add_trade({
-                    'timestamp': datetime.now().isoformat(),
-                    'symbol': args.symbol,
-                    'side': 'buy',
-                    'price': entry_price,
-                    'quantity': position_size,
-                    'pnl': 0.0
-                })
-                logger.info(f"BUY: {position_size:.8f} BTC at ${entry_price:.2f}")
-            elif position_size > 0 and random.random() > 0.8:
-                pnl = (current_price - entry_price) * position_size
-                portfolio_value += position_size * current_price
-                for strategy in signals:
-                    signals[strategy] = {'buy': False, 'sell': False}
-                chosen_strategy = random.choice(list(signals.keys()))
-                signals[chosen_strategy]['sell'] = True
-                dashboard_manager.add_trade({
-                    'timestamp': datetime.now().isoformat(),
-                    'symbol': args.symbol,
-                    'side': 'sell',
-                    'price': current_price,
-                    'quantity': position_size,
-                    'pnl': pnl
-                })
-                logger.info(f"SELL: {position_size:.8f} BTC at ${current_price:.2f} (PnL: ${pnl:.2f})")
-                position_size = 0.0
-                entry_price = 0.0
-            
-            dashboard_manager.update_portfolio_value(portfolio_value)
-            dashboard_manager.update_position(position_size, entry_price, current_price)
-            dashboard_manager.update_strategy_signals(signals)
-            dashboard_manager.update_system_stats(get_system_stats())
-            
-            metrics['total_trades'] = iteration // 2
-            metrics['winning_trades'] = int(metrics['total_trades'] * random.uniform(0.5, 0.7))
-            metrics['losing_trades'] = metrics['total_trades'] - metrics['winning_trades']
-            if metrics['total_trades'] > 0:
-                metrics['win_rate'] = metrics['winning_trades'] / metrics['total_trades'] * 100
-                metrics['profit_factor'] = random.uniform(1.2, 2.8)
-                metrics['sharpe_ratio'] = random.uniform(0.8, 2.5)
-                metrics['max_drawdown'] = random.uniform(3.0, 12.0)
-            dashboard_manager.update_metrics(metrics)
-            
+    iteration = 0
+    while dashboard_manager.dashboard and dashboard_manager.dashboard.running:
+        iteration += 1
+        current_candle = price_fetcher.get_current_candle()
+        current_price = current_candle['close']
+        logger.debug(f"Current candle in main: {current_candle}")
+        dashboard_manager.update_candle(current_candle)
+        
+        if current_price <= 0:
+            logger.warning("No valid price data received yet.")
             time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Simulation interrupted by user")
+            continue
+        
+        if position_size == 0 and random.random() > 0.8:
+            position_size = portfolio_value / current_price * 0.1
+            entry_price = current_price
+            portfolio_value -= position_size * entry_price
+            for strategy in signals:
+                signals[strategy] = {'buy': False, 'sell': False}
+            chosen_strategy = random.choice(list(signals.keys()))
+            signals[chosen_strategy]['buy'] = True
+            dashboard_manager.add_trade({
+                'timestamp': datetime.now().isoformat(),
+                'symbol': args.symbol,
+                'side': 'buy',
+                'price': entry_price,
+                'quantity': position_size,
+                'pnl': 0.0
+            })
+            logger.info(f"BUY: {position_size:.8f} BTC at ${entry_price:.2f}")
+        elif position_size > 0 and random.random() > 0.8:
+            pnl = (current_price - entry_price) * position_size
+            portfolio_value += position_size * current_price
+            for strategy in signals:
+                signals[strategy] = {'buy': False, 'sell': False}
+            chosen_strategy = random.choice(list(signals.keys()))
+            signals[chosen_strategy]['sell'] = True
+            dashboard_manager.add_trade({
+                'timestamp': datetime.now().isoformat(),
+                'symbol': args.symbol,
+                'side': 'sell',
+                'price': current_price,
+                'quantity': position_size,
+                'pnl': pnl
+            })
+            logger.info(f"SELL: {position_size:.8f} BTC at ${current_price:.2f} (PnL: ${pnl:.2f})")
+            position_size = 0.0
+            entry_price = 0.0
+        
+        dashboard_manager.update_portfolio_value(portfolio_value)
+        dashboard_manager.update_position(position_size, entry_price, current_price)
+        dashboard_manager.update_strategy_signals(signals)
+        dashboard_manager.update_system_stats(get_system_stats())
+        
+        metrics['total_trades'] = iteration // 2
+        metrics['winning_trades'] = int(metrics['total_trades'] * random.uniform(0.5, 0.7))
+        metrics['losing_trades'] = metrics['total_trades'] - metrics['winning_trades']
+        if metrics['total_trades'] > 0:
+            metrics['win_rate'] = metrics['winning_trades'] / metrics['total_trades'] * 100
+            metrics['profit_factor'] = random.uniform(1.2, 2.8)
+            metrics['sharpe_ratio'] = random.uniform(0.8, 2.5)
+            metrics['max_drawdown'] = random.uniform(3.0, 12.0)
+        dashboard_manager.update_metrics(metrics)
+        
+        time.sleep(1)
+
+def run_dashboard_simulation(logger, args):
+    dashboard_manager = ConsoleDashboardManager(logger)
+    price_fetcher = PriceFetcher(logger, symbol=args.symbol, timeframe="1m")
+    
+    price_fetcher.start()
+    simulation_thread = threading.Thread(target=run_simulation, args=(dashboard_manager, price_fetcher, logger, args))
+    simulation_thread.daemon = True
+    simulation_thread.start()
+    
+    try:
+        dashboard_manager.start_dashboard()
+    except Exception as e:
+        logger.error(f"Dashboard failed: {e}", exc_info=True)
     finally:
         price_fetcher.stop()
         dashboard_manager.stop_dashboard()
+        simulation_thread.join(timeout=2)
 
 def main():
     print(ELVIS_ASCII)
