@@ -1,4 +1,37 @@
 # Changelog
+## need help
+
+**Date:** 2025-04-02
+
+**Summary:** Despite multiple debugging attempts, the console dashboard (`utils/console_dashboard.py`) reportedly still crashes.
+**Debugging Steps Taken:**
+1.  Fixed potential race condition by copying shared data under lock before rendering.
+2.  Refactored drawing functions to use local data copies.
+3.  Improved border drawing logic for split views.
+4.  Corrected multiple indentation errors.
+5.  Fixed incorrect call signature for `_generate_mock_candle_data`.
+6.  Added type checking and safe string conversion in `_safe_addstr`.
+7.  Enhanced error handling around `curses.initscr()`, `curses.endwin()`, and `stdscr.refresh()`.
+8.  Added specific error handling (e.g., for `ZeroDivisionError`) and range checks within `_draw_large_candle_chart` coordinate calculations.
+
+**Request:** The exact cause of the crash is still unknown. Need the specific error message and full traceback produced when the dashboard crashes to proceed with debugging.
+
+---
+*(Previous Entries Below)*
+---
+## eureka
+
+**Date:** 2025-04-02
+
+**Summary:** Fixed bugs and improved thread safety in the console dashboard (`utils/console_dashboard.py`):
+1.  **Fixed Race Condition:** Implemented locking and data copying in the main dashboard loop (`_run_dashboard`) to prevent race conditions during rendering. Drawing functions now use local copies of shared data.
+2.  **Refactored Drawing Functions:** Updated signatures and logic of all drawing helper functions (`_draw_logo_header`, `_draw_header`, `_draw_portfolio_info`, `_draw_metrics_simple`, `_draw_trades`, `_draw_signals`, `_draw_market_stats`, `_draw_system_stats`, `_draw_candle_info`, `_draw_large_candle_chart`) to accept data as arguments instead of accessing class attributes directly.
+3.  **Improved Border Drawing:** Corrected the border characters (`┬`, `┴`, `│`) used in split-view sections (`_draw_market_stats`/`_draw_system_stats` and `_draw_trades`/`_draw_signals`) for a cleaner visual separation.
+4.  **Fixed Indentation Errors:** Corrected multiple `IndentationError` issues introduced during refactoring, particularly within `_draw_large_candle_chart`.
+
+---
+*(Previous Entries Below)*
+---
 ## eureka
 
 **Date:** 2025-04-02

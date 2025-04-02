@@ -84,7 +84,16 @@ class PaperBot:
             return
 
         current_price = candle['close']
-        candle_time = pd.to_datetime(candle['time'], unit='ms') # Assuming time is ms timestamp
+        # Corrected key from 'time' to 'T' (Kline close time from Binance stream)
+        # Add error handling in case 'T' is also missing or invalid
+        try:
+            candle_time = pd.to_datetime(candle['T'], unit='ms')
+        except KeyError:
+            self.logger.error("Candle data missing 'T' (timestamp) key. Using current time.")
+            candle_time = pd.Timestamp.now() # Fallback to current time
+        except Exception as time_err:
+            self.logger.error(f"Error converting candle timestamp '{candle.get('T')}': {time_err}. Using current time.")
+            candle_time = pd.Timestamp.now() # Fallback
 
         # --- Update Data History ---
         new_data = pd.DataFrame([{
