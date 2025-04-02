@@ -427,10 +427,13 @@ class PerformanceMonitor:
             
             # Add metrics to report
             for metric, value in metrics.items():
+                # Format value based on type
+                formatted_value = f"{value:.4f}" if isinstance(value, float) else str(value)
+                
                 report += f"""
                     <tr>
                         <td>{metric.replace('_', ' ').title()}</td>
-                        <td>{value:.4f if isinstance(value, float) else value}</td>
+                        <td>{formatted_value}</td>
                     </tr>
                 """
             

@@ -70,7 +70,8 @@ FILE_PATHS = {
     'DATA_DIR': './data/trade_data/',
     'SPY_INDEX_FILE': 'data/SPY_Crypto_Broad_Digital_Market_Index - Sheet1.csv',
     'METRICS_FILE': 'plots_and_metrics/test_metrics.txt',
-    'PLOT_DIR': './plots_and_metrics/'
+    'PLOT_DIR': './plots_and_metrics/',
+    'METRICS_DIR': './plots_and_metrics/'
 }
 
 # Logging Configuration

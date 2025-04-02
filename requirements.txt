@@ -1,15 +1,13 @@
-# Core dependencies from your original list
+# Core dependencies
 pandas>=2.0.0
 numpy>=1.26.0
 requests>=2.31.0
 python-binance>=1.0.19
-# elegantrl  # Disabled due to pygame build failure
 scikit-learn>=1.0.2
 tensorflow-macos==2.16.2
 tensorflow-metal>=1.1.0
+tensorflow_decision_forests==1.8.1
 streamlit>=1.38.0
-solana==0.30.2
-anchorpy==0.18.0
 plotly==6.0.0
 python-dotenv==1.0.0
 openai>=0.27.0
@@ -27,14 +25,54 @@ optuna>=3.6.0
 git+https://github.com/fracdiff/fracdiff.git@0.9.1
 ta>=0.11.0
 
-# Dependencies already in your script or implied
+# Logging and notification
 colorlog>=6.8.0
 python-telegram-bot>=20.0.0
 
-# Dependencies for ensemble models
+# Ensemble models
 ydf==0.7.0
 coremltools>=7.1
 
-# New dependencies for enhancements
-newsapi-python>=2.7
+# Sentiment analysis
+newsapi-python==0.2.7
 nltk>=3.8.1
+textblob>=0.17.1
+tweepy>=4.14.0
+vaderSentiment>=3.3.2
+
+# Transformer models
+torch>=2.0.0
+transformers>=4.30.0
+tokenizers>=0.13.3
+
+# Reinforcement learning
+gym>=0.26.0
+stable-baselines3>=2.0.0
+tensorboard>=2.13.0
+
+# Dashboard and visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+dash>=2.10.0
+dash-bootstrap-components>=1.4.0
+flask>=2.3.0
+flask-socketio>=5.3.0
+
+# Monte Carlo simulation
+tqdm>=4.65.0
+multiprocess>=0.70.14
+
+# Testing and validation
+pytest-cov>=4.1.0
+hypothesis>=6.80.0
+
+# Documentation
+sphinx>=7.1.0
+sphinx-rtd-theme>=1.2.0
+nbsphinx>=0.9.0
+
+# Development tools
+pre-commit>=3.3.0
+mypy>=1.3.0
+isort>=5.12.0
+flake8>=6.0.0

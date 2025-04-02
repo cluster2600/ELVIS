@@ -1,5 +1,7 @@
 # ELVIS: Enhanced Leveraged Virtual Investment System
 
+![ELVIS Logo](images/elvis.png)
+
 ```ascii
                                                                                                                                                        
                                                                                                                                                        

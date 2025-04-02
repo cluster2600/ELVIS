@@ -1,0 +1,82 @@
+{
+  "data_processors": {
+    "BinanceProcessor": {
+      "success": true,
+      "message": "BinanceProcessor test passed"
+    }
+  },
+  "models": {
+    "RandomForestModel": {
+      "success": false,
+      "message": "RandomForestModel test failed: Can't instantiate abstract class RandomForestModel with abstract methods get_params, load, save, set_params"
+    },
+    "NeuralNetworkModel": {
+      "success": false,
+      "message": "NeuralNetworkModel test failed: Can't instantiate abstract class NeuralNetworkModel with abstract methods get_params, load, save, set_params"
+    },
+    "EnsembleModel": {
+      "success": false,
+      "message": "EnsembleModel test failed: Can't instantiate abstract class RandomForestModel with abstract methods get_params, load, save, set_params"
+    },
+    "TransformerModel": {
+      "success": false,
+      "message": "TransformerModel test failed: Can't instantiate abstract class TransformerModel with abstract methods get_params, load, save, set_params"
+    },
+    "ReinforcementLearningModel": {
+      "success": false,
+      "message": "ReinforcementLearningModel test failed: Can't instantiate abstract class ReinforcementLearningModel with abstract methods get_params, load, save, set_params"
+    }
+  },
+  "strategies": {
+    "TechnicalStrategy": {
+      "success": true,
+      "message": "TechnicalStrategy test passed"
+    },
+    "MeanReversionStrategy": {
+      "success": true,
+      "message": "MeanReversionStrategy test passed"
+    },
+    "TrendFollowingStrategy": {
+      "success": true,
+      "message": "TrendFollowingStrategy test passed"
+    },
+    "SentimentStrategy": {
+      "success": true,
+      "message": "SentimentStrategy test passed"
+    },
+    "GridStrategy": {
+      "success": true,
+      "message": "GridStrategy test passed"
+    }
+  },
+  "risk_managers": {
+    "RiskManager": {
+      "success": false,
+      "message": "RiskManager test failed: can't multiply sequence by non-int of type 'float'"
+    },
+    "AdvancedRiskManager": {
+      "success": true,
+      "message": "AdvancedRiskManager test passed"
+    }
+  },
+  "utilities": {
+    "PerformanceMonitor": {
+      "success": true,
+      "message": "PerformanceMonitor test passed"
+    },
+    "MonteCarloSimulator": {
+      "success": true,
+      "message": "MonteCarloSimulator test passed"
+    },
+    "DashboardManager": {
+      "success": true,
+      "message": "DashboardManager test passed"
+    }
+  },
+  "integration": {
+    "End-to-end workflow": {
+      "success": false,
+      "message": "End-to-end workflow test failed: Can't instantiate abstract class RandomForestModel with abstract methods get_params, load, save, set_params"
+    }
+  }
+}

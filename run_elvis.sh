@@ -2,14 +2,12 @@
 
 # ASCII Art for ELVIS
 echo "
- _______ __     ____  __ ____ _____
-|  ____| \ \   / /  \/  |___ \_   _|
-| |__     \ \_/ /| \  / | __) || |
-|  __|     \   / | |\/| ||__ < | |
-| |____     | |  | |  | |___) || |_
-|______|    |_|  |_|  |_|____/_____|
-
-Enhanced Leveraged Virtual Investment System
+ _______  _        __      __  _____   _____ 
+|  ____| | |       \ \    / / |_   _| / ____|
+| |__    | |        \ \  / /    | |  | (___  
+|  __|   | |         \ \/ /     | |   \___ \ 
+| |____  | |____      \  /     _| |_  ____) |
+|______| |______|      \/     |_____||_____/ 
 "
 
 # Load environment variables
@@ -29,13 +27,8 @@ fi
 
 # Check for command line arguments
 MODE="paper"  # Default fallback if config can't be read
-# Try to read default mode from config.py
-if [ -f "config/config.py" ]; then
-    DEFAULT_MODE=$(grep "DEFAULT_MODE" config/config.py | grep -o "'[^']*'" | sed "s/'//g")
-    if [ ! -z "$DEFAULT_MODE" ]; then
-        MODE="$DEFAULT_MODE"
-    fi
-fi
+# Set default mode
+MODE="paper"
 SYMBOL="BTCUSDT"
 TIMEFRAME="1h"
 LEVERAGE=75
