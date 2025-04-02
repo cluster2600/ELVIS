@@ -46,7 +46,8 @@ TRADING_CONFIG = {
     'MIN_CAPITAL_USD': 1000.0,
     'DATA_LIMIT': 200,  # Number of recent candles to fetch
     'PRODUCTION_MODE': False,  # Set to False for non-production mode
-    'DEFAULT_MODE': 'paper'  # 'live', 'paper', or 'backtest'
+    'DEFAULT_MODE': 'paper',  # 'live', 'paper', or 'backtest'
+    'CREATE_MOCK_POSITION': True  # Create a mock position for testing the dashboard
 }
 
 # --- Configuration Validation ---

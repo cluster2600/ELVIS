@@ -1,3 +1,14 @@
 {
-  "total_trades": 0
+  "total_closed_trades": 12,
+  "total_trades": 25,
+  "winning_trades": 10,
+  "losing_trades": 2,
+  "win_rate": 83.33333333333334,
+  "total_pnl": 32.15091153794232,
+  "avg_pnl_per_closed_trade": 2.67924262816186,
+  "avg_win": 3.702388380186881,
+  "avg_loss": -2.4364861319632474,
+  "profit_factor": 7.597803105908934,
+  "sharpe_ratio": 11.224972160321826,
+  "max_drawdown": 36.933886903068
 }

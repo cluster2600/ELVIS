@@ -66,6 +66,10 @@ class PriceFetcher:
                 'volume': float(kline['v']),
                 'closed': kline['x']
             }
+            # Update the last update time to indicate we're receiving real data
+            self.last_update_time = time.time()
+            self.connection_established = True
+            
             if kline['x']:  # Candle is closed
                 self.candle_history.append(self.current_candle.copy())
                 self.logger.info(f"New {self.timeframe} candle: O:{self.current_candle['open']:.2f} "

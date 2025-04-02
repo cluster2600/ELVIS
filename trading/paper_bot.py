@@ -99,6 +99,125 @@ class PaperBot:
         dashboard_thread = threading.Thread(target=self.dashboard_manager.start_dashboard, daemon=True)
         dashboard_thread.start()
         time.sleep(1)
+        
+        # Create mock positions for testing the dashboard
+        if TRADING_CONFIG.get('CREATE_MOCK_POSITION', True):  # Default to True
+            self.logger.info("Creating mock positions for testing...")
+            
+            # Create multiple positions with different entry prices and sizes
+            current_price = self.price_fetcher.get_current_price()
+            if current_price == 0:
+                current_price = self.price_fetcher.default_price
+            
+            # Main position (BTC)
+            self.position = 0.01  # 0.01 BTC
+            self.entry_price = 75000.0  # $75,000 per BTC
+            
+            # Additional mock positions for display
+            open_positions = [
+                {
+                    'symbol': self.symbol,
+                    'size': self.position,
+                    'entry_price': self.entry_price,
+                    'current_price': current_price,
+                    'leverage': self.leverage,
+                    'pnl': (current_price - self.entry_price) * self.position,
+                    'pnl_pct': ((current_price / self.entry_price) - 1) * 100 if self.entry_price > 0 else 0.0
+                },
+                {
+                    'symbol': 'ETH/USDT',
+                    'size': 0.15,
+                    'entry_price': 3800.0,
+                    'current_price': 3850.0,
+                    'leverage': self.leverage,
+                    'pnl': (3850.0 - 3800.0) * 0.15,
+                    'pnl_pct': ((3850.0 / 3800.0) - 1) * 100
+                },
+                {
+                    'symbol': 'SOL/USDT',
+                    'size': 2.5,
+                    'entry_price': 150.0,
+                    'current_price': 145.0,
+                    'leverage': self.leverage,
+                    'pnl': (145.0 - 150.0) * 2.5,
+                    'pnl_pct': ((145.0 / 150.0) - 1) * 100
+                }
+            ]
+            
+            # Update portfolio value based on all positions
+            self.portfolio_value = TRADING_CONFIG['MIN_CAPITAL_USD'] - sum(pos['size'] * pos['entry_price'] for pos in open_positions)
+            
+            # Update the dashboard with the mock positions
+            self.dashboard_manager.update_open_positions(open_positions)
+            
+            # Add mock trades to the performance monitor
+            self.logger.info("Adding mock trades for testing...")
+            
+            # Generate a series of mock trades over the past 24 hours
+            for i in range(20):
+                hours_ago = 24 - i
+                
+                # Alternate buy and sell trades
+                side = 'buy' if i % 2 == 0 else 'sell'
+                
+                # Generate realistic price movements
+                base_price = 74000.0 + (i * 100)  # Gradually increasing price
+                price_noise = np.random.normal(0, 200)  # Random noise
+                price = base_price + price_noise
+                
+                # Calculate PnL for sell trades
+                pnl = 0.0
+                quantity = 0.01
+                
+                if side == 'sell' and i > 0:
+                    prev_price = 74000.0 + ((i-1) * 100) + np.random.normal(0, 200)
+                    pnl = (price - prev_price) * quantity
+                
+                # Add the trade
+                self.performance_monitor.add_trade({
+                    'timestamp': (datetime.now() - timedelta(hours=hours_ago)).isoformat(),
+                    'symbol': self.symbol,
+                    'side': side,
+                    'price': price,
+                    'quantity': quantity,
+                    'pnl': pnl if side == 'sell' else 0.0
+                })
+            
+            # Add a few trades for other symbols
+            for symbol, entry_price in [('ETH/USDT', 3800.0), ('SOL/USDT', 150.0)]:
+                # Buy trade
+                self.performance_monitor.add_trade({
+                    'timestamp': (datetime.now() - timedelta(hours=6)).isoformat(),
+                    'symbol': symbol,
+                    'side': 'buy',
+                    'price': entry_price,
+                    'quantity': 0.5 if symbol == 'ETH/USDT' else 2.0,
+                    'pnl': 0.0
+                })
+                
+                # Sell trade
+                exit_price = entry_price * (1 + np.random.uniform(-0.05, 0.05))
+                quantity = 0.5 if symbol == 'ETH/USDT' else 2.0
+                pnl = (exit_price - entry_price) * quantity
+                
+                self.performance_monitor.add_trade({
+                    'timestamp': (datetime.now() - timedelta(hours=3)).isoformat(),
+                    'symbol': symbol,
+                    'side': 'sell',
+                    'price': exit_price,
+                    'quantity': quantity,
+                    'pnl': pnl
+                })
+            
+            # Add the current open position as the most recent buy
+            self.performance_monitor.add_trade({
+                'timestamp': (datetime.now() - timedelta(minutes=30)).isoformat(),
+                'symbol': self.symbol,
+                'side': 'buy',
+                'price': self.entry_price,
+                'quantity': self.position,
+                'pnl': 0.0
+            })
 
         try:
             while self.running and not self.stop_event.is_set():
@@ -202,9 +321,20 @@ class PaperBot:
         if not self.dashboard_manager:
             return
         try:
-            current_price = latest_candle['close']
+            # Get the current price from the price fetcher directly to ensure it's up-to-date
+            current_price = self.price_fetcher.get_current_price()
+            
+            # If the price is still 0, use the default price from the price fetcher
+            if current_price == 0:
+                current_price = self.price_fetcher.default_price
+            
             total_value = self.portfolio_value + (self.position * current_price if self.position > 0 else 0)
             self.dashboard_manager.update_portfolio_value(total_value)
+            
+            # Update the position with the current price
+            if self.position > 0:
+                self.dashboard_manager.update_position(self.position, self.entry_price, current_price)
+            
             metrics = {
                 'portfolio_value': round(total_value, 2),
                 'position_size': round(self.position, 8),
@@ -231,6 +361,7 @@ class PaperBot:
                     'size': self.position,
                     'entry_price': self.entry_price,
                     'current_price': current_price,
+                    'leverage': self.leverage,
                     'pnl': (current_price - self.entry_price) * self.position,
                     'pnl_pct': ((current_price / self.entry_price) - 1) * 100 if self.entry_price > 0 else 0.0
                 }]

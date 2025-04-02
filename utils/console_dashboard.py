@@ -251,7 +251,8 @@ class ConsoleDashboard:
                             'price_history': list(self.price_history),
                             'testnet': self.testnet,
                             'model_name': self.model_name,
-                            'open_positions': self.open_positions
+                            'open_positions': self.open_positions,
+                            'symbol': 'BTC/USDT'  # Add symbol for open positions
                         }
                     
                     # Draw a simple dashboard
@@ -391,8 +392,9 @@ class ConsoleDashboard:
                         self.stdscr.addstr(y, 15, "Size")
                         self.stdscr.addstr(y, 30, "Entry Price")
                         self.stdscr.addstr(y, 45, "Current Price")
-                        self.stdscr.addstr(y, 65, "PnL")
-                        self.stdscr.addstr(y, 80, "PnL %")
+                        self.stdscr.addstr(y, 60, "Leverage")
+                        self.stdscr.addstr(y, 70, "PnL")
+                        self.stdscr.addstr(y, 85, "PnL %")
                     
                     # Draw positions
                     for i, position in enumerate(open_positions):
@@ -406,13 +408,18 @@ class ConsoleDashboard:
                             self.stdscr.addstr(y, 30, f"${position.get('entry_price', 0.0):,.2f}")
                             self.stdscr.addstr(y, 45, f"${position.get('current_price', 0.0):,.2f}")
                             
+                            # Leverage with bold
+                            leverage = position.get('leverage', 1)
+                            leverage_text = f"{leverage}x"
+                            self.stdscr.addstr(y, 60, leverage_text, curses.A_BOLD)
+                            
                             # PnL with color
                             pnl = position.get('pnl', 0.0)
                             pnl_text = f"${pnl:,.2f}"
                             pnl_attr = curses.A_NORMAL
                             if curses.has_colors():
                                 pnl_attr = curses.color_pair(3) if pnl >= 0 else curses.color_pair(1)
-                            self.stdscr.addstr(y, 65, pnl_text, pnl_attr)
+                            self.stdscr.addstr(y, 70, pnl_text, pnl_attr)
                             
                             # PnL % with color
                             pnl_pct = position.get('pnl_pct', 0.0)
@@ -420,7 +427,7 @@ class ConsoleDashboard:
                             pnl_pct_attr = curses.A_NORMAL
                             if curses.has_colors():
                                 pnl_pct_attr = curses.color_pair(3) if pnl_pct >= 0 else curses.color_pair(1)
-                            self.stdscr.addstr(y, 80, pnl_pct_text, pnl_pct_attr)
+                            self.stdscr.addstr(y, 85, pnl_pct_text, pnl_pct_attr)
             
             # Draw metrics section
             metrics_y = section_y
