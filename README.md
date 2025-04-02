@@ -2,67 +2,6 @@
 
 ![ELVIS Logo](images/elvis.png)
 
-```ascii
-                                                                                                                                                       
-                                                                                                                                                       
-                                                                                                                                                       
-                                                                                                                 
-                                      @  @@  @@@@@          @@@@@@@@@@@@@           @@@@@@@@@@@@@@@@@@@@@@@@@@@@    @@@@@@@@@@@@@@@@@@@@@@@@ @@@@      
-       @@@@@@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@@@@@@@@        @@@@         @          @@           @@@@           @    @ @ @@                    @@@      
-       @@@                     @@@   @@@ @@@ @@ @@@        @@ @@@@@@@@@ @@         @@ @@@@@@@@@@@  @@@@@@@@@@@ @   @@ @ @@@@@@@@@@@@@@@@@@@@@@@@@      
-       @@@@@@@@@@@@@@@@@@@@@@@@@@@   @ @@@@@@@@@@@@         @ @@      @@@@         @@@@        @@  @@        @ @@  @@@@                      @@@@      
-       @@@@                   @@@@   @ @@      @@@@         @@@@      @@@@         @@@@        @  @@@        @ @@  @@@@                      @@@@      
-       @@@@                   @@@@  @@ @@      @@ @         @@@@      @@@@         @ @        @@@ @@@        @ @@  @@@@       @@@@@@@@@@     @@@@@     
-       @@@@      @@@@@@@@@@@@@@@@@  @@ @@      @@@@         @@@@      @@ @         @ @        @@@ @@@        @ @@  @@@@       @@@    @@@@    @@@@      
-       @@@@      @@@@          @@@  @@ @@      @@@@         @@ @       @ @@       @@ @        @@@ @@@        @ @@  @@@@       @@@@@@@@ @@    @@@@    
-       @@@@      @@ @@@@@@@@@@@@@   @@ @       @@@@          @ @@      @ @@       @@@@        @ @ @@@        @ @@  @@ @@      @@@@  @@ @@    @@ @@   
-      @@ @@      @@ @@              @@ @       @@@@          @@@@      @@@@       @@@@       @@@@ @@@        @@@@  @@ @       @@@@  @@ @@    @@ @@   
-      @@ @@      @@@@               @@@@       @@@@          @@@@      @@@@       @ @@       @@@@ @@@        @@@@  @@@@       @@@@  @@ @@    @@ @@    
-      @@ @@      @@ @               @@@@       @@@@    @@    @@@@      @@@@       @@@       @@ @@ @@@        @@@@  @@@@       @@@@  @@ @@@@@@@@ @@    
-      @@ @@      @@ @               @@@@       @@@@@@ @    @@ @ @       @ @       @ @       @@ @  @@@        @@@@  @@ @       @@@@  @@ @@@@@@@@ @@    
-      @@ @@      @@@@               @@@@       @@@@@@@@@@  @ @@@@@      @@@@     @@@@       @@@@  @@@        @@    @@@@       @@@@  @@@@@@@@@@@@@@   
-      @@ @@      @@@@               @@@@       @@@@@ @@ @@@@@@@@@@      @@@@     @@@@       @@@@  @@@        @@ @  @@ @       @@@@   @@@@@@@@@@@@     
-      @@ @@      @@@@               @@@@       @@@@@@ @ @@@@     @      @@ @     @@@@       @ @@  @@@        @@@   @@@@       @@@@                  
-      @@ @@      @@@@               @@@@       @@@@@@@@@@@@@@  @ @       @ @@    @ @@      @@ @@  @@@        @@@   @@@@       @@@@                    
-      @@ @@      @@@@               @@@@       @@@@@ @@ @@@  @ @ @@      @@@@   @@@@       @@@@  @@@@        @@@    @ @       @@@@                     
-      @@ @@      @@@@               @@@@      @@@@@@ @ @@ @@@@@@@@@      @@@@   @@@@       @@@@  @@@@        @@@    @ @@      @@@@                     
-      @@ @@      @@@@               @@@@      @@@@@@@@@ @@@@@@@@@@@@@@   @@@@   @ @@       @@@@  @@@@        @@@    @ @@      @@@@                     
-      @@ @@      @@@@               @@@@      @@ @@@ @@@@@    @@@@@@@@@  @@@@   @ @@       @ @   @@@@        @@@    @ @       @@@@                     
-      @@ @@      @@@@               @@@@     @@@@ @@@@@@            @@@  @@ @  @@ @       @@@@   @@@@        @@@    @ @       @@@@                     
-      @@ @@      @@@@               @@@@     @@ @@@ @@@@             @@   @ @  @@@@       @@@@   @@@@        @@@@   @ @       @@@@                     
-      @@@@@      @@@@               @@@@     @@@@@  @@@@            @@@   @@@@ @@@@       @ @@   @@@@        @@@@  @@ @@      @@ @                     
-       @@@@      @@@@@@@@@@@@@@@@@  @@@@     @@    @                @@    @@@@ @ @@      @@ @    @@@@        @@@@  @@ @@      @@ @@@@@@@@@@@@@@@@     
-      @@@@@      @@@@         @@@@  @@@@    @@@@  @  @@             @@    @@@@ @ @       @@@@    @@@@        @@@@   @ @@       @@@             @@@    
-      @@@@@      @@@@@@@@@@@@@@@@@  @@@@    @  @   @@@@@            @@     @ @@@ @       @@@@    @@@@        @@@@   @ @@       @@@@@@@@@@@@@@@@@@@    
-      @@ @@                   @@@@  @@@@    @@@@    @@@@@@         @@@     @@@ @@@       @@@@    @@@@        @@@@   @ @@                      @@@@    
-      @@ @@                   @@@@  @@@@   @@ @@    @@@@  @@@@@@  @@@      @@@ @@@      @@ @@    @@@@        @@@@   @@@@                      @@@@    
-      @@@@@      @@@ @@@ @@@@@@@@@  @@@@   @@@@@       @@@@@      @@@      @@@@ @@      @@@@     @@@@        @@@@   @@@@ @@@ @@@ @@@@@@@@     @@@@    
-      @@@@       @@@@@@@@@@@@ @@@@  @@@@   @ @@@          @@@@@@@ @@       @@   @       @@@@     @@@@        @@@@   @@@@@@@@@@@@@@@@@@@@@@    @@@@    
-      @@@@       @@@@@@@@@@@@@@@@   @@@@   @@@@@@             @@@ @@        @  @@       @@@@     @@ @        @@@@   @@@@@@@@ @@@ @@@@@  @@    @@@@    
-      @@@@       @@@@@@@@@@@@       @@@@   @ @ @@                 @@@       @@ @@       @ @       @ @        @@@@   @@@@@@@@@@@@@@@@@@@ @@    @@@@    
-      @@@@       @ @@               @@@@   @@@ @@                 @@        @@ @@      @@ @       @ @@       @@@@                    @@ @@    @@@@    
-      @@@@      @@ @@               @@@@   @ @@@@                 @@@@      @@ @@      @@@@       @ @@       @@@@                    @@ @@    @@ @     
-     @@@@@      @@ @                @@@@   @@@@@@                 @@@        @@@       @@@@       @@@@       @@@@                    @@ @@    @@@@     
-     @@ @@      @@@@                @@@@     @@@                   @@@        @        @ @@       @@@@       @@@@                    @@ @@    @@@@     
-     @@ @@      @@@@               @@@@@    @@@@                   @@@                @@ @@       @@@@       @@@@                    @@ @@    @@@@     
-     @@ @@      @@@@               @@ @@    @@@                    @@@                @@@@        @@@@       @@@@                    @@ @@    @@@@     
-     @@ @@      @@@@               @@ @@    @@                      @@                @@@@        @@@@       @@@@                    @@ @@    @@@@     
-     @@ @@      @@@@                @@@@   @@@        @@@@@@@@@@@@@@@@@               @ @@        @@@@       @@@@                    @@ @@    @@@@    
-     @@ @@      @@@@                @@@@   @@    @@@@@@@@          @@@ @             @@@@         @@@@       @@@@   @@@@@@@@@@@@@@@  @@ @@    @@@@  
-     @@ @@      @@@@                @@@@  @@@   @@  @@@@@@@@@@@@@@@@@  @             @@@@         @@@@       @@@@   @@@@         @@  @@ @@    @@ @ 
-     @@@@       @@@@                @@@@  @@@    @@@@@@ @@@        @@@@@             @@@@         @ @@       @@@@   @@@@@@@@@@@@@ @  @@ @@    @@ @  
-     @@@@       @@@@               @@ @@  @@         @@@@@@        @@@ @             @@@@         @@@@       @@@@   @@@@       @@ @  @@ @@    @@@@   
-     @@@@       @@@@               @@ @@  @@      @@@@@@ @@@       @@@ @            @@ @          @@@@       @@@@   @@@@       @@ @  @@ @@    @@@@     
-     @@@@       @@@@               @@ @@  @@      @@@@@@ @@@       @@@ @            @@@@          @@@@       @@@@   @@@@        @ @  @@ @@    @@ @     
-     @@@@       @@@@ @@  @@@  @@   @@ @@ @@@     @@@@@@   @@@      @@@ @            @@@@          @ @        @@@@   @@@@        @ @  @@ @@    @@ @     
-     @@@@       @@@@@@@@ @@@@@@@@   @@@@@@@@    @@@ @ @ @@ @@      @@@ @@          @@ @@          @ @        @@@@   @@@@        @ @@@@@ @@    @@ @     
-     @@@@       @@@@@@@@ @@@ @@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@            @@@@@@@@@@@@@@@   @@@@        @@@   @@@@     @@@@    
-     @@@@@@@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@             @@@@@@@@@@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@     
-                                                                                                                                                                 
-
-Enhanced Leveraged Virtual Investment System
-```
-
 ## Overview  
 ELVIS integrates **Deep Reinforcement Learning (DRL)** and **high-frequency trading (HFT)** for Binance Futures, targeting **BTC/USDT**. It tackles overfitting in financial RL and employs a **Random Forest model** with technical indicators (**SMA, RSI, MACD, Bollinger Bands**), enriched by insights on combining financial and social features. **Tested across multiple cryptocurrencies and market crashes**, it aims to surpass traditional strategies.  
 
@@ -182,17 +121,38 @@ Available modes:
 - `backtest`: Backtesting with historical data
 
 ## Recent Updates  
-- **Project Renaming**: Renamed to ELVIS (Enhanced Leveraged Virtual Investment System) with ASCII art.
+- **Project Renaming**: Renamed to ELVIS (Enhanced Leveraged Virtual Investment System).
 - **Modular Architecture**: Implemented a new architecture with clear separation of concerns.
 - **Centralized Configuration**: Created a configuration module for all settings.
 - **Improved Logging**: Enhanced logging system with colored console output and file rotation.
 - **Standardized Interfaces**: Defined base interfaces for models, processors, strategies, and execution.
 - **Enhanced Metrics**: Created comprehensive metrics utilities for performance analysis.
 - **Command-line Interface**: Added a main entry point with command-line argument parsing.
-- **Multiple Trading Strategies**: Added Mean Reversion and Trend Following strategies.
-- **Advanced Model Types**: Implemented Neural Network and Ensemble models.
-- **Performance Monitoring**: Added trade tracking, metrics calculation, and HTML reporting.
-- **Comprehensive Testing**: Created unit tests and integration tests for all components.
+- **Multiple Trading Strategies**: 
+  - **Technical Strategy**: Uses RSI, MACD, DX, and OBV indicators
+  - **Mean Reversion Strategy**: Uses Bollinger Bands and RSI
+  - **Trend Following Strategy**: Uses Moving Averages and ADX
+  - **EMA-RSI Strategy**: Uses EMA crossovers and RSI
+  - **Sentiment Strategy**: Incorporates news and social media sentiment
+  - **Grid Strategy**: Implements dynamic grid trading based on volatility
+- **Advanced Model Types**: 
+  - **Random Forest Model**: Using TensorFlow Decision Forests
+  - **Neural Network Model**: Using LSTM and Dense layers
+  - **Ensemble Model**: Combining multiple models
+  - **Transformer Model**: Using self-attention mechanism
+  - **Reinforcement Learning Model**: Using PPO algorithm
+- **Advanced Risk Management**:
+  - **Risk Manager**: Basic risk management with position sizing and trade limits
+  - **Advanced Risk Manager**: Implements Kelly Criterion, circuit breakers, and drawdown protection
+- **Performance Monitoring**: 
+  - **Trade Tracking**: Records all trades with timestamps and metrics
+  - **Performance Metrics**: Calculates win rate, profit factor, Sharpe ratio
+  - **Visualization**: Generates equity curves, daily returns, win/loss distributions
+  - **HTML Reports**: Creates comprehensive performance reports
+- **Real-time Dashboard**: Displays performance metrics and trading signals
+- **Monte Carlo Simulation**: Tests strategy robustness through simulations
+- **Mock Data Generation**: Creates realistic market data for testing when API calls fail
+- **Comprehensive Testing**: Unit tests and integration tests for all components
 
 ## Future Improvements
 See [Future Improvements](docs/future_improvements.md) for a detailed roadmap of planned enhancements, including:

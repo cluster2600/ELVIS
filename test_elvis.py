@@ -534,9 +534,9 @@ class ElvisTester:
             
             # Test position size calculation
             position_size = risk_manager.calculate_position_size(
-                data.iloc[-10:],
-                data['close'].iloc[-1],
-                10000.0
+                10000.0,  # available_capital
+                data['close'].iloc[-1],  # current_price
+                data['atr'].iloc[-1] if 'atr' in data.columns else 0.01 * data['close'].iloc[-1]  # volatility
             )
             
             # Check if position size is valid

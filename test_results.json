@@ -51,8 +51,8 @@
   },
   "risk_managers": {
     "RiskManager": {
-      "success": false,
-      "message": "RiskManager test failed: can't multiply sequence by non-int of type 'float'"
+      "success": true,
+      "message": "RiskManager test passed"
     },
     "AdvancedRiskManager": {
       "success": true,
@@ -75,8 +75,8 @@
   },
   "integration": {
     "End-to-end workflow": {
-      "success": false,
-      "message": "End-to-end workflow test failed: Total trades is not in performance metrics"
+      "success": true,
+      "message": "End-to-end workflow test passed"
     }
   }
 }

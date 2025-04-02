@@ -136,7 +136,11 @@ class PerformanceMonitor:
             # Check if we have trades
             if not self.trades:
                 self.logger.warning("No trades to calculate metrics")
-                return {}
+                # Return a dictionary with total_trades = 0
+                metrics = {'total_trades': 0}
+                self.metrics = metrics
+                self._save_metrics()
+                return metrics
             
             # Convert trades to DataFrame
             trades_df = pd.DataFrame(self.trades)
