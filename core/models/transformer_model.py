@@ -187,7 +187,7 @@ class TransformerModel(BaseModel):
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('transformer', logger, **kwargs)
+        self.logger = logger
         
         # Model parameters
         self.input_dim = kwargs.get('input_dim', 10)
@@ -527,3 +527,131 @@ class TransformerModel(BaseModel):
         except Exception as e:
             self.logger.error(f"Error getting attention weights: {e}")
             return {}
+    
+    def save(self, path: str) -> None:
+        """
+        Save model to disk.
+        
+        Args:
+            path: The path to save the model to.
+        """
+        try:
+            self.logger.info(f"Saving Transformer model to {path}")
+            
+            # Check if model exists
+            if self.model is None:
+                self.logger.warning("No model to save")
+                return
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Save model
+            torch.save(self.model.state_dict(), path)
+            
+            # Save scaler if available
+            if self.scaler is not None:
+                scaler_path = os.path.join(os.path.dirname(path), 'transformer_scaler.pkl')
+                joblib.dump(self.scaler, scaler_path)
+            
+            self.logger.info("Transformer model saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving Transformer model: {e}")
+    
+    @classmethod
+    def load(cls, path: str) -> 'TransformerModel':
+        """
+        Load model from disk.
+        
+        Args:
+            path: The path to load the model from.
+            
+        Returns:
+            TransformerModel: The loaded model.
+        """
+        try:
+            # Create logger
+            logger = logging.getLogger('TransformerModel')
+            
+            # Create model instance
+            model_instance = cls(logger)
+            
+            # Set model path
+            model_instance.model_path = path
+            
+            # Load model
+            model_instance.model = model_instance._build_model()
+            model_instance.model.load_state_dict(torch.load(path, map_location=model_instance.device))
+            model_instance.model.eval()
+            
+            # Load scaler if available
+            scaler_path = os.path.join(os.path.dirname(path), 'transformer_scaler.pkl')
+            if os.path.exists(scaler_path):
+                model_instance.scaler = joblib.load(scaler_path)
+            
+            logger.info("Transformer model loaded successfully")
+            
+            return model_instance
+            
+        except Exception as e:
+            logger = logging.getLogger('TransformerModel')
+            logger.error(f"Error loading Transformer model: {e}")
+            return cls(logger)
+    
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Get the model parameters.
+        
+        Returns:
+            Dict[str, Any]: The model parameters.
+        """
+        return {
+            'input_dim': self.input_dim,
+            'output_dim': self.output_dim,
+            'seq_len': self.seq_len,
+            'hidden_dim': self.hidden_dim,
+            'num_layers': self.num_layers,
+            'num_heads': self.num_heads,
+            'dropout': self.dropout,
+            'learning_rate': self.learning_rate,
+            'batch_size': self.batch_size,
+            'epochs': self.epochs
+        }
+    
+    def set_params(self, **params) -> None:
+        """
+        Set the model parameters.
+        
+        Args:
+            **params: The model parameters.
+        """
+        if 'input_dim' in params:
+            self.input_dim = params['input_dim']
+        
+        if 'output_dim' in params:
+            self.output_dim = params['output_dim']
+        
+        if 'seq_len' in params:
+            self.seq_len = params['seq_len']
+        
+        if 'hidden_dim' in params:
+            self.hidden_dim = params['hidden_dim']
+        
+        if 'num_layers' in params:
+            self.num_layers = params['num_layers']
+        
+        if 'num_heads' in params:
+            self.num_heads = params['num_heads']
+        
+        if 'dropout' in params:
+            self.dropout = params['dropout']
+        
+        if 'learning_rate' in params:
+            self.learning_rate = params['learning_rate']
+        
+        if 'batch_size' in params:
+            self.batch_size = params['batch_size']
+        
+        if 'epochs' in params:
+            self.epochs = params['epochs']

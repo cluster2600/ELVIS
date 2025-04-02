@@ -489,7 +489,7 @@ class ReinforcementLearningModel(BaseModel):
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('reinforcement_learning', logger, **kwargs)
+        self.logger = logger
         
         # Model parameters
         self.state_dim = kwargs.get('state_dim', 10)
@@ -783,3 +783,130 @@ class ReinforcementLearningModel(BaseModel):
         """
         self.logger.warning("Feature importance not available for Reinforcement Learning models")
         return pd.DataFrame()
+    
+    def save(self, path: str) -> None:
+        """
+        Save model to disk.
+        
+        Args:
+            path: The path to save the model to.
+        """
+        try:
+            self.logger.info(f"Saving Reinforcement Learning model to {path}")
+            
+            # Check if model exists
+            if self.model is None:
+                self.logger.warning("No model to save")
+                return
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Save model
+            self.model.save(path)
+            
+            self.logger.info("Reinforcement Learning model saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving Reinforcement Learning model: {e}")
+    
+    @classmethod
+    def load(cls, path: str) -> 'ReinforcementLearningModel':
+        """
+        Load model from disk.
+        
+        Args:
+            path: The path to load the model from.
+            
+        Returns:
+            ReinforcementLearningModel: The loaded model.
+        """
+        try:
+            # Create logger
+            logger = logging.getLogger('ReinforcementLearningModel')
+            
+            # Create model instance
+            model_instance = cls(logger)
+            
+            # Set model path
+            model_instance.model_path = path
+            
+            # Build model
+            model_instance.model = model_instance._build_model()
+            
+            # Load model
+            model_instance.model.load(path)
+            
+            logger.info("Reinforcement Learning model loaded successfully")
+            
+            return model_instance
+            
+        except Exception as e:
+            logger = logging.getLogger('ReinforcementLearningModel')
+            logger.error(f"Error loading Reinforcement Learning model: {e}")
+            return cls(logger)
+    
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Get the model parameters.
+        
+        Returns:
+            Dict[str, Any]: The model parameters.
+        """
+        return {
+            'state_dim': self.state_dim,
+            'action_dim': self.action_dim,
+            'hidden_dim': self.hidden_dim,
+            'lr_actor': self.lr_actor,
+            'lr_critic': self.lr_critic,
+            'gamma': self.gamma,
+            'K_epochs': self.K_epochs,
+            'eps_clip': self.eps_clip,
+            'continuous': self.continuous,
+            'max_episodes': self.max_episodes,
+            'max_timesteps': self.max_timesteps,
+            'update_timestep': self.update_timestep
+        }
+    
+    def set_params(self, **params) -> None:
+        """
+        Set the model parameters.
+        
+        Args:
+            **params: The model parameters.
+        """
+        if 'state_dim' in params:
+            self.state_dim = params['state_dim']
+        
+        if 'action_dim' in params:
+            self.action_dim = params['action_dim']
+        
+        if 'hidden_dim' in params:
+            self.hidden_dim = params['hidden_dim']
+        
+        if 'lr_actor' in params:
+            self.lr_actor = params['lr_actor']
+        
+        if 'lr_critic' in params:
+            self.lr_critic = params['lr_critic']
+        
+        if 'gamma' in params:
+            self.gamma = params['gamma']
+        
+        if 'K_epochs' in params:
+            self.K_epochs = params['K_epochs']
+        
+        if 'eps_clip' in params:
+            self.eps_clip = params['eps_clip']
+        
+        if 'continuous' in params:
+            self.continuous = params['continuous']
+        
+        if 'max_episodes' in params:
+            self.max_episodes = params['max_episodes']
+        
+        if 'max_timesteps' in params:
+            self.max_timesteps = params['max_timesteps']
+        
+        if 'update_timestep' in params:
+            self.update_timestep = params['update_timestep']

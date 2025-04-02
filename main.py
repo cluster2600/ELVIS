@@ -38,31 +38,67 @@ def parse_arguments():
                         help=f'Trading timeframe (default: {TRADING_CONFIG["TIMEFRAME"]})')
     parser.add_argument('--leverage', type=int, default=TRADING_CONFIG['LEVERAGE_MIN'],
                         help=f'Initial leverage (default: {TRADING_CONFIG["LEVERAGE_MIN"]})')
+    parser.add_argument('--strategy', type=str, choices=['technical', 'mean_reversion', 'trend_following', 'ema_rsi'], 
+                        default='technical',
+                        help='Trading strategy to use (default: technical)')
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default=LOGGING_CONFIG['LOG_LEVEL'],
                         help=f'Logging level (default: {LOGGING_CONFIG["LOG_LEVEL"]})')
     return parser.parse_args()
 
-def initialize_bot(args):
+def get_strategy(strategy_name, logger):
     """
-    Initialize the trading bot based on the specified mode.
+    Get the strategy instance based on the strategy name.
+    
+    Args:
+        strategy_name (str): The name of the strategy.
+        logger (logging.Logger): The logger to use.
+        
+    Returns:
+        BaseStrategy: The strategy instance.
+    """
+    from trading.strategies import (
+        TechnicalStrategy, 
+        MeanReversionStrategy, 
+        TrendFollowingStrategy, 
+        EmaRsiStrategy
+    )
+    
+    if strategy_name == 'technical':
+        return TechnicalStrategy(logger)
+    elif strategy_name == 'mean_reversion':
+        return MeanReversionStrategy(logger)
+    elif strategy_name == 'trend_following':
+        return TrendFollowingStrategy(logger)
+    elif strategy_name == 'ema_rsi':
+        return EmaRsiStrategy(logger)
+    else:
+        raise ValueError(f"Invalid strategy: {strategy_name}")
+
+def initialize_bot(args, logger):
+    """
+    Initialize the trading bot based on the specified mode and strategy.
     
     Args:
         args (argparse.Namespace): The parsed arguments.
+        logger (logging.Logger): The logger to use.
         
     Returns:
         object: The initialized bot.
     """
+    # Get the strategy
+    strategy = get_strategy(args.strategy, logger)
+    
     # Import the appropriate modules based on the mode
     if args.mode == 'live':
         from trading.live_bot import LiveBot
-        return LiveBot(args.symbol, args.timeframe, args.leverage)
+        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
     elif args.mode == 'backtest':
         from trading.backtest_bot import BacktestBot
-        return BacktestBot(args.symbol, args.timeframe, args.leverage)
+        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
     elif args.mode == 'paper':
         from trading.paper_bot import PaperBot
-        return PaperBot(args.symbol, args.timeframe, args.leverage)
+        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
     else:
         raise ValueError(f"Invalid mode: {args.mode}")
 
@@ -93,8 +129,8 @@ def main():
     
     # Initialize the bot
     try:
-        bot = initialize_bot(args)
-        print_info(logger, f"Bot initialized in {args.mode} mode for {args.symbol} on {args.timeframe} timeframe")
+        bot = initialize_bot(args, logger)
+        print_info(logger, f"Bot initialized in {args.mode} mode for {args.symbol} on {args.timeframe} timeframe with {args.strategy} strategy")
     except Exception as e:
         print_error(logger, f"Failed to initialize bot: {e}")
         sys.exit(1)

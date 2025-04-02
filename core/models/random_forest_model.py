@@ -29,7 +29,7 @@ class RandomForestModel(BaseModel):
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('random_forest', logger, **kwargs)
+        self.logger = logger
         
         # Model parameters
         self.num_trees = kwargs.get('num_trees', 100)
@@ -240,3 +240,91 @@ class RandomForestModel(BaseModel):
         except Exception as e:
             self.logger.error(f"Error getting feature importance: {e}")
             return pd.DataFrame()
+    
+    def save(self, path: str) -> None:
+        """
+        Save model to disk.
+        
+        Args:
+            path: The path to save the model to.
+        """
+        try:
+            self.logger.info(f"Saving Random Forest model to {path}")
+            
+            # Check if model exists
+            if self.model is None:
+                self.logger.warning("No model to save")
+                return
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Save model
+            self.model.save(path)
+            
+            self.logger.info("Random Forest model saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving Random Forest model: {e}")
+    
+    @classmethod
+    def load(cls, path: str) -> 'RandomForestModel':
+        """
+        Load model from disk.
+        
+        Args:
+            path: The path to load the model from.
+            
+        Returns:
+            RandomForestModel: The loaded model.
+        """
+        try:
+            # Create logger
+            logger = logging.getLogger('RandomForestModel')
+            
+            # Create model instance
+            model_instance = cls(logger)
+            
+            # Set model path
+            model_instance.model_path = path
+            
+            # Load model
+            model_instance.model = tfdf.keras.RandomForestModel.load(path)
+            
+            logger.info("Random Forest model loaded successfully")
+            
+            return model_instance
+            
+        except Exception as e:
+            logger = logging.getLogger('RandomForestModel')
+            logger.error(f"Error loading Random Forest model: {e}")
+            return cls(logger)
+    
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Get the model parameters.
+        
+        Returns:
+            Dict[str, Any]: The model parameters.
+        """
+        return {
+            'num_trees': self.num_trees,
+            'max_depth': self.max_depth,
+            'min_examples': self.min_examples
+        }
+    
+    def set_params(self, **params) -> None:
+        """
+        Set the model parameters.
+        
+        Args:
+            **params: The model parameters.
+        """
+        if 'num_trees' in params:
+            self.num_trees = params['num_trees']
+        
+        if 'max_depth' in params:
+            self.max_depth = params['max_depth']
+        
+        if 'min_examples' in params:
+            self.min_examples = params['min_examples']
