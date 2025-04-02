@@ -32,7 +32,7 @@ class NeuralNetworkModel(BaseModel):
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('neural_network', logger, **kwargs)
+        self.logger = logger
         
         # Model parameters
         self.input_shape = kwargs.get('input_shape', (60, 10))  # (sequence_length, features)
@@ -314,3 +314,117 @@ class NeuralNetworkModel(BaseModel):
         """
         self.logger.warning("Feature importance not directly available for Neural Network models")
         return pd.DataFrame()
+    
+    def save(self, path: str) -> None:
+        """
+        Save model to disk.
+        
+        Args:
+            path: The path to save the model to.
+        """
+        try:
+            self.logger.info(f"Saving Neural Network model to {path}")
+            
+            # Check if model exists
+            if self.model is None:
+                self.logger.warning("No model to save")
+                return
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Save model
+            self.model.save(path)
+            
+            # Save scaler if available
+            if self.scaler is not None:
+                scaler_path = os.path.join(os.path.dirname(path), 'nn_scaler.pkl')
+                joblib.dump(self.scaler, scaler_path)
+            
+            self.logger.info("Neural Network model saved successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving Neural Network model: {e}")
+    
+    @classmethod
+    def load(cls, path: str) -> 'NeuralNetworkModel':
+        """
+        Load model from disk.
+        
+        Args:
+            path: The path to load the model from.
+            
+        Returns:
+            NeuralNetworkModel: The loaded model.
+        """
+        try:
+            # Create logger
+            logger = logging.getLogger('NeuralNetworkModel')
+            
+            # Create model instance
+            model_instance = cls(logger)
+            
+            # Set model path
+            model_instance.model_path = path
+            
+            # Load model
+            model_instance.model = load_model(path)
+            
+            # Load scaler if available
+            scaler_path = os.path.join(os.path.dirname(path), 'nn_scaler.pkl')
+            if os.path.exists(scaler_path):
+                model_instance.scaler = joblib.load(scaler_path)
+            
+            logger.info("Neural Network model loaded successfully")
+            
+            return model_instance
+            
+        except Exception as e:
+            logger = logging.getLogger('NeuralNetworkModel')
+            logger.error(f"Error loading Neural Network model: {e}")
+            return cls(logger)
+    
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Get the model parameters.
+        
+        Returns:
+            Dict[str, Any]: The model parameters.
+        """
+        return {
+            'input_shape': self.input_shape,
+            'lstm_units': self.lstm_units,
+            'dense_units': self.dense_units,
+            'dropout_rate': self.dropout_rate,
+            'learning_rate': self.learning_rate,
+            'batch_size': self.batch_size,
+            'epochs': self.epochs
+        }
+    
+    def set_params(self, **params) -> None:
+        """
+        Set the model parameters.
+        
+        Args:
+            **params: The model parameters.
+        """
+        if 'input_shape' in params:
+            self.input_shape = params['input_shape']
+        
+        if 'lstm_units' in params:
+            self.lstm_units = params['lstm_units']
+        
+        if 'dense_units' in params:
+            self.dense_units = params['dense_units']
+        
+        if 'dropout_rate' in params:
+            self.dropout_rate = params['dropout_rate']
+        
+        if 'learning_rate' in params:
+            self.learning_rate = params['learning_rate']
+        
+        if 'batch_size' in params:
+            self.batch_size = params['batch_size']
+        
+        if 'epochs' in params:
+            self.epochs = params['epochs']

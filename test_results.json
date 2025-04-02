@@ -11,12 +11,12 @@
       "message": "RandomForestModel test passed"
     },
     "NeuralNetworkModel": {
-      "success": false,
-      "message": "NeuralNetworkModel test failed: Can't instantiate abstract class NeuralNetworkModel with abstract methods get_params, load, save, set_params"
+      "success": true,
+      "message": "NeuralNetworkModel test passed"
     },
     "EnsembleModel": {
-      "success": false,
-      "message": "EnsembleModel test failed: Can't instantiate abstract class NeuralNetworkModel with abstract methods get_params, load, save, set_params"
+      "success": true,
+      "message": "EnsembleModel test passed"
     },
     "TransformerModel": {
       "success": true,

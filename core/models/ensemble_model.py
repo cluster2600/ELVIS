@@ -30,7 +30,7 @@ class EnsembleModel(BaseModel):
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('ensemble', logger, **kwargs)
+        self.logger = logger
         
         # Model parameters
         self.models = kwargs.get('models', [])
@@ -313,3 +313,108 @@ class EnsembleModel(BaseModel):
         except Exception as e:
             self.logger.error(f"Error getting feature importance: {e}")
             return pd.DataFrame()
+    
+    def save(self, path: str) -> None:
+        """
+        Save model to disk.
+        
+        Args:
+            path: The path to save the model to.
+        """
+        try:
+            self.logger.info(f"Saving Ensemble model to {path}")
+            
+            # Check if model exists
+            if self.model is None:
+                self.logger.warning("No model to save")
+                return
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Save model
+            joblib.dump(self.model, path)
+            
+            self.logger.info("Ensemble model saved successfully")
+            
+            # Save individual models
+            for i, (name, model) in enumerate(self.models):
+                model_path = os.path.join(os.path.dirname(path), f"{name}_model.pkl")
+                model.save(model_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error saving Ensemble model: {e}")
+    
+    @classmethod
+    def load(cls, path: str) -> 'EnsembleModel':
+        """
+        Load model from disk.
+        
+        Args:
+            path: The path to load the model from.
+            
+        Returns:
+            EnsembleModel: The loaded model.
+        """
+        try:
+            # Create logger
+            logger = logging.getLogger('EnsembleModel')
+            
+            # Create model instance
+            model_instance = cls(logger)
+            
+            # Set model path
+            model_instance.model_path = path
+            
+            # Load model
+            if os.path.exists(path):
+                model_instance.model = joblib.load(path)
+                logger.info("Ensemble model loaded successfully")
+            else:
+                logger.warning(f"Model not found at {path}")
+            
+            # Load individual models
+            for i, (name, model) in enumerate(model_instance.models):
+                model_path = os.path.join(os.path.dirname(path), f"{name}_model.pkl")
+                if os.path.exists(model_path):
+                    model_instance.models[i] = (name, model.__class__.load(model_path))
+            
+            return model_instance
+            
+        except Exception as e:
+            logger = logging.getLogger('EnsembleModel')
+            logger.error(f"Error loading Ensemble model: {e}")
+            return cls(logger)
+    
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Get the model parameters.
+        
+        Returns:
+            Dict[str, Any]: The model parameters.
+        """
+        return {
+            'models': self.models,
+            'weights': self.weights,
+            'voting': self.voting,
+            'threshold': self.threshold
+        }
+    
+    def set_params(self, **params) -> None:
+        """
+        Set the model parameters.
+        
+        Args:
+            **params: The model parameters.
+        """
+        if 'models' in params:
+            self.models = params['models']
+        
+        if 'weights' in params:
+            self.weights = params['weights']
+        
+        if 'voting' in params:
+            self.voting = params['voting']
+        
+        if 'threshold' in params:
+            self.threshold = params['threshold']

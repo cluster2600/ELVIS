@@ -139,16 +139,19 @@ class RiskManager:
             int: The leverage.
         """
         # Base leverage on signal strength
-        leverage = self.min_leverage + (self.max_leverage - self.min_leverage) * signal_strength
+        base_leverage = float(self.min_leverage) + (float(self.max_leverage) - float(self.min_leverage)) * signal_strength
+        
+        # Initialize volatility_factor
+        volatility_factor = 1.0
         
         # Adjust for volatility
         if volatility > 0:
             # Reduce leverage for higher volatility
             volatility_factor = 1.0 / (1.0 + volatility)
-            leverage = leverage * volatility_factor
+            base_leverage = base_leverage * volatility_factor
         
-        # Ensure leverage is within limits
-        leverage = max(self.min_leverage, min(int(leverage), self.max_leverage))
+        # Ensure leverage is within limits and convert to int
+        leverage = max(self.min_leverage, min(int(base_leverage), self.max_leverage))
         
         self.logger.info(f"Calculated leverage: {leverage}x (signal strength: {signal_strength:.2f}, volatility factor: {volatility_factor:.2f})")
         
