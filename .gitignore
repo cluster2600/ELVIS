@@ -1,0 +1,43 @@
+# Sensitive files
+apikeys.txt
+secrets.txt
+.env
+setup_secure_config.sh
+
+# Virtual environments
+DeepSeek-R1-Distill-Qwen-1.5B/
+venv/
+venv310/
+venv_rf/
+
+# Logs
+TradingBot_*.log
+*.log
+*.log.*
+venv/
+venv310/
+venv_rf/
+DeepSeek-R1-Distill-Qwen-1.5B/
+tensorflow/
+*.log
+*.log.*
+TradingBot_*.log
+apikeys.txt
+secrets.txt
+# Python cache and bytecode
+__pycache__/
+*.pyc
+
+# macOS junk
+.DS_Store
+
+# Large data and model files (optional: adjust as needed)
+data/5m_25000/
+train_results/
+train_results/*.pth
+train_results/*.pkl
+NNModel.mlpackage/
+model_rf.ydf/
+
+# Backups
+your_bot_script.py.bak

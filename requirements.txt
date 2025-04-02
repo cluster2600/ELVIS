@@ -1,0 +1,40 @@
+# Core dependencies from your original list
+pandas>=2.0.0
+numpy>=1.26.0
+requests>=2.31.0
+python-binance>=1.0.19
+# elegantrl  # Disabled due to pygame build failure
+scikit-learn>=1.0.2
+tensorflow-macos==2.16.2
+tensorflow-metal>=1.1.0
+streamlit>=1.38.0
+solana==0.30.2
+anchorpy==0.18.0
+plotly==6.0.0
+python-dotenv==1.0.0
+openai>=0.27.0
+websockets>=10.3
+black==23.12.1
+pylint==3.0.3
+pytest==7.4.4
+ccxt>=4.1.87
+joblib==1.2.0
+ta-lib>=0.4.0
+yfinance>=0.2.0
+exchange_calendars>=4.5
+stockstats>=0.5.0
+optuna>=3.6.0
+git+https://github.com/fracdiff/fracdiff.git@0.9.1
+ta>=0.11.0
+
+# Dependencies already in your script or implied
+colorlog>=6.8.0
+python-telegram-bot>=20.0.0
+
+# Dependencies for ensemble models
+ydf==0.7.0
+coremltools>=7.1
+
+# New dependencies for enhancements
+newsapi-python>=2.7
+nltk>=3.8.1

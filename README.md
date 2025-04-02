@@ -1,0 +1,205 @@
+# ELVIS: Enhanced Leveraged Virtual Investment System
+
+```ascii
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                                                       
+                                                                                                                 
+                                      @  @@  @@@@@          @@@@@@@@@@@@@           @@@@@@@@@@@@@@@@@@@@@@@@@@@@    @@@@@@@@@@@@@@@@@@@@@@@@ @@@@      
+       @@@@@@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@@@@@@@@        @@@@         @          @@           @@@@           @    @ @ @@                    @@@      
+       @@@                     @@@   @@@ @@@ @@ @@@        @@ @@@@@@@@@ @@         @@ @@@@@@@@@@@  @@@@@@@@@@@ @   @@ @ @@@@@@@@@@@@@@@@@@@@@@@@@      
+       @@@@@@@@@@@@@@@@@@@@@@@@@@@   @ @@@@@@@@@@@@         @ @@      @@@@         @@@@        @@  @@        @ @@  @@@@                      @@@@      
+       @@@@                   @@@@   @ @@      @@@@         @@@@      @@@@         @@@@        @  @@@        @ @@  @@@@                      @@@@      
+       @@@@                   @@@@  @@ @@      @@ @         @@@@      @@@@         @ @        @@@ @@@        @ @@  @@@@       @@@@@@@@@@     @@@@@     
+       @@@@      @@@@@@@@@@@@@@@@@  @@ @@      @@@@         @@@@      @@ @         @ @        @@@ @@@        @ @@  @@@@       @@@    @@@@    @@@@      
+       @@@@      @@@@          @@@  @@ @@      @@@@         @@ @       @ @@       @@ @        @@@ @@@        @ @@  @@@@       @@@@@@@@ @@    @@@@    
+       @@@@      @@ @@@@@@@@@@@@@   @@ @       @@@@          @ @@      @ @@       @@@@        @ @ @@@        @ @@  @@ @@      @@@@  @@ @@    @@ @@   
+      @@ @@      @@ @@              @@ @       @@@@          @@@@      @@@@       @@@@       @@@@ @@@        @@@@  @@ @       @@@@  @@ @@    @@ @@   
+      @@ @@      @@@@               @@@@       @@@@          @@@@      @@@@       @ @@       @@@@ @@@        @@@@  @@@@       @@@@  @@ @@    @@ @@    
+      @@ @@      @@ @               @@@@       @@@@    @@    @@@@      @@@@       @@@       @@ @@ @@@        @@@@  @@@@       @@@@  @@ @@@@@@@@ @@    
+      @@ @@      @@ @               @@@@       @@@@@@ @    @@ @ @       @ @       @ @       @@ @  @@@        @@@@  @@ @       @@@@  @@ @@@@@@@@ @@    
+      @@ @@      @@@@               @@@@       @@@@@@@@@@  @ @@@@@      @@@@     @@@@       @@@@  @@@        @@    @@@@       @@@@  @@@@@@@@@@@@@@   
+      @@ @@      @@@@               @@@@       @@@@@ @@ @@@@@@@@@@      @@@@     @@@@       @@@@  @@@        @@ @  @@ @       @@@@   @@@@@@@@@@@@     
+      @@ @@      @@@@               @@@@       @@@@@@ @ @@@@     @      @@ @     @@@@       @ @@  @@@        @@@   @@@@       @@@@                  
+      @@ @@      @@@@               @@@@       @@@@@@@@@@@@@@  @ @       @ @@    @ @@      @@ @@  @@@        @@@   @@@@       @@@@                    
+      @@ @@      @@@@               @@@@       @@@@@ @@ @@@  @ @ @@      @@@@   @@@@       @@@@  @@@@        @@@    @ @       @@@@                     
+      @@ @@      @@@@               @@@@      @@@@@@ @ @@ @@@@@@@@@      @@@@   @@@@       @@@@  @@@@        @@@    @ @@      @@@@                     
+      @@ @@      @@@@               @@@@      @@@@@@@@@ @@@@@@@@@@@@@@   @@@@   @ @@       @@@@  @@@@        @@@    @ @@      @@@@                     
+      @@ @@      @@@@               @@@@      @@ @@@ @@@@@    @@@@@@@@@  @@@@   @ @@       @ @   @@@@        @@@    @ @       @@@@                     
+      @@ @@      @@@@               @@@@     @@@@ @@@@@@            @@@  @@ @  @@ @       @@@@   @@@@        @@@    @ @       @@@@                     
+      @@ @@      @@@@               @@@@     @@ @@@ @@@@             @@   @ @  @@@@       @@@@   @@@@        @@@@   @ @       @@@@                     
+      @@@@@      @@@@               @@@@     @@@@@  @@@@            @@@   @@@@ @@@@       @ @@   @@@@        @@@@  @@ @@      @@ @                     
+       @@@@      @@@@@@@@@@@@@@@@@  @@@@     @@    @                @@    @@@@ @ @@      @@ @    @@@@        @@@@  @@ @@      @@ @@@@@@@@@@@@@@@@     
+      @@@@@      @@@@         @@@@  @@@@    @@@@  @  @@             @@    @@@@ @ @       @@@@    @@@@        @@@@   @ @@       @@@             @@@    
+      @@@@@      @@@@@@@@@@@@@@@@@  @@@@    @  @   @@@@@            @@     @ @@@ @       @@@@    @@@@        @@@@   @ @@       @@@@@@@@@@@@@@@@@@@    
+      @@ @@                   @@@@  @@@@    @@@@    @@@@@@         @@@     @@@ @@@       @@@@    @@@@        @@@@   @ @@                      @@@@    
+      @@ @@                   @@@@  @@@@   @@ @@    @@@@  @@@@@@  @@@      @@@ @@@      @@ @@    @@@@        @@@@   @@@@                      @@@@    
+      @@@@@      @@@ @@@ @@@@@@@@@  @@@@   @@@@@       @@@@@      @@@      @@@@ @@      @@@@     @@@@        @@@@   @@@@ @@@ @@@ @@@@@@@@     @@@@    
+      @@@@       @@@@@@@@@@@@ @@@@  @@@@   @ @@@          @@@@@@@ @@       @@   @       @@@@     @@@@        @@@@   @@@@@@@@@@@@@@@@@@@@@@    @@@@    
+      @@@@       @@@@@@@@@@@@@@@@   @@@@   @@@@@@             @@@ @@        @  @@       @@@@     @@ @        @@@@   @@@@@@@@ @@@ @@@@@  @@    @@@@    
+      @@@@       @@@@@@@@@@@@       @@@@   @ @ @@                 @@@       @@ @@       @ @       @ @        @@@@   @@@@@@@@@@@@@@@@@@@ @@    @@@@    
+      @@@@       @ @@               @@@@   @@@ @@                 @@        @@ @@      @@ @       @ @@       @@@@                    @@ @@    @@@@    
+      @@@@      @@ @@               @@@@   @ @@@@                 @@@@      @@ @@      @@@@       @ @@       @@@@                    @@ @@    @@ @     
+     @@@@@      @@ @                @@@@   @@@@@@                 @@@        @@@       @@@@       @@@@       @@@@                    @@ @@    @@@@     
+     @@ @@      @@@@                @@@@     @@@                   @@@        @        @ @@       @@@@       @@@@                    @@ @@    @@@@     
+     @@ @@      @@@@               @@@@@    @@@@                   @@@                @@ @@       @@@@       @@@@                    @@ @@    @@@@     
+     @@ @@      @@@@               @@ @@    @@@                    @@@                @@@@        @@@@       @@@@                    @@ @@    @@@@     
+     @@ @@      @@@@               @@ @@    @@                      @@                @@@@        @@@@       @@@@                    @@ @@    @@@@     
+     @@ @@      @@@@                @@@@   @@@        @@@@@@@@@@@@@@@@@               @ @@        @@@@       @@@@                    @@ @@    @@@@    
+     @@ @@      @@@@                @@@@   @@    @@@@@@@@          @@@ @             @@@@         @@@@       @@@@   @@@@@@@@@@@@@@@  @@ @@    @@@@  
+     @@ @@      @@@@                @@@@  @@@   @@  @@@@@@@@@@@@@@@@@  @             @@@@         @@@@       @@@@   @@@@         @@  @@ @@    @@ @ 
+     @@@@       @@@@                @@@@  @@@    @@@@@@ @@@        @@@@@             @@@@         @ @@       @@@@   @@@@@@@@@@@@@ @  @@ @@    @@ @  
+     @@@@       @@@@               @@ @@  @@         @@@@@@        @@@ @             @@@@         @@@@       @@@@   @@@@       @@ @  @@ @@    @@@@   
+     @@@@       @@@@               @@ @@  @@      @@@@@@ @@@       @@@ @            @@ @          @@@@       @@@@   @@@@       @@ @  @@ @@    @@@@     
+     @@@@       @@@@               @@ @@  @@      @@@@@@ @@@       @@@ @            @@@@          @@@@       @@@@   @@@@        @ @  @@ @@    @@ @     
+     @@@@       @@@@ @@  @@@  @@   @@ @@ @@@     @@@@@@   @@@      @@@ @            @@@@          @ @        @@@@   @@@@        @ @  @@ @@    @@ @     
+     @@@@       @@@@@@@@ @@@@@@@@   @@@@@@@@    @@@ @ @ @@ @@      @@@ @@          @@ @@          @ @        @@@@   @@@@        @ @@@@@ @@    @@ @     
+     @@@@       @@@@@@@@ @@@ @@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@            @@@@@@@@@@@@@@@   @@@@        @@@   @@@@     @@@@    
+     @@@@@@@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@             @@@@@@@@@@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@     
+                                                                                                                                                                 
+
+Enhanced Leveraged Virtual Investment System
+```
+
+## Overview  
+ELVIS integrates **Deep Reinforcement Learning (DRL)** and **high-frequency trading (HFT)** for Binance Futures, targeting **BTC/USDT**. It tackles overfitting in financial RL and employs a **Random Forest model** with technical indicators (**SMA, RSI, MACD, Bollinger Bands**), enriched by insights on combining financial and social features. **Tested across multiple cryptocurrencies and market crashes**, it aims to surpass traditional strategies.  
+
+> **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**  
+> ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.  
+> This project is for educational purposes only and is not production-ready without extensive validation.  
+> Leveraged trading carries high risk—use simulation or Binance Testnet first.  
+> To enable live trading (at your own risk), set `PRODUCTION_MODE: True` in `config/config.py`.
+
+## Features  
+- **Multiple Trading Strategies**:
+  - **Technical Strategy**: Uses RSI, MACD, DX, and OBV for trend-based trading
+  - **Mean Reversion Strategy**: Leverages Bollinger Bands and RSI for mean reversion trading
+  - **Trend Following Strategy**: Employs Moving Averages and ADX for trend identification and following
+  
+- **Advanced Model Types**:
+  - **Random Forest Model**: Uses TensorFlow Decision Forests for robust prediction
+  - **Neural Network Model**: Implements LSTM networks for time series forecasting
+  - **Ensemble Model**: Combines multiple models for improved prediction accuracy
+  
+- **Comprehensive Risk Management**:
+  - **Position Sizing**: Dynamic position sizing based on volatility and available capital
+  - **Leverage Control**: Adjusts leverage based on trend strength and market conditions
+  - **Stop Loss & Take Profit**: Calculates optimal levels using ATR and price action
+  - **Trade Limits**: Enforces daily trade limits, profit targets, and loss thresholds
+  
+- **Performance Monitoring & Reporting**:
+  - **Trade Tracking**: Records all trades with timestamps and performance metrics
+  - **Metrics Calculation**: Computes win rate, profit factor, Sharpe ratio, and drawdown
+  - **Visualization**: Generates equity curves, daily returns, and win/loss distributions
+  - **HTML Reports**: Creates comprehensive performance reports with metrics and charts
+  
+- **Robust Testing Framework**:
+  - **Unit Tests**: Comprehensive test coverage for all components
+  - **Integration Tests**: End-to-end testing of the entire trading system
+  - **Mocking**: Simulates exchange API for reliable testing
+  
+- **Core Infrastructure**:
+  - **Binance Futures Integration**: Uses `ccxt` for trading with proper error handling
+  - **Technical Indicators**: Calculates SMA, RSI, MACD, Bollinger Bands, ATR, ADX, and more
+  - **Data Processing**: Efficient data downloading, cleaning, and indicator calculation
+  - **Telegram Notifications**: Real-time alerts for trades, errors, and system status
+  - **Data Caching**: Reduces API calls through intelligent caching
+  - **Modular Architecture**: Clear separation of concerns with standardized interfaces
+
+## Papers  
+- **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.  
+- **"High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features"** by Annelotte Bonenkamp (Bachelor Thesis, University of Amsterdam, June 2021).  
+
+## Prerequisites  
+- **Python 3.10** (tested with virtual environment `venv310`).  
+- **Modules**: `ccxt`, `numpy`, `pandas`, `joblib`, `binance`, `talib`, `requests`, `yfinance` (optional), `telebot`, `websocket-client`, `ta`, `python-dotenv`, `torch`, `optuna`, plus `ElegantRL` dependencies.  
+- **Binance Futures API access** (`API key` and `secret`).  
+- **Configuration**: `.env` file with:  
+  ```plaintext
+  BINANCE_API_KEY=your_binance_api_key  
+  BINANCE_API_SECRET=your_binance_api_secret  
+  TELEGRAM_TOKEN=your_telegram_token  
+  TELEGRAM_CHAT_ID=your_telegram_chat_id  
+  ```
+
+## Installation  
+### Clone Repository:  
+```bash
+git clone https://github.com/cluster2600/ELVIS.git && cd ELVIS  
+```
+
+### Virtual Environment:  
+#### Linux/macOS:  
+```bash
+python3.10 -m venv venv310 && source venv310/bin/activate  
+```
+#### Windows:  
+```bash
+python -m venv venv310 && venv310\Scripts\activate  
+```
+
+### Install Dependencies:  
+```bash
+pip install -r requirements.txt  
+```
+Set up `.env` with credentials (see Configuration below).  
+
+## How to Use  
+### Configuration  
+Edit `config/config.py` for:  
+- API credentials (loaded from `.env`)
+- Trading parameters (symbol, timeframe, leverage, etc.)
+- Technical indicators
+- Backtesting configuration
+- File paths
+- Logging settings
+
+### Folder Structure  
+- `config/`: Configuration files for all settings.
+- `core/`: Core functionality modules.
+  - `data/`: Data handling modules.
+  - `models/`: Model definitions.
+  - `metrics/`: Performance metrics.
+- `trading/`: Trading execution modules.
+  - `strategies/`: Trading strategies.
+  - `execution/`: Order execution.
+  - `risk/`: Risk management.
+- `utils/`: Utility functions.
+- `data/`: Training/validation data.
+- `logs/`: Trading and backtesting logs.
+
+### Running the Bot  
+To run the bot, use the provided script:
+```bash
+./run_elvis.sh --mode paper --symbol BTCUSDT --timeframe 1h --leverage 75
+```
+
+Available modes:
+- `live`: Live trading with real money
+- `paper`: Paper trading (simulated)
+- `backtest`: Backtesting with historical data
+
+## Recent Updates  
+- **Project Renaming**: Renamed to ELVIS (Enhanced Leveraged Virtual Investment System) with ASCII art.
+- **Modular Architecture**: Implemented a new architecture with clear separation of concerns.
+- **Centralized Configuration**: Created a configuration module for all settings.
+- **Improved Logging**: Enhanced logging system with colored console output and file rotation.
+- **Standardized Interfaces**: Defined base interfaces for models, processors, strategies, and execution.
+- **Enhanced Metrics**: Created comprehensive metrics utilities for performance analysis.
+- **Command-line Interface**: Added a main entry point with command-line argument parsing.
+- **Multiple Trading Strategies**: Added Mean Reversion and Trend Following strategies.
+- **Advanced Model Types**: Implemented Neural Network and Ensemble models.
+- **Performance Monitoring**: Added trade tracking, metrics calculation, and HTML reporting.
+- **Comprehensive Testing**: Created unit tests and integration tests for all components.
+
+## Future Improvements
+See [Future Improvements](docs/future_improvements.md) for a detailed roadmap of planned enhancements, including:
+- Advanced trading strategies (sentiment analysis, grid trading)
+- Enhanced machine learning models (transformers, reinforcement learning)
+- Infrastructure improvements (real-time dashboard, distributed computing)
+- Risk management enhancements
+- Data enhancements
+- And more...
+
+## Risk Disclaimer  
+This bot is experimental and not financial advice. Use at your own risk. Consider using Binance Testnet before live trading.
