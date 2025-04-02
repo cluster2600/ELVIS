@@ -320,10 +320,10 @@ class TransformerModel(BaseModel):
             # Create target tensor, ensuring correct shape
             y_values = y_train.values[self.seq_len-1:]
             if self.output_dim == 1:
-                # Reshape to (N, 1) for consistency with potential loss function expectations
+                # Keep as (N, 1) which BCEWithLogitsLoss can handle
                 y_tensor = torch.tensor(y_values, dtype=torch.float32).unsqueeze(1).to(self.device)
             else:
-                # Assuming multi-class classification requires Long type
+                # Assuming multi-class classification requires Long type for CrossEntropyLoss
                 y_tensor = torch.tensor(y_values, dtype=torch.long).to(self.device)
 
             # Create dataset and dataloader
@@ -347,9 +347,8 @@ class TransformerModel(BaseModel):
 
                     # Ensure target shape matches output shape for loss calculation
                     # BCEWithLogitsLoss expects input (N, *) and target (N, *)
-                    if self.output_dim == 1:
-                         batch_y = batch_y.squeeze() # Ensure target is (batch_size,) if output is squeezed later
-                         outputs = outputs.squeeze() # Squeeze output to (batch_size,)
+                    # Keep shapes as (batch_size, 1) for both output and target if output_dim is 1
+                    # No squeezing needed here if y_tensor was created with unsqueeze(1)
 
                     # Calculate loss
                     loss = criterion(outputs, batch_y)

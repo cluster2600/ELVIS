@@ -50,6 +50,37 @@ TRADING_CONFIG = {
     'DEFAULT_MODE': 'paper'  # 'live', 'paper', or 'backtest'
 }
 
+# --- Configuration Validation ---
+def validate_config():
+    """Basic validation for critical config values."""
+    # Leverage
+    assert 1 <= TRADING_CONFIG['LEVERAGE_MIN'] <= 125, "LEVERAGE_MIN must be between 1 and 125"
+    assert 1 <= TRADING_CONFIG['LEVERAGE_MAX'] <= 125, "LEVERAGE_MAX must be between 1 and 125"
+    assert TRADING_CONFIG['LEVERAGE_MIN'] <= TRADING_CONFIG['LEVERAGE_MAX'], "LEVERAGE_MIN cannot be greater than LEVERAGE_MAX"
+
+    # Percentages (Stop Loss / Take Profit)
+    assert 0 < TRADING_CONFIG['STOP_LOSS_PCT'] < 1, "STOP_LOSS_PCT must be between 0 and 1 (exclusive)"
+    assert 0 < TRADING_CONFIG['TAKE_PROFIT_PCT'] < 1, "TAKE_PROFIT_PCT must be between 0 and 1 (exclusive)"
+
+    # Limits
+    assert TRADING_CONFIG['DAILY_LOSS_LIMIT_USD'] <= 0, "DAILY_LOSS_LIMIT_USD should be zero or negative"
+    assert TRADING_CONFIG['DAILY_PROFIT_TARGET_USD'] >= 0, "DAILY_PROFIT_TARGET_USD should be zero or positive"
+    assert TRADING_CONFIG['MAX_TRADES_PER_DAY'] >= 0, "MAX_TRADES_PER_DAY cannot be negative"
+    assert TRADING_CONFIG['MIN_CAPITAL_USD'] > 0, "MIN_CAPITAL_USD must be positive"
+
+    # Intervals
+    assert TRADING_CONFIG['COOLDOWN'] >= 0, "COOLDOWN cannot be negative"
+    assert TRADING_CONFIG['SLEEP_INTERVAL'] > 0, "SLEEP_INTERVAL must be positive"
+    assert TRADING_CONFIG['DATA_LIMIT'] > 10, "DATA_LIMIT should be reasonably large (e.g., > 10)"
+
+    # Mode
+    assert TRADING_CONFIG['DEFAULT_MODE'] in ['live', 'paper', 'backtest'], "Invalid DEFAULT_MODE"
+
+# Run validation on import
+validate_config()
+# --- End Validation ---
+
+
 # Technical Indicators
 TECH_INDICATORS = ['rsi', 'macd', 'dx', 'obv']
 

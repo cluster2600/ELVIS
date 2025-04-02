@@ -206,23 +206,23 @@ def test_generic_model_workflow(model_class, processed_test_data):
 
     try:
         # Initialize model with necessary params if needed (e.g., input_dim for NN/Transformer)
-            init_kwargs = {}
-            if model_class == NeuralNetworkModel:
-                init_kwargs['input_dim'] = X_train.shape[1]
-                init_kwargs['epochs'] = 2 # Minimal epochs for testing
-                init_kwargs['batch_size'] = 16
-            elif model_class == TransformerModel:
-                input_dim = X_train.shape[1]
-                # Ensure num_heads divides input_dim
-                num_heads = 3 if input_dim % 3 == 0 else (1 if input_dim > 0 else 4) # Choose a valid divisor (e.g., 3 for 9 features)
-                init_kwargs['input_dim'] = input_dim
-                init_kwargs['num_heads'] = num_heads
-                init_kwargs['epochs'] = 2 # Minimal epochs for testing
-                 init_kwargs['batch_size'] = 16
+        # Corrected indentation for this block
+        init_kwargs = {}
+        if model_class == NeuralNetworkModel:
+            init_kwargs['input_dim'] = X_train.shape[1]
+            init_kwargs['epochs'] = 2 # Minimal epochs for testing
+            init_kwargs['batch_size'] = 16
+        elif model_class == TransformerModel:
+            input_dim = X_train.shape[1]
+            # Ensure num_heads divides input_dim
+            num_heads = 3 if input_dim % 3 == 0 else (1 if input_dim > 0 else 4) # Choose a valid divisor (e.g., 3 for 9 features)
+            init_kwargs['input_dim'] = input_dim
+            init_kwargs['num_heads'] = num_heads
+            init_kwargs['epochs'] = 2 # Minimal epochs for testing
+            init_kwargs['batch_size'] = 16
 
-            model = model_class(logger=logger, **init_kwargs)
-            # Corrected indentation for this assertion
-            assert isinstance(model, BaseModel), f"{model_name} does not inherit from BaseModel"
+        model = model_class(logger=logger, **init_kwargs)
+        assert isinstance(model, BaseModel), f"{model_name} does not inherit from BaseModel"
 
         # Train
         logger.info(f"Training {model_name}...")

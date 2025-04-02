@@ -2,8 +2,8 @@
 
 ![ELVIS Logo](images/elvis.png)
 
-## Overview  
-ELVIS integrates **Deep Reinforcement Learning (DRL)** and **high-frequency trading (HFT)** for Binance Futures, targeting **BTC/USDT**. It tackles overfitting in financial RL and employs a **Random Forest model** with technical indicators (**SMA, RSI, MACD, Bollinger Bands**), enriched by insights on combining financial and social features. **Tested across multiple cryptocurrencies and market crashes**, it aims to surpass traditional strategies.  
+## Overview
+ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for developing and deploying cryptocurrency trading bots on Binance Futures, specifically targeting BTC/USDT. It integrates various trading strategies, machine learning models (including Random Forest, Neural Networks, Transformers, and Reinforcement Learning), risk management techniques, and performance monitoring tools.
 
 > **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**  
 > ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.  
@@ -13,49 +13,25 @@ ELVIS integrates **Deep Reinforcement Learning (DRL)** and **high-frequency trad
 
 ## Features  
 - **Multiple Trading Strategies**:
-  - **Technical Strategy**: Uses RSI, MACD, DX, and OBV for trend-based trading
-  - **Mean Reversion Strategy**: Leverages Bollinger Bands and RSI for mean reversion trading
-  - **Trend Following Strategy**: Employs Moving Averages and ADX for trend identification and following
-  
-- **Advanced Model Types**:
-  - **Random Forest Model**: Uses TensorFlow Decision Forests for robust prediction
-  - **Neural Network Model**: Implements LSTM networks for time series forecasting
-  - **Ensemble Model**: Combines multiple models for improved prediction accuracy
-  
-- **Comprehensive Risk Management**:
-  - **Position Sizing**: Dynamic position sizing based on volatility and available capital
-  - **Leverage Control**: Adjusts leverage based on trend strength and market conditions
-  - **Stop Loss & Take Profit**: Calculates optimal levels using ATR and price action
-  - **Trade Limits**: Enforces daily trade limits, profit targets, and loss thresholds
-  
-- **Performance Monitoring & Reporting**:
-  - **Trade Tracking**: Records all trades with timestamps and performance metrics
-  - **Metrics Calculation**: Computes win rate, profit factor, Sharpe ratio, and drawdown
-  - **Visualization**: Generates equity curves, daily returns, and win/loss distributions
-  - **HTML Reports**: Creates comprehensive performance reports with metrics and charts
-  
-- **Robust Testing Framework**:
-  - **Unit Tests**: Comprehensive test coverage for all components
-  - **Integration Tests**: End-to-end testing of the entire trading system
-  - **Mocking**: Simulates exchange API for reliable testing
-  
-- **Core Infrastructure**:
-  - **Binance Futures Integration**: Uses `ccxt` for trading with proper error handling
-  - **Technical Indicators**: Calculates SMA, RSI, MACD, Bollinger Bands, ATR, ADX, and more
-  - **Data Processing**: Efficient data downloading, cleaning, and indicator calculation
-  - **Telegram Notifications**: Real-time alerts for trades, errors, and system status
-  - **Data Caching**: Reduces API calls through intelligent caching
-  - **Modular Architecture**: Clear separation of concerns with standardized interfaces
+- **Multiple Trading Strategies**: Technical, Mean Reversion, Trend Following, EMA/RSI, Sentiment, Grid.
+- **Advanced Model Types**: Random Forest (TFDF), Neural Network (LSTM), Transformer, Reinforcement Learning (PPO), Ensemble.
+- **Comprehensive Risk Management**: Basic and Advanced (Kelly Criterion, Drawdown Protection) options.
+- **Performance Monitoring**: Tracks trades, calculates key metrics (Sharpe, PnL, Win Rate, etc.), generates plots and HTML reports.
+- **Real-time Console Dashboard**: For monitoring paper trading sessions.
+- **Modular Architecture**: Core components (data, models, metrics), Trading components (strategies, execution, risk), Utilities.
+- **Testing**: Includes unit and integration tests using pytest.
+- **Configuration**: Centralized settings in `config/config.py` and API keys via `.env`.
 
 ## Papers  
 - **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.  
 - **"High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features"** by Annelotte Bonenkamp (Bachelor Thesis, University of Amsterdam, June 2021).  
 
 ## Prerequisites  
-- **Python 3.10** (tested with virtual environment `venv310`).  
-- **Modules**: `ccxt`, `numpy`, `pandas`, `joblib`, `binance`, `talib`, `requests`, `yfinance` (optional), `telebot`, `websocket-client`, `ta`, `python-dotenv`, `torch`, `optuna`, plus `ElegantRL` dependencies.  
-- **Binance Futures API access** (`API key` and `secret`).  
-- **Configuration**: `.env` file with:  
+- **Python 3.10+** (developed with 3.11).
+- **Dependencies**: Listed in `requirements.txt`. Install using `pip install -r requirements.txt`.
+- **Binance API Keys**: Required for live trading and potentially for data fetching in paper/backtest modes if not using mock data.
+- **Telegram Bot Token/Chat ID**: Optional, for notifications.
+- **Configuration**: Create a `.env` file in the root directory with your API keys and Telegram details:
   ```plaintext
   BINANCE_API_KEY=your_binance_api_key  
   BINANCE_API_SECRET=your_binance_api_secret  
@@ -79,82 +55,52 @@ python3.10 -m venv venv310 && source venv310/bin/activate
 python -m venv venv310 && venv310\Scripts\activate  
 ```
 
-### Install Dependencies:  
+### Install Dependencies:
 ```bash
-pip install -r requirements.txt  
-```
-Set up `.env` with credentials (see Configuration below).  
-
-## How to Use  
-### Configuration  
-Edit `config/config.py` for:  
-- API credentials (loaded from `.env`)
-- Trading parameters (symbol, timeframe, leverage, etc.)
-- Technical indicators
-- Backtesting configuration
-- File paths
-- Logging settings
-
-### Folder Structure  
-- `config/`: Configuration files for all settings.
-- `core/`: Core functionality modules.
-  - `data/`: Data handling modules.
-  - `models/`: Model definitions.
-  - `metrics/`: Performance metrics.
-- `trading/`: Trading execution modules.
-  - `strategies/`: Trading strategies.
-  - `execution/`: Order execution.
-  - `risk/`: Risk management.
-- `utils/`: Utility functions.
-- `data/`: Training/validation data.
-- `logs/`: Trading and backtesting logs.
-
-### Running the Bot  
-To run the bot, use the provided script:
-```bash
-./run_elvis.sh --mode paper --symbol BTCUSDT --timeframe 1h --leverage 75
+pip install -r requirements.txt
 ```
 
-To run the bot with the console dashboard enabled:
+## How to Use
+
+### Configuration
+1.  **Create `.env` file**: Add your API keys and Telegram info (see Prerequisites).
+2.  **Edit `config/config.py`**: Adjust trading parameters (symbol, timeframe, leverage, strategy defaults), file paths, logging level, and **importantly**, set `PRODUCTION_MODE` to `True` **only** if you intend to live trade (default is `False` for safety).
+
+### Running the Bot
+Use `main.py` as the entry point. Select the mode and strategy via command-line arguments:
+
 ```bash
-./run_dashboard.sh
+python main.py --mode <mode> --strategy <strategy_name> [other_options]
 ```
 
-Available modes:
-- `live`: Live trading with real money
-- `paper`: Paper trading (simulated)
-- `backtest`: Backtesting with historical data
+**Available Modes (`--mode`):**
+-   `live`: Live trading on Binance Futures (**Requires `PRODUCTION_MODE = True` in config and valid API keys**). High risk!
+-   `paper`: Simulated trading using real-time data via a console dashboard. Ideal for testing strategies without risk.
+-   `backtest`: Backtesting strategies using historical data (Implementation details might vary).
 
-### Console Dashboard
-ELVIS includes a real-time console dashboard for monitoring trading performance directly in your terminal:
+**Available Strategies (`--strategy`):**
+-   `technical` (Default)
+-   `mean_reversion`
+-   `trend_following`
+-   `ema_rsi`
+-   `sentiment` (May require additional setup/data sources)
+-   `grid`
 
-- **Portfolio Information**: Track your portfolio value, position size, and unrealized PnL
-- **Performance Metrics**: View key metrics like win rate, profit factor, and Sharpe ratio
-- **Recent Trades**: See your most recent trades with PnL information
-- **Strategy Signals**: Monitor buy/sell signals from your active strategy
-- **Real-time Candlestick Charts**: View live candlestick data with price movement visualization
-- **Market Statistics**: Monitor daily high/low, volume, and market sentiment
-- **System Statistics**: Track CPU/memory usage, uptime, and API calls
+**Example (Paper Trading with Console Dashboard):**
+```bash
+python main.py --mode paper --strategy ema_rsi --symbol BTCUSDT --timeframe 1h
+```
+This will start the paper trading bot using the EMA/RSI strategy and display the real-time console dashboard.
 
-The console dashboard features:
-- **Multiple Views**: Standard, Detailed, and Candlestick Chart views
-- **Real-time WebSocket Data**: Direct connection to Binance for live price updates
-- **Color-coded Information**: Green for positive values, red for negative
-- **Real-time Updates**: Instant updates as trades are executed and prices change
-- **Compact Display**: Fits in a standard terminal window
-- **Low Resource Usage**: Efficient compared to web-based dashboards
-- **Error Handling**: Robust error handling for terminal resizing and display issues
+### Console Dashboard (Paper Trading Mode)
+When running in `paper` mode, ELVIS displays a real-time console dashboard:
 
-To use the console dashboard:
-1. Run the bot with the dashboard enabled using `./run_dashboard.sh`
-2. The dashboard will appear directly in your terminal
-3. Use number keys to switch between views:
-   - `1`: Standard view (portfolio, metrics, trades, signals)
-   - `2`: Detailed view (portfolio, market stats, system stats, candle info)
-   - `3`: Candlestick Chart view (real-time price chart)
-4. Press 'q' to quit the dashboard and stop the bot
+- **Real-time Updates**: Shows portfolio value, position, PnL, metrics, recent trades, strategy signals, market data, and system stats.
+- **Live Candlestick Chart**: Visualizes price action.
+- **Interactive Views**: Use number keys (`1`, `2`, `3`) to switch between Standard, Detailed, and Chart views.
+- **Quit**: Press `q` to exit the dashboard and stop the paper trading session.
 
-**Note**: The dashboard requires a terminal with support for Unicode box-drawing characters and a minimum size of 50x10 characters. For best results, use a terminal with a dark background.
+**Note**: The dashboard requires a terminal supporting Unicode and color, with a minimum size (e.g., 80x24). It uses a WebSocket connection via `utils/price_fetcher.py` for live data.
 
 ```
 ┌─────────────────────── ELVIS Console Dashboard ───────────────────────┐
@@ -183,38 +129,7 @@ To use the console dashboard:
 ```
 
 ## Recent Updates  
-- **Project Renaming**: Renamed to ELVIS (Enhanced Leveraged Virtual Investment System).
-- **Modular Architecture**: Implemented a new architecture with clear separation of concerns.
-- **Centralized Configuration**: Created a configuration module for all settings.
-- **Improved Logging**: Enhanced logging system with colored console output and file rotation.
-- **Standardized Interfaces**: Defined base interfaces for models, processors, strategies, and execution.
-- **Enhanced Metrics**: Created comprehensive metrics utilities for performance analysis.
-- **Command-line Interface**: Added a main entry point with command-line argument parsing.
-- **Multiple Trading Strategies**: 
-  - **Technical Strategy**: Uses RSI, MACD, DX, and OBV indicators
-  - **Mean Reversion Strategy**: Uses Bollinger Bands and RSI
-  - **Trend Following Strategy**: Uses Moving Averages and ADX
-  - **EMA-RSI Strategy**: Uses EMA crossovers and RSI
-  - **Sentiment Strategy**: Incorporates news and social media sentiment
-  - **Grid Strategy**: Implements dynamic grid trading based on volatility
-- **Advanced Model Types**: 
-  - **Random Forest Model**: Using TensorFlow Decision Forests
-  - **Neural Network Model**: Using LSTM and Dense layers
-  - **Ensemble Model**: Combining multiple models
-  - **Transformer Model**: Using self-attention mechanism
-  - **Reinforcement Learning Model**: Using PPO algorithm
-- **Advanced Risk Management**:
-  - **Risk Manager**: Basic risk management with position sizing and trade limits
-  - **Advanced Risk Manager**: Implements Kelly Criterion, circuit breakers, and drawdown protection
-- **Performance Monitoring**: 
-  - **Trade Tracking**: Records all trades with timestamps and metrics
-  - **Performance Metrics**: Calculates win rate, profit factor, Sharpe ratio
-  - **Visualization**: Generates equity curves, daily returns, win/loss distributions
-  - **HTML Reports**: Creates comprehensive performance reports
-- **Real-time Dashboard**: Displays performance metrics and trading signals
-- **Monte Carlo Simulation**: Tests strategy robustness through simulations
-- **Mock Data Generation**: Creates realistic market data for testing when API calls fail
-- **Comprehensive Testing**: Unit tests and integration tests for all components
+*(Summary of features moved to the main Features section)*
 
 ## Future Improvements
 See [Future Improvements](docs/future_improvements.md) for a detailed roadmap of planned enhancements, including:

@@ -1,4 +1,24 @@
 # Changelog
+## eureka
+
+**Date:** 2025-04-02
+
+**Summary:** Implemented several improvements based on code review:
+1.  **Fixed Paper Trading Logic:** Refactored `main.py` to correctly initialize `PaperBot` for paper mode. Updated `trading/paper_bot.py` to use `PriceFetcher` for real-time data and integrate properly with the console dashboard, removing the previous random simulation.
+2.  **Refactored EnsembleModel:** Modified `core/models/ensemble_model.py` to handle sub-models via configuration (paths) rather than direct embedding, fixing save/load and prediction logic.
+3.  **Code Cleanup:** Removed several redundant/legacy top-level scripts (`processor_Binance.py`, `your_bot_script.py`, `config_api.py`, etc.).
+4.  **Enhanced Testing:**
+    *   Refactored `test_elvis.py` to use standard pytest structure (fixtures, test functions).
+    *   Fixed `RandomForestModel` training error (`unhashable type`) by adjusting data conversion for TFDF.
+    *   Fixed `TransformerModel` training error (`tuple index out of range` / dimension mismatch) by correcting positional encoding and ensuring `num_heads` compatibility in tests.
+    *   Fixed `PerformanceMonitor` metric calculation logic for `total_trades`/`losing_trades` and resolved JSON serialization error for NumPy types.
+5.  **Improved Documentation:** Updated `README.md` with current architecture overview, clarified usage instructions for different modes (`main.py`), and updated dashboard description.
+6.  **Dependency Management:** Cleaned up `requirements.txt` by removing unused web dashboard and CoreML packages.
+7.  **Configuration Validation:** Added basic validation checks for critical parameters in `config/config.py`.
+
+---
+*(Previous Entries Below)*
+---
 ## need help
 
 **Date:** 2025-04-02
