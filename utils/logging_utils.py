@@ -76,15 +76,16 @@ def print_info(logger, message):
     """
     logger.info(message)
     
-def print_error(logger, message):
+def print_error(logger, message, exc_info=False):
     """
     Log an error message.
     
     Args:
         logger (logging.Logger): The logger to use.
         message (str): The message to log.
+        exc_info (bool, optional): Whether to include exception info. Defaults to False.
     """
-    logger.error(message)
+    logger.error(message, exc_info=exc_info)
     
 def print_warning(logger, message):
     """

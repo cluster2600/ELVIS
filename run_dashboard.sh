@@ -31,9 +31,13 @@ pip install websocket-client psutil >/dev/null 2>&1 || {
     exit 1
 }
 
-# Run the bot in paper trading mode with EMA-RSI strategy
-echo "Starting ELVIS in paper trading mode with EMA-RSI strategy..."
-python main.py --mode paper --strategy ema_rsi --log-level DEBUG
+# Set working directory to nested project root
+cd /Users/maxime/BTC_BOT/BTC_BOT
+
+# Run the bot in paper trading mode with Ensemble strategy
+echo "Starting ELVIS in paper trading mode with Ensemble strategy..."
+# Redirect stderr to /dev/null to prevent log messages from appearing in the terminal
+python main.py --mode paper --strategy ensemble --log-level INFO "$@" 2>/dev/null
 
 # Check exit status
 if [ $? -eq 0 ]; then

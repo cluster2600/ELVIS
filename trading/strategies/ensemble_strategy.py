@@ -4,12 +4,14 @@ import tensorflow as tf
 import ydf
 import requests
 import coremltools as ct
+import os
+from typing import Optional
 from trading.strategies.base_strategy import BaseStrategy
 
 class EnsembleStrategy(BaseStrategy):
-    def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/model_rf.ydf", 
+    def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf", 
                  coreml_model_path="/Users/maxime/BTC_BOT/models/trading_model.mlmodel", 
-                 mlx_url="http://192.168.1.165:1234/v1/completions"):
+                 mlx_url="http://localhost:1234/v1/completions"):
         super().__init__(logger)
         self.logger = logger
         self.REQUIRED_FEATURES = [
@@ -19,8 +21,11 @@ class EnsembleStrategy(BaseStrategy):
         ]
         self.CLASSES = ["BUY", "HOLD", "SELL"]
         self.mlx_url = mlx_url
+        self.mlx_available = False
         
         # Load models during initialization
+        self.logger.debug(f"Current working directory: {os.getcwd()}")
+        self.logger.debug(f"Attempting to load YDF model from: {ydf_model_path}")
         self.ydf_model = self._load_ydf_model(ydf_model_path)
         self.nn_model = self._load_coreml_model(coreml_model_path)
         self._check_mlx_connectivity()
@@ -52,10 +57,11 @@ class EnsembleStrategy(BaseStrategy):
         try:
             response = requests.get(f"{self.mlx_url.split('/v1/')[0]}/v1/models", timeout=5)
             response.raise_for_status()
+            self.mlx_available = True
             self.logger.info(f"MLX model connected at {self.mlx_url}")
         except Exception as e:
-            self.logger.error(f"Failed to connect to MLX server: {e}")
-            raise
+            self.mlx_available = False
+            self.logger.warning(f"Failed to connect to MLX server: {e}. Proceeding without MLX model.")
 
     def _ensure_required_features(self, features: dict) -> dict:
         """Ensure all required features are present."""
@@ -63,9 +69,13 @@ class EnsembleStrategy(BaseStrategy):
 
     def _mlx_generate(self, prompt: str, max_tokens: int = 10) -> str:
         """Generate trading decision using MLX model."""
+        if not self.mlx_available:
+            self.logger.debug("MLX model unavailable, defaulting to HOLD")
+            return "HOLD"
         try:
             headers = {"Content-Type": "application/json"}
             data = {
+                "model": "llama-3.2-3b-instruct",  # Specify the model
                 "prompt": prompt,
                 "max_tokens": max_tokens,
                 "temperature": 0.7,
@@ -88,7 +98,13 @@ class EnsembleStrategy(BaseStrategy):
 
     def generate_signals(self, data):
         """Generate trading signals using the ensemble model."""
-        features = self._ensure_required_features(data)
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            features = data.iloc[-1].to_dict()
+            features['price'] = features.get('close', 0.0)  # Map 'close' to 'price'
+        else:
+            features = data if isinstance(data, dict) else {}
+
+        features = self._ensure_required_features(features)
 
         # YDF prediction
         try:
@@ -117,8 +133,11 @@ class EnsembleStrategy(BaseStrategy):
         mlx_decision = self._parse_mlx_decision(mlx_output)
         mlx_probs = np.array([1.0 if cls == mlx_decision else 0.0 for cls in self.CLASSES], dtype=np.float32)
 
-        # Ensemble
-        avg_probs = np.mean([ydf_probs, nn_probs, mlx_probs], axis=0)
+        # Ensemble with available models
+        available_probs = [ydf_probs, nn_probs]
+        if self.mlx_available:
+            available_probs.append(mlx_probs)
+        avg_probs = np.mean(available_probs, axis=0)
         decision_idx = np.argmax(avg_probs)
         decision = self.CLASSES[decision_idx]
         confidence = avg_probs[decision_idx]
@@ -127,3 +146,22 @@ class EnsembleStrategy(BaseStrategy):
         self.logger.info(f"Ensemble decision: {decision}, Confidence: {confidence:.4f}")
         
         return {"signal": decision, "confidence": float(confidence)}
+
+    def calculate_position_size(self, portfolio_value: float, price: float, volatility: float) -> float:
+        """Calculate position size (default implementation, can be overridden by bot)."""
+        risk_per_trade = portfolio_value * 0.01  # 1% risk
+        position_size = risk_per_trade / price
+        self.logger.debug(f"Calculated position size: {position_size} based on portfolio: {portfolio_value}, price: {price}")
+        return position_size
+
+    def calculate_stop_loss(self, data: pd.DataFrame, entry_price: float) -> Optional[float]:
+        """Calculate stop loss (default implementation)."""
+        stop_loss = entry_price * (1 - 0.01)
+        self.logger.debug(f"Default stop loss calculated: {stop_loss} for entry price: {entry_price}")
+        return stop_loss
+
+    def calculate_take_profit(self, data: pd.DataFrame, entry_price: float) -> Optional[float]:
+        """Calculate take profit (default implementation)."""
+        take_profit = entry_price * (1 + 0.03)
+        self.logger.debug(f"Default take profit calculated: {take_profit} for entry price: {entry_price}")
+        return take_profit

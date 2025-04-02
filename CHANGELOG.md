@@ -1,4 +1,54 @@
 # Changelog
+## eureka
+
+**Date:** 2025-04-03
+
+**Summary:** Fixed console dashboard crashes, timestamp issues, and logging conflicts, and enhanced the UI with frames and additional information:
+1. **Simplified Dashboard Structure:** Replaced the complex drawing functions with a simpler, more robust implementation that focuses on core functionality.
+2. **Fixed Syntax Errors:** Resolved multiple syntax errors in the original implementation, including unclosed parentheses and missing try-except blocks.
+3. **Improved Error Handling:** Added comprehensive error handling throughout the dashboard code to prevent crashes.
+4. **Reduced Complexity:** Simplified the dashboard to focus on essential information display rather than complex visualizations that were causing instability.
+5. **Thread Safety:** Enhanced thread safety with proper locking mechanisms around all shared data access.
+6. **Minimized Dependencies:** Reduced external dependencies to improve stability and reduce potential points of failure.
+7. **Robust Terminal Handling:** Improved handling of terminal resizing and other terminal-related events.
+8. **Fixed Timestamp Handling:** Resolved "Invalid timestamp in candle" errors by properly handling timestamp data from PriceFetcher.
+9. **Fixed Dashboard Manager Integration:** Corrected the integration between PaperBot and ConsoleDashboardManager to properly check dashboard status.
+10. **Added Missing Methods:** Implemented missing add_trade method in ConsoleDashboardManager to handle trade updates.
+11. **Disabled Console Logging During Dashboard Display:** Added methods to temporarily disable console logging while the dashboard is active and restore it when the dashboard is closed, preventing log messages from corrupting the dashboard display.
+12. **Fixed NoneType Error:** Added robust attribute checking in the logging handler management to prevent AttributeError when handling StreamHandler objects with None streams.
+13. **Enhanced UI with Requested Features:**
+    - Added pink/magenta color for the ELVIS logo
+    - Added prominent network mode indicator (TESTNET/PRODUCTION)
+    - Added real-time BTC price display with emphasis
+    - Added realized PnL calculation and display with color-coding
+14. **Added Framed Layout and Additional Information:**
+    - Added a main frame around the entire dashboard for better visual organization
+    - Added section frames with titles for Portfolio Information, Performance Metrics, and System Information
+    - Added current time display in the top-right corner
+    - Added strategy name display
+    - Added more performance metrics (Profit Factor, Sharpe Ratio, Max Drawdown)
+    - Added system information section with CPU usage, memory usage, uptime, and API calls
+    - Improved layout with two-column design for better space utilization
+15. **Added Open Positions Display:**
+    - Added a dedicated section to display all open positions
+    - Included symbol, size, entry price, current price, PnL, and PnL percentage for each position
+    - Added color-coding for positive and negative PnL values
+16. **Added ML Model Information:**
+    - Added display of the current ML model being used
+    - Added methods to update the model name from the trading bot
+17. **Fixed Logging Restoration Issue:**
+    - Enhanced the logging restoration mechanism to properly handle the root logger
+    - Added checks to prevent duplicate handlers when restoring logging
+    - Fixed issue with log messages appearing after dashboard is stopped
+    - Ensured proper cleanup of all logging handlers
+18. **Fixed run_dashboard.sh Script:**
+    - Fixed duplicate content in the script
+    - Added redirection of stderr to /dev/null to prevent log messages from appearing in the terminal
+    - Set log level to INFO to reduce unnecessary debug messages
+    - Ensured proper exit status handling
+
+**Result:** The console dashboard now runs stably without crashes or error messages, providing essential trading information in a clean, readable format without being interrupted by log messages. The enhanced UI with frames and additional information provides better visibility of critical information and a more professional appearance. The addition of open positions display and ML model information makes the dashboard more useful for monitoring trading activity. The improved logging handling ensures that log messages don't interfere with the dashboard display and are properly restored when the dashboard is stopped.
+
 ## need help
 
 **Date:** 2025-04-02
