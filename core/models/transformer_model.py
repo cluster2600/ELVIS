@@ -130,14 +130,15 @@ class TimeSeriesTransformer(nn.Module):
         Returns:
             torch.Tensor: The positional encoding of shape (seq_len, 1, d_model).
         """
-        position = torch.arange(seq_len).unsqueeze(1).float()
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(np.log(10000.0) / d_model))
-        
-        pos_encoding = torch.zeros(seq_len, 1, d_model)
-        pos_encoding[:, 0, 0::2] = torch.sin(position * div_term)
-        pos_encoding[:, 0, 1::2] = torch.cos(position * div_term)
-        
-        return pos_encoding
+        # More standard implementation from PyTorch tutorials
+        max_len = seq_len
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(1) # Shape: (seq_len, 1, d_model)
+        return pe
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -315,10 +316,16 @@ class TransformerModel(BaseModel):
             
             # Create sequences
             X_seq = self._create_sequences(X_train)
-            
-            # Create target tensor
-            y_tensor = torch.tensor(y_train.values[self.seq_len-1:], dtype=torch.float32).to(self.device)
-            
+
+            # Create target tensor, ensuring correct shape
+            y_values = y_train.values[self.seq_len-1:]
+            if self.output_dim == 1:
+                # Reshape to (N, 1) for consistency with potential loss function expectations
+                y_tensor = torch.tensor(y_values, dtype=torch.float32).unsqueeze(1).to(self.device)
+            else:
+                # Assuming multi-class classification requires Long type
+                y_tensor = torch.tensor(y_values, dtype=torch.long).to(self.device)
+
             # Create dataset and dataloader
             dataset = TensorDataset(X_seq, y_tensor)
             dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -336,12 +343,14 @@ class TransformerModel(BaseModel):
                 epoch_loss = 0.0
                 for batch_X, batch_y in dataloader:
                     # Forward pass
-                    outputs = self.model(batch_X)
-                    
-                    # Reshape outputs if needed
+                    outputs = self.model(batch_X) # Shape (batch_size, output_dim)
+
+                    # Ensure target shape matches output shape for loss calculation
+                    # BCEWithLogitsLoss expects input (N, *) and target (N, *)
                     if self.output_dim == 1:
-                        outputs = outputs.squeeze()
-                    
+                         batch_y = batch_y.squeeze() # Ensure target is (batch_size,) if output is squeezed later
+                         outputs = outputs.squeeze() # Squeeze output to (batch_size,)
+
                     # Calculate loss
                     loss = criterion(outputs, batch_y)
                     

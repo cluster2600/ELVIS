@@ -95,10 +95,16 @@ class RandomForestModel(BaseModel):
         """
         try:
             self.logger.info("Training Random Forest model")
-            
-            # Convert to TensorFlow dataset
-            train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(X_train, label=y_train)
-            
+
+            # Combine features and labels into one DataFrame for TFDF
+            # Ensure y_train index aligns with X_train
+            label_name = 'target_label' # Define a label column name
+            train_df_combined = X_train.copy()
+            train_df_combined[label_name] = y_train
+
+            # Convert the combined DataFrame to a TensorFlow dataset
+            train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(train_df_combined, label=label_name)
+
             # Create model
             self.model = tfdf.keras.RandomForestModel(
                 num_trees=self.num_trees,

@@ -35,7 +35,7 @@ class ConsoleDashboard:
         self.current_price = 0.0
         self.unrealized_pnl = 0.0
         self.unrealized_pnl_pct = 0.0
-        self.realised_pnl = 0.0  # Added to track realised PnL
+        self.realised_pnl = 0.0
         self.trades = []
         self.metrics = {}
         self.strategy_signals = {}
@@ -325,9 +325,9 @@ class ConsoleDashboard:
         """Draw the standard view."""
         self._draw_logo_header(max_x)
         self._draw_portfolio_info(9, max_x)
-        self._draw_metrics_simple(16, max_x)  # Adjusted start_y due to extra line in portfolio
-        self._draw_trades(23, max_x)  # Adjusted start_y
-        self._draw_signals(23, max_x // 2 + 2, max_x)  # Adjusted start_y
+        self._draw_metrics_simple(16, max_x)
+        self._draw_trades(23, max_x)
+        self._draw_signals(23, max_x // 2 + 2, max_x)
 
     def _draw_detailed_view(self, max_y: int, max_x: int):
         """Draw the detailed view."""
@@ -336,15 +336,15 @@ class ConsoleDashboard:
             self._draw_portfolio_info(9, max_x)
             
             # Only draw these sections if we have enough vertical space
-            if max_y > 21:  # Adjusted for extra line
-                self._draw_market_stats(16, max_x)  # Adjusted start_y
-                self._draw_system_stats(16, max_x // 2 + 2, max_x)  # Adjusted start_y
+            if max_y > 21:
+                self._draw_market_stats(16, max_x)
+                self._draw_system_stats(16, max_x // 2 + 2, max_x)
                 
-                if max_y > 29:  # Adjusted
-                    self._draw_candle_info(23, max_x)  # Adjusted start_y
+                if max_y > 29:
+                    self._draw_candle_info(23, max_x)
                     
-                    if max_y > 35:  # Adjusted
-                        self._draw_trades(30, max_x)  # Adjusted start_y
+                    if max_y > 35:
+                        self._draw_trades(30, max_x)
             else:
                 # Simplified view for smaller terminals
                 self.stdscr.addstr(16, 2, "Terminal too small for detailed view", curses.color_pair(4))
@@ -518,7 +518,7 @@ class ConsoleDashboard:
             
             self.stdscr.addstr(start_y + 1, start_x + 2, f"CPU Usage: {self.system_stats['cpu_usage']:.1f}%")
             self.stdscr.addstr(start_y + 2, start_x + 2, f"Memory Usage: {self.system_stats['memory_usage']:.1f}%")
-            self.stdscr.addstr(start_y + 3, start_x + 2, f"API Calls: {self.system_stats['api_calls']}")
+            self.stdscr.addstr(start_y + 3, start_x + 2, f"API Calls: {self.system-stats['api_calls']}")
             self.stdscr.addstr(start_y + 4, start_x + 2, f"Uptime: {self.system_stats['uptime']} sec")
             
             # Draw borders
@@ -532,23 +532,23 @@ class ConsoleDashboard:
             self.logger.error(f"Error drawing system stats: {e}")
 
     def _generate_mock_candle_data(self):
-        """Generate mock candle data for visualization when real data is not available."""
+        """Generate mock candle data with realistic BTC fluctuations."""
         if self.current_price <= 0:
             self.current_price = 75655.0  # Default BTC price if none available
         
         base_price = self.current_price
         self.logger.info(f"Generating mock candle data with base price: ${base_price:.2f}")
         
-        # Generate 50 candles with realistic price movements
+        # Generate 50 candles with smaller, realistic price movements
         for i in range(50):
-            # Create price movement with some randomness but trending slightly upward
-            price_change_pct = random.uniform(-0.015, 0.02)  # -1.5% to +2% change
+            # Smaller price movement: ±0.5% typical for 1m BTC candles
+            price_change_pct = random.uniform(-0.005, 0.005)
             close_price = base_price * (1 + price_change_pct)
             
-            # Create realistic OHLC values
-            high_price = close_price * (1 + random.uniform(0.001, 0.01))
-            low_price = close_price * (1 - random.uniform(0.001, 0.01))
-            open_price = close_price * (1 + random.uniform(-0.008, 0.008))
+            # Create realistic OHLC values with tighter ranges
+            high_price = close_price * (1 + random.uniform(0.0005, 0.002))
+            low_price = close_price * (1 - random.uniform(0.0005, 0.002))
+            open_price = close_price * (1 + random.uniform(-0.001, 0.001))
             
             # Ensure high is highest and low is lowest
             high_price = max(high_price, open_price, close_price)
@@ -567,12 +567,12 @@ class ConsoleDashboard:
             self.candle_history.append(candle)
             base_price = close_price  # Use close as base for next candle
         
-        # Update current candle
+        # Update current candle with smaller range
         self.current_candle = {
             'open': self.candle_history[-1]['close'],
-            'high': self.candle_history[-1]['close'] * (1 + random.uniform(0.001, 0.005)),
-            'low': self.candle_history[-1]['close'] * (1 - random.uniform(0.001, 0.005)),
-            'close': self.candle_history[-1]['close'] * (1 + random.uniform(-0.003, 0.003)),
+            'high': self.candle_history[-1]['close'] * (1 + random.uniform(0.0002, 0.0005)),
+            'low': self.candle_history[-1]['close'] * (1 - random.uniform(0.0002, 0.0005)),
+            'close': self.candle_history[-1]['close'] * (1 + random.uniform(-0.0003, 0.0003)),
             'volume': random.uniform(5, 50),
             'closed': False
         }
@@ -610,7 +610,7 @@ class ConsoleDashboard:
             self.logger.error(f"Error drawing candle info: {e}")
 
     def _draw_large_candle_chart(self, start_y: int, max_y: int, max_x: int):
-        """Draw a large candlestick chart."""
+        """Draw a large candlestick chart with adjusted scale."""
         try:
             with self.lock:
                 chart_height = max_y - start_y - 1
@@ -622,9 +622,22 @@ class ConsoleDashboard:
                     self.stdscr.addstr(start_y + chart_height // 2, max_x // 2 - 10, "No candle data available", curses.color_pair(7))
                     return
 
-                min_low = min(c['low'] for c in self.candle_history[-num_candles:])
-                max_high = max(c['high'] for c in self.candle_history[-num_candles:])
+                # Use recent close prices to set a realistic range
+                recent_closes = [c['close'] for c in self.candle_history[-num_candles:]]
+                avg_price = sum(recent_closes) / len(recent_closes) if recent_closes else self.current_price
+                # Set range to ±2% of average price (typical BTC 1m fluctuation)
+                price_padding = avg_price * 0.02
+                min_low = avg_price - price_padding
+                max_high = avg_price + price_padding
+
+                # Adjust range based on actual data, but cap at ±2%
+                actual_min = min(c['low'] for c in self.candle_history[-num_candles:])
+                actual_max = max(c['high'] for c in self.candle_history[-num_candles:])
+                min_low = max(min_low, actual_min)  # Don't go below actual min
+                max_high = min(max_high, actual_max)  # Don't exceed actual max
                 price_range = max(max_high - min_low, 1.0)
+
+                self.logger.debug(f"Chart scale: min_low=${min_low:.2f}, max_high=${max_high:.2f}, range=${price_range:.2f}")
 
                 # Draw price levels
                 for i in range(0, chart_height, 4):

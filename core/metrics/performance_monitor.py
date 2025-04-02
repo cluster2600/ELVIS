@@ -149,54 +149,73 @@ class PerformanceMonitor:
             metrics = {}
             
             # Total trades
-            metrics['total_trades'] = len(trades_df)
-            
-            # Winning trades
-            if 'pnl' in trades_df.columns:
-                winning_trades = trades_df[trades_df['pnl'] > 0]
+            # Filter for closed trades (assuming 'sell' side closes a position)
+            closed_trades_df = trades_df[trades_df['side'] == 'sell'].copy()
+
+            # Total closed trades
+            metrics['total_closed_trades'] = len(closed_trades_df)
+            metrics['total_trades'] = len(trades_df) # Keep total records added if needed
+
+            # Winning/Losing trades based on closed trades PnL
+            if 'pnl' in closed_trades_df.columns and not closed_trades_df.empty:
+                winning_trades = closed_trades_df[closed_trades_df['pnl'] > 0]
+                losing_trades = closed_trades_df[closed_trades_df['pnl'] <= 0] # Include PnL = 0 as non-winning
+
                 metrics['winning_trades'] = len(winning_trades)
-                metrics['losing_trades'] = len(trades_df) - len(winning_trades)
+                metrics['losing_trades'] = len(losing_trades)
+
+                # Win rate based on closed trades
+                metrics['win_rate'] = metrics['winning_trades'] / metrics['total_closed_trades'] * 100 if metrics['total_closed_trades'] > 0 else 0.0
+
+                # Total PnL from closed trades
+                metrics['total_pnl'] = closed_trades_df['pnl'].sum()
                 
-                # Win rate
-                metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0.0
-                
-                # Total PnL
-                metrics['total_pnl'] = trades_df['pnl'].sum()
-                
-                # Average PnL
-                metrics['avg_pnl'] = trades_df['pnl'].mean()
-                
-                # Average winning trade
-                metrics['avg_win'] = winning_trades['pnl'].mean() if len(winning_trades) > 0 else 0.0
-                
-                # Average losing trade
-                losing_trades = trades_df[trades_df['pnl'] <= 0]
-                metrics['avg_loss'] = losing_trades['pnl'].mean() if len(losing_trades) > 0 else 0.0
-                
-                # Profit factor
+                # Average PnL per closed trade
+                metrics['avg_pnl_per_closed_trade'] = metrics['total_pnl'] / metrics['total_closed_trades'] if metrics['total_closed_trades'] > 0 else 0.0
+
+                # Average winning trade PnL
+                metrics['avg_win'] = winning_trades['pnl'].mean() if not winning_trades.empty else 0.0
+
+                # Average losing trade PnL
+                metrics['avg_loss'] = losing_trades['pnl'].mean() if not losing_trades.empty else 0.0
+
+                # Profit factor based on closed trades
                 total_wins = winning_trades['pnl'].sum()
                 total_losses = abs(losing_trades['pnl'].sum())
-                metrics['profit_factor'] = total_wins / total_losses if total_losses > 0 else float('inf')
+                metrics['profit_factor'] = total_wins / total_losses if total_losses > 0 else float('inf') # Handle division by zero
                 
-                # Sharpe ratio
-                if len(self.daily_returns) > 0:
-                    daily_returns = pd.Series(self.daily_returns.values())
-                    metrics['sharpe_ratio'] = daily_returns.mean() / daily_returns.std() * np.sqrt(252) if daily_returns.std() > 0 else 0.0
-                
-                # Maximum drawdown
-                if 'cumulative_pnl' in trades_df.columns:
-                    cumulative_pnl = trades_df['cumulative_pnl'].values
-                    max_drawdown = 0.0
-                    peak = cumulative_pnl[0]
-                    
-                    for value in cumulative_pnl:
-                        if value > peak:
-                            peak = value
-                        drawdown = (peak - value) / peak if peak > 0 else 0.0
-                        max_drawdown = max(max_drawdown, drawdown)
-                    
-                    metrics['max_drawdown'] = max_drawdown
-            
+                # Sharpe ratio (remains based on daily returns)
+                metrics['sharpe_ratio'] = 0.0
+                if len(self.daily_returns) > 1: # Need at least 2 days for std dev
+                    daily_returns_series = pd.Series(self.daily_returns.values())
+                    if daily_returns_series.std() > 0:
+                         # Assuming risk-free rate is 0 for simplicity
+                         metrics['sharpe_ratio'] = daily_returns_series.mean() / daily_returns_series.std() * np.sqrt(252) # Annualized
+
+                # Maximum drawdown calculation needs cumulative PnL based on closed trades
+                closed_trades_df['cumulative_pnl'] = closed_trades_df['pnl'].cumsum()
+                cumulative_pnl = closed_trades_df['cumulative_pnl'].values
+                max_drawdown = 0.0
+                peak = cumulative_pnl[0] if len(cumulative_pnl) > 0 else 0.0
+
+                for value in cumulative_pnl:
+                    if value > peak:
+                        peak = value
+                    # Avoid division by zero if peak is zero or negative
+                    drawdown = (peak - value) / peak if peak > 0 else 0.0
+                    max_drawdown = max(max_drawdown, drawdown)
+
+                metrics['max_drawdown'] = max_drawdown * 100 # Express as percentage
+            else:
+                 # Handle case where there are trades but no PnL column or no closed trades
+                 metrics.update({
+                     'winning_trades': 0, 'losing_trades': 0, 'win_rate': 0.0,
+                     'total_pnl': 0.0, 'avg_pnl_per_closed_trade': 0.0,
+                     'avg_win': 0.0, 'avg_loss': 0.0, 'profit_factor': 0.0,
+                     'sharpe_ratio': 0.0, 'max_drawdown': 0.0
+                 })
+
+
             # Store metrics
             self.metrics = metrics
             
@@ -209,17 +228,44 @@ class PerformanceMonitor:
             
         except Exception as e:
             self.logger.error(f"Error calculating metrics: {e}")
-            return {}
-    
+            # Ensure a default dict with total_trades is returned on error after attempting calculation
+            return {'total_trades': len(self.trades) if self.trades else 0}
+
+    def _convert_numpy_types(self, obj):
+        """Recursively convert numpy types in dicts/lists to standard Python types."""
+        if isinstance(obj, dict):
+            return {k: self._convert_numpy_types(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(i) for i in obj]
+        elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+                            np.int16, np.int32, np.int64, np.uint8,
+                            np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+            # Handle potential NaN/inf values for JSON compatibility
+            if np.isnan(obj): return None # Convert NaN to null
+            if np.isinf(obj): return str(obj) # Convert inf to string 'Infinity' or '-Infinity'
+            return float(obj)
+        elif isinstance(obj, (np.ndarray,)): # Convert arrays to lists
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_)):
+            return bool(obj)
+        elif isinstance(obj, (np.void)): # Handle numpy void types if necessary
+            return None
+        return obj
+
     def _save_metrics(self) -> None:
         """
-        Save metrics to file.
+        Save metrics to file after converting numpy types.
         """
         try:
+            # Convert numpy types before saving
+            metrics_to_save = self._convert_numpy_types(self.metrics)
+
             # Save to JSON
             with open(self.metrics_file, 'w') as f:
-                json.dump(self.metrics, f, indent=2)
-            
+                json.dump(metrics_to_save, f, indent=2)
+
             self.logger.info(f"Saved metrics to {self.metrics_file}")
             
         except Exception as e:

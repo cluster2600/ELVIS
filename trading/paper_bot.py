@@ -9,9 +9,12 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+import threading # For stopping mechanism
 
-from core.data.processors.binance_processor import BinanceProcessor
-from trading.strategies.technical_strategy import TechnicalStrategy
+# Removed BinanceProcessor import, added PriceFetcher
+# from core.data.processors.binance_processor import BinanceProcessor
+from utils.price_fetcher import PriceFetcher
+from trading.strategies.base_strategy import BaseStrategy # Use base class for type hint
 from trading.risk.risk_manager import RiskManager
 from core.metrics.performance_monitor import PerformanceMonitor
 from utils.console_dashboard import ConsoleDashboardManager
@@ -35,7 +38,8 @@ class PaperBot:
         """
         # Set up logger
         self.logger = logger or logging.getLogger("ELVIS.PaperBot")
-        
+        self.stop_event = threading.Event() # For graceful shutdown
+
         # Trading parameters
         self.symbol = symbol
         self.timeframe = timeframe
@@ -47,99 +51,147 @@ class PaperBot:
         
         # Initialize components
         self.logger.info("Initializing paper trading bot...")
-        
-        # Data processor
-        self.processor = BinanceProcessor(
-            start_date=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S"),
-            end_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            time_interval=timeframe,
-            logger=self.logger
-        )
-        
+
+        # Data history (maintain state for strategy)
+        self.data_history = pd.DataFrame(columns=['date', 'open', 'high', 'low', 'close', 'volume'])
+        self.history_lock = threading.Lock() # Protect access to data_history
+
+        # Price Fetcher for real-time data (using 1m for dashboard responsiveness)
+        self.price_fetcher = PriceFetcher(self.logger, symbol=self.symbol, timeframe='1m') # Use 1m for dashboard
+        self.price_fetcher.start()
+
         # Strategy
-        if strategy is None:
-            from trading.strategies import TechnicalStrategy
-            self.strategy = TechnicalStrategy(self.logger)
-        else:
-            self.strategy = strategy
-        
+        if not isinstance(strategy, BaseStrategy):
+             self.logger.error(f"Invalid strategy object provided: {type(strategy)}. Must inherit from BaseStrategy.")
+             raise TypeError("Strategy must inherit from BaseStrategy")
+        self.strategy = strategy
+
         # Risk manager
         self.risk_manager = RiskManager(self.logger)
         
         # Performance monitor
         self.performance_monitor = PerformanceMonitor(self.logger)
         
-        # Dashboard
+        # Dashboard - Start it within the run method to ensure curses setup is correct
         self.dashboard_manager = ConsoleDashboardManager(self.logger)
-        self.dashboard_manager.start_dashboard()
+
+        self.logger.info(f"Paper trading bot initialized for {symbol} on {timeframe} timeframe with {leverage}x leverage using {self.strategy.__class__.__name__}")
+
+    def _process_new_candle(self, candle: Dict[str, Any]):
+        """Processes a new candle received from the PriceFetcher."""
+        if not candle or candle.get('close') is None or candle.get('close') <= 0:
+            self.logger.debug("Received invalid or empty candle, skipping.")
+            return
+
+        current_price = candle['close']
+        candle_time = pd.to_datetime(candle['time'], unit='ms') # Assuming time is ms timestamp
+
+        # --- Update Data History ---
+        new_data = pd.DataFrame([{
+            'date': candle_time,
+            'open': candle['open'],
+            'high': candle['high'],
+            'low': candle['low'],
+            'close': candle['close'],
+            'volume': candle['volume']
+        }])
         
-        self.logger.info(f"Paper trading bot initialized for {symbol} on {timeframe} timeframe with {leverage}x leverage")
-    
-    def run(self):
-        """
-        Run the paper trading bot.
-        """
-        self.logger.info("Starting paper trading bot...")
-        self.running = True
-        
-        try:
-            while self.running:
-                # Get latest data
-                self.logger.info("Fetching latest market data...")
-                try:
-                    data = self.processor.download_data([self.symbol])
-                    
-                    if data.empty:
-                        self.logger.warning("No data received. Generating mock data...")
-                        data = self._generate_mock_data()
-                    
-                    # Add technical indicators
-                    data = self.processor.add_technical_indicator(TECH_INDICATORS)
-                    
-                    if data.empty:
-                        self.logger.warning("No data after adding indicators. Generating mock data with indicators...")
-                        data = self._generate_mock_data_with_indicators()
-                except Exception as e:
-                    self.logger.error(f"Error fetching data: {e}")
-                    self.logger.warning("Generating mock data with indicators...")
-                    data = self._generate_mock_data_with_indicators()
-                
-                # Generate signals
-                self.logger.info("Generating trading signals...")
-                buy_signal, sell_signal = self.strategy.generate_signals(data.tail(50))
-                
-                # Check if data is empty
-                if data.empty or 'close' not in data.columns:
-                    self.logger.warning("No valid price data available. Skipping trading logic.")
-                else:
-                    # Current price
-                    current_price = data['close'].iloc[-1]
-                    
-                    # Execute trades
+        with self.history_lock:
+            # Append new candle and keep a reasonable history size (e.g., 200 candles)
+            self.data_history = pd.concat([self.data_history, new_data], ignore_index=True)
+            self.data_history = self.data_history.iloc[-200:] # Keep last 200 candles
+            
+            # Make a copy for strategy processing to avoid race conditions if needed
+            strategy_data = self.data_history.copy()
+
+        # --- Strategy Execution ---
+        if not strategy_data.empty:
+            # Add indicators (assuming strategy or a helper handles this)
+            # TODO: Need a mechanism to add indicators required by the specific strategy
+            # For now, assume strategy handles data with OHLCV
+            # Example: strategy_data = self.strategy.preprocess_data(strategy_data)
+
+            self.logger.debug(f"Generating signals with {len(strategy_data)} candles...")
+            try:
+                # Ensure enough data for the strategy (e.g., 50 candles)
+                if len(strategy_data) >= 50:
+                    buy_signal, sell_signal = self.strategy.generate_signals(strategy_data)
+
+                    # Execute trades based on signals
                     if buy_signal and self.position == 0:
-                        self.execute_buy(current_price, data.tail(20))
+                        self.execute_buy(current_price, strategy_data) # Pass historical data
                     elif sell_signal and self.position > 0:
                         self.execute_sell(current_price)
-                    
-                # Check for stop loss or take profit
-                if self.position > 0:
-                    self.check_exit_conditions(current_price)
+                else:
+                     self.logger.debug(f"Not enough data ({len(strategy_data)}/50) for signal generation.")
+
+            except Exception as e:
+                self.logger.error(f"Error during signal generation or trade execution: {e}", exc_info=True)
+
+        # --- Check Exit Conditions ---
+        if self.position > 0:
+            self.check_exit_conditions(current_price)
+
+        # --- Update Dashboard ---
+        # Pass historical data and the latest candle
+        self._update_console_dashboard(strategy_data, candle)
+
+
+    def run(self):
+        """
+        Run the paper trading bot, driven by real-time data from PriceFetcher.
+        """
+        self.logger.info("Starting paper trading bot run loop...")
+        self.running = True
+        
+        # Start the dashboard within the run loop context
+        dashboard_thread = threading.Thread(target=self.dashboard_manager.start_dashboard, daemon=True)
+        dashboard_thread.start()
+        time.sleep(1) # Give dashboard time to initialize
+
+        try:
+            while self.running and not self.stop_event.is_set():
+                # Get the latest candle from the fetcher
+                candle = self.price_fetcher.get_current_candle()
                 
-                # Update dashboard
-                self._update_console_dashboard(data, current_price)
-                
-                # Sleep
-                self.logger.info(f"Sleeping for {TRADING_CONFIG['SLEEP_INTERVAL']} seconds...")
-                time.sleep(TRADING_CONFIG['SLEEP_INTERVAL'])
-                
+                if candle:
+                    self._process_new_candle(candle)
+                else:
+                    # No new candle yet, wait briefly
+                    time.sleep(0.1) # Short sleep to prevent busy-waiting
+
+                # Check if dashboard is still running
+                if not self.dashboard_manager.is_running():
+                    self.logger.info("Dashboard closed, stopping paper bot.")
+                    self.running = False
+
         except KeyboardInterrupt:
-            self.logger.info("Paper trading bot stopped by user")
+            self.logger.info("Paper trading bot stopped by user (KeyboardInterrupt)")
         except Exception as e:
-            self.logger.error(f"Paper trading bot error: {e}")
+            self.logger.error(f"Unhandled error in paper trading bot run loop: {e}", exc_info=True)
         finally:
-            self.running = False
+            self.stop() # Ensure cleanup happens
+
+    def stop(self):
+        """Stops the bot and cleans up resources."""
+        if not self.running:
+            return
+        self.logger.info("Stopping paper trading bot...")
+        self.running = False
+        self.stop_event.set() # Signal threads to stop
+        
+        if self.price_fetcher:
+            self.price_fetcher.stop()
+            self.logger.info("Price fetcher stopped.")
+            
+        if self.dashboard_manager:
             self.dashboard_manager.stop_dashboard()
-            self.logger.info("Paper trading bot stopped")
+            self.logger.info("Dashboard manager stopped.")
+            
+        # Wait briefly for threads to exit if needed (optional)
+        # dashboard_thread.join(timeout=2) 
+        
+        self.logger.info("Paper trading bot fully stopped.")
     
     def execute_buy(self, price: float, data: pd.DataFrame):
         """
@@ -155,13 +207,21 @@ class PaperBot:
             return
         
         # Calculate volatility (using ATR if available, otherwise use a simple estimate)
-        volatility = 0.0
-        if 'atr' in data.columns:
-            volatility = data['atr'].iloc[-1]
-        else:
-            # Simple volatility estimate based on high-low range
-            volatility = (data['high'].mean() - data['low'].mean()) / data['close'].mean()
-        
+            volatility = 0.0
+        # Ensure data has enough rows and required columns
+        if not data.empty and len(data) > 1:
+            if 'atr' in data.columns and not pd.isna(data['atr'].iloc[-1]):
+                 volatility = data['atr'].iloc[-1]
+            elif all(col in data.columns for col in ['high', 'low', 'close']):
+                 # Simple volatility estimate based on recent high-low range mean
+                 recent_data = data.tail(14) # Use recent period (e.g., 14)
+                 if not recent_data.empty and recent_data['close'].mean() != 0:
+                     volatility = (recent_data['high'].mean() - recent_data['low'].mean()) / recent_data['close'].mean()
+                 else:
+                     volatility = 0.02 # Default fallback volatility (e.g., 2%)
+            else:
+                 volatility = 0.02 # Default fallback volatility
+
         # Calculate position size
         position_size = self.risk_manager.calculate_position_size(
             self.portfolio_value,
@@ -177,10 +237,22 @@ class PaperBot:
         self.entry_price = entry_price
         self.portfolio_value -= position_size * entry_price
         
-        # Calculate stop loss and take profit
-        stop_loss = self.strategy.calculate_stop_loss(data, entry_price)
-        take_profit = self.strategy.calculate_take_profit(data, entry_price)
-        
+        # Calculate stop loss and take profit using the strategy
+        # Ensure data has enough history for the strategy's calculation
+        stop_loss = self.entry_price * (1 - TRADING_CONFIG.get('STOP_LOSS_PCT', 0.01)) # Default SL
+        take_profit = self.entry_price * (1 + TRADING_CONFIG.get('TAKE_PROFIT_PCT', 0.03)) # Default TP
+        try:
+            if len(data) >= 20: # Example: Ensure enough data for strategy calculation
+                 sl = self.strategy.calculate_stop_loss(data, entry_price)
+                 tp = self.strategy.calculate_take_profit(data, entry_price)
+                 if sl is not None: stop_loss = sl
+                 if tp is not None: take_profit = tp
+            else:
+                 self.logger.warning("Not enough data for strategy-based SL/TP, using defaults.")
+        except Exception as e:
+            self.logger.error(f"Error calculating strategy SL/TP: {e}. Using defaults.", exc_info=True)
+
+
         # Log trade
         self.logger.info(f"BUY: {position_size} {self.symbol} at {entry_price} (Portfolio: ${self.portfolio_value:.2f})")
         self.logger.info(f"Stop Loss: {stop_loss} | Take Profit: {take_profit}")
@@ -246,19 +318,20 @@ class PaperBot:
         
         last_trade = self.performance_monitor.trades[-1]
         
-        # Check stop loss
-        if 'stop_loss' in last_trade and current_price <= last_trade['stop_loss']:
-            self.logger.info(f"Stop loss triggered at {current_price}")
-            self.execute_sell(current_price)
-        
-        # Check take profit
-        elif 'take_profit' in last_trade and current_price >= last_trade['take_profit']:
-            self.logger.info(f"Take profit triggered at {current_price}")
-            self.execute_sell(current_price)
-    
+        # Check stop loss (use the SL calculated during buy)
+        if 'stop_loss' in last_trade and last_trade['stop_loss'] is not None and current_price <= last_trade['stop_loss']:
+            self.logger.info(f"Stop loss triggered at {current_price} (SL: {last_trade['stop_loss']})")
+            self.execute_sell(current_price) # Sell at current market price
+
+        # Check take profit (use the TP calculated during buy)
+        elif 'take_profit' in last_trade and last_trade['take_profit'] is not None and current_price >= last_trade['take_profit']:
+            self.logger.info(f"Take profit triggered at {current_price} (TP: {last_trade['take_profit']})")
+            self.execute_sell(current_price) # Sell at current market price
+
+    # --- Mock Data Generation (Keep for potential testing, but not used in main run loop) ---
     def _generate_mock_data(self) -> pd.DataFrame:
         """
-        Generate mock data for testing.
+        Generate mock OHLCV data for testing purposes.
         
         Returns:
             pd.DataFrame: The generated mock data.
@@ -334,13 +407,13 @@ class PaperBot:
     
     def _generate_mock_data_with_indicators(self) -> pd.DataFrame:
         """
-        Generate mock data with technical indicators for testing.
-        
+        Generate mock OHLCV data with mock indicators for testing purposes.
+
         Returns:
             pd.DataFrame: The generated mock data with indicators.
         """
-        self.logger.info("Generating mock data with indicators for testing")
-        
+        self.logger.debug("Generating mock data with indicators for testing") # Changed to debug level
+
         # Create a date range
         start_date = datetime.now() - timedelta(days=30)
         end_date = datetime.now()
@@ -415,18 +488,24 @@ class PaperBot:
         
         # Create DataFrame
         df = pd.DataFrame(mock_data)
-        self.logger.info(f"Generated mock data with {len(mock_data)} candles and indicators")
+        self.logger.debug(f"Generated mock data with {len(mock_data)} candles and indicators")
         return df
-        
-    def _update_console_dashboard(self, data: pd.DataFrame, current_price: float) -> None:
+
+    # --- Dashboard Update ---
+    def _update_console_dashboard(self, history_data: pd.DataFrame, latest_candle: Dict[str, Any]) -> None:
         """
         Update the console dashboard with the latest data.
-        
+
         Args:
-            data (pd.DataFrame): The market data.
-            current_price (float): The current price.
+            history_data (pd.DataFrame): Historical market data for context/charts.
+            latest_candle (Dict[str, Any]): The most recent candle data from PriceFetcher.
         """
+        if not self.dashboard_manager or not self.dashboard_manager.is_running():
+             return # Don't update if dashboard isn't running
+
         try:
+            current_price = latest_candle['close']
+
             # Update portfolio value
             total_value = self.portfolio_value
             if self.position > 0:
@@ -441,54 +520,48 @@ class PaperBot:
                 current_price
             )
             
-            # Update metrics
+            # Update metrics for dashboard display
             metrics = {
-                'portfolio_value': total_value,
-                'position_size': self.position,
-                'entry_price': self.entry_price if self.position > 0 else 0.0,
-                'current_price': current_price,
-                'unrealized_pnl': (current_price - self.entry_price) * self.position if self.position > 0 else 0.0,
-                'unrealized_pnl_pct': ((current_price / self.entry_price) - 1) * 100 if self.position > 0 else 0.0
+                'portfolio_value': round(total_value, 2),
+                'position_size': round(self.position, 8),
+                'entry_price': round(self.entry_price, 2) if self.position > 0 else 0.0,
+                'current_price': round(current_price, 2),
+                'unrealized_pnl': round((current_price - self.entry_price) * self.position if self.position > 0 else 0.0, 2),
+                'unrealized_pnl_pct': round(((current_price / self.entry_price) - 1) * 100 if self.position > 0 and self.entry_price != 0 else 0.0, 2)
             }
-            
-            # Add performance metrics
-            if hasattr(self.performance_monitor, 'get_metrics'):
-                performance_metrics = self.performance_monitor.get_metrics()
-                metrics.update(performance_metrics)
-            
+
+            # Add performance metrics from monitor
+            performance_metrics = self.performance_monitor.get_metrics()
+            metrics.update(performance_metrics) # Overwrites if keys clash, which is fine
+
             self.dashboard_manager.update_metrics(metrics)
-            
-            # Update strategy signals
-            if hasattr(self.strategy, 'generate_signals'):
-                buy_signal, sell_signal = self.strategy.generate_signals(data.tail(50))
-                
-                strategy_signals = {
-                    self.strategy.__class__.__name__: {
-                        'buy': buy_signal,
-                        'sell': sell_signal
-                    }
-                }
-                
-                self.dashboard_manager.update_strategy_signals(strategy_signals)
-            
-            # Update market data
-            if not data.empty and 'close' in data.columns:
-                # Get the last 20 candles
-                recent_data = data.tail(20)
-                
-                # Format for dashboard
-                prices = []
-                for _, row in recent_data.iterrows():
-                    prices.append({
-                        'time': row['date'].strftime('%H:%M:%S') if isinstance(row['date'], datetime) else str(row['date']),
-                        'price': row['close']
-                    })
-                
-                market_data = {
-                    'prices': prices
-                }
-                
-                self.dashboard_manager.update_market_data(market_data)
-            
+
+            # Update strategy signals (get latest signals if possible)
+            # Note: Signals might be slightly delayed if calculated only on new candles
+            # We can potentially store the last signals generated in _process_new_candle
+            # For now, just display placeholder or last known signals
+            # Re-generating signals here might be too slow for dashboard update
+            strategy_signals = { self.strategy.__class__.__name__: {'buy': '?', 'sell': '?'} } # Placeholder
+            # TODO: Store last signals in self attributes if needed for dashboard
+            self.dashboard_manager.update_strategy_signals(strategy_signals)
+
+            # Update candle display
+            self.dashboard_manager.update_candle(latest_candle)
+
+            # Update market data chart (using historical data)
+            if not history_data.empty:
+                 # Format recent history for dashboard chart (e.g., last 60 points)
+                 chart_data = history_data.tail(60)
+                 prices = []
+                 for _, row in chart_data.iterrows():
+                     # Ensure 'date' is datetime object before formatting
+                     time_str = row['date'].strftime('%H:%M') if isinstance(row['date'], pd.Timestamp) else str(row['date'])
+                     prices.append({
+                         'time': time_str,
+                         'price': row['close']
+                     })
+                 market_data = {'prices': prices}
+                 self.dashboard_manager.update_market_data(market_data)
+
         except Exception as e:
-            self.logger.error(f"Error updating console dashboard: {e}")
+            self.logger.error(f"Error updating console dashboard: {e}", exc_info=True)

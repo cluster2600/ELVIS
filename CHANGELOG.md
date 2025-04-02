@@ -1,4 +1,33 @@
 # Changelog
+## need help
+
+**Date:** 2025-04-02
+
+**Assessment:**
+Reviewed the ELVIS project structure, configuration (`config/config.py`), entry point (`main.py`), future plans (`docs/future_improvements.md`), and existing changelog. The project has a solid modular foundation but exhibits several areas needing attention:
+
+1.  **Inconsistent Paper Trading:** The `main.py` script runs a *random* simulation for paper mode instead of using the `PaperBot` and the selected strategy with the console dashboard.
+2.  **Incomplete Models:** Several ML models (`TransformerModel`, `ReinforcementLearningModel`, etc.) appear incomplete or buggy, causing test failures noted in previous logs.
+3.  **Potential Legacy Code:** Top-level scripts might contain redundant or outdated logic compared to the structured modules.
+4.  **Test Failures:** Previous logs indicate failing tests, particularly for models.
+
+**Proposed Plan:**
+Prioritize fixing the critical issues:
+1.  **Fix Paper Trading:** Refactor `main.py` and `trading/paper_bot.py` to correctly simulate the chosen strategy in paper mode using the console dashboard.
+2.  **Fix Models:** Complete and debug the ML model implementations (`core/models/`) to ensure they pass all tests in `test_elvis.py`.
+3.  **Cleanup:** Refactor/remove legacy top-level scripts.
+4.  **Testing:** Ensure full test suite passes.
+5.  **Documentation:** Update README and add docstrings.
+
+**Questions for User/Experts:**
+- Do you agree with this assessment and prioritization?
+- Which improvement should be tackled first? (Suggest starting with #1 - Fixing Paper Trading Logic).
+- Is there any specific context regarding the random simulation in `main.py` for paper mode that I should be aware of? Was it intentional for a specific testing purpose?
+
+---
+*(Previous Entries Below)*
+---
+
 ## eureka
 
 ## [02/04/2025] - Eureka

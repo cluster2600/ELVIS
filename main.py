@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Main entry point for the ELVIS project with real-time candlestick dashboard.
+Main entry point for the ELVIS project.
+Initializes and runs the appropriate trading bot based on command-line arguments.
 """
 
 ELVIS_ASCII = r"""
@@ -15,17 +16,12 @@ ELVIS_ASCII = r"""
 import argparse
 import logging
 import sys
-import time
-import random
-import psutil
-import threading
-from datetime import datetime
+import time # Keep time for potential future use in bots
 from utils import setup_logger, print_info, print_error
-from utils.console_dashboard import ConsoleDashboardManager
-from utils.price_fetcher import PriceFetcher
 from config import API_CONFIG, TRADING_CONFIG, LOGGING_CONFIG
 
 def parse_arguments():
+    """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description='ELVIS - Enhanced Leveraged Virtual Investment System')
     parser.add_argument('--mode', type=str, choices=['live', 'backtest', 'paper'], default=TRADING_CONFIG['DEFAULT_MODE'],
                         help=f'Trading mode (default: {TRADING_CONFIG["DEFAULT_MODE"]})')
@@ -35,182 +31,110 @@ def parse_arguments():
                         help=f'Trading timeframe (default: {TRADING_CONFIG["TIMEFRAME"]})')
     parser.add_argument('--leverage', type=int, default=TRADING_CONFIG['LEVERAGE_MIN'],
                         help=f'Initial leverage (default: {TRADING_CONFIG["LEVERAGE_MIN"]})')
-    parser.add_argument('--strategy', type=str, choices=['technical', 'mean_reversion', 'trend_following', 'ema_rsi'], 
+    # Updated strategy choices based on available implementations in trading/strategies/
+    # Note: Sentiment and Grid strategies might need separate handling if they require different inputs/models
+    parser.add_argument('--strategy', type=str, 
+                        choices=['technical', 'mean_reversion', 'trend_following', 'ema_rsi', 'sentiment', 'grid'], 
                         default='technical', help='Trading strategy (default: technical)')
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default=LOGGING_CONFIG['LOG_LEVEL'],
                         help=f'Logging level (default: {LOGGING_CONFIG["LOG_LEVEL"]})')
     return parser.parse_args()
 
-def get_system_stats():
-    process = psutil.Process()
-    return {
-        'cpu_usage': psutil.cpu_percent(),
-        'memory_usage': process.memory_percent(),
-        'uptime': int(time.time() - process.create_time()),
-        'api_calls': random.randint(100, 500),
-        'last_error': None
-    }
-
 def get_strategy(strategy_name, logger):
+    """Imports and returns the specified strategy class."""
+    # Import strategies locally to avoid circular dependencies if strategies import config
     from trading.strategies import (
-        TechnicalStrategy, MeanReversionStrategy, TrendFollowingStrategy, EmaRsiStrategy
+        TechnicalStrategy, MeanReversionStrategy, TrendFollowingStrategy, EmaRsiStrategy,
+        SentimentStrategy, GridStrategy # Assuming these are implemented
     )
     strategies = {
         'technical': TechnicalStrategy,
         'mean_reversion': MeanReversionStrategy,
         'trend_following': TrendFollowingStrategy,
-        'ema_rsi': EmaRsiStrategy
+        'ema_rsi': EmaRsiStrategy,
+        'sentiment': SentimentStrategy,
+        'grid': GridStrategy
     }
     if strategy_name not in strategies:
+        # Log available strategies for clarity
+        available = ", ".join(strategies.keys())
+        logger.error(f"Invalid strategy: {strategy_name}. Available: {available}")
         raise ValueError(f"Invalid strategy: {strategy_name}")
-    return strategies[strategy_name](logger)
+    logger.info(f"Selected strategy: {strategy_name}")
+    return strategies[strategy_name](logger) # Instantiate the strategy
 
 def initialize_bot(args, logger):
-    strategy = get_strategy(args.strategy, logger)
+    """Initializes the appropriate bot based on the mode."""
+    strategy_instance = get_strategy(args.strategy, logger)
+    
     if args.mode == 'live':
         from trading.live_bot import LiveBot
-        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
+        logger.info("Initializing LiveBot...")
+        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
     elif args.mode == 'backtest':
         from trading.backtest_bot import BacktestBot
-        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
+        logger.info("Initializing BacktestBot...")
+        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
     elif args.mode == 'paper':
+        # PaperBot will now handle its own dashboard integration
         from trading.paper_bot import PaperBot
-        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy, logger=logger)
-    raise ValueError(f"Invalid mode: {args.mode}")
-
-def run_simulation(dashboard_manager, price_fetcher, logger, args):
-    """Run simulation in a separate thread."""
-    time.sleep(5)  # Wait for initial WebSocket data
-    
-    portfolio_value = 10000.0
-    position_size = 0.0
-    entry_price = 0.0
-    
-    dashboard_manager.set_testnet(True)
-    dashboard_manager.update_portfolio_value(portfolio_value)
-    
-    signals = {
-        'EMA_RSI_Strategy': {'buy': False, 'sell': False},
-        'Technical_Strategy': {'buy': False, 'sell': False},
-        'Mean_Reversion': {'buy': False, 'sell': False},
-        'Trend_Following': {'buy': False, 'sell': False}
-    }
-    metrics = {
-        'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0, 'win_rate': 0.0,
-        'profit_factor': 0.0, 'sharpe_ratio': 0.0, 'max_drawdown': 0.0, 'avg_profit': 0.0,
-        'avg_loss': 0.0, 'daily_return': 0.0, 'monthly_return': 0.0, 'yearly_return': 0.0,
-        'volatility': 0.0, 'sortino_ratio': 0.0, 'calmar_ratio': 0.0
-    }
-    
-    iteration = 0
-    while dashboard_manager.dashboard and dashboard_manager.dashboard.running:
-        iteration += 1
-        current_candle = price_fetcher.get_current_candle()
-        current_price = current_candle['close']
-        logger.debug(f"Current candle in main: {current_candle}")
-        dashboard_manager.update_candle(current_candle)
-        
-        if current_price <= 0:
-            logger.warning("No valid price data received yet.")
-            time.sleep(1)
-            continue
-        
-        if position_size == 0 and random.random() > 0.8:
-            position_size = portfolio_value / current_price * 0.1
-            entry_price = current_price
-            portfolio_value -= position_size * entry_price
-            for strategy in signals:
-                signals[strategy] = {'buy': False, 'sell': False}
-            chosen_strategy = random.choice(list(signals.keys()))
-            signals[chosen_strategy]['buy'] = True
-            dashboard_manager.add_trade({
-                'timestamp': datetime.now().isoformat(),
-                'symbol': args.symbol,
-                'side': 'buy',
-                'price': entry_price,
-                'quantity': position_size,
-                'pnl': 0.0
-            })
-            logger.info(f"BUY: {position_size:.8f} BTC at ${entry_price:.2f}")
-        elif position_size > 0 and random.random() > 0.8:
-            pnl = (current_price - entry_price) * position_size
-            portfolio_value += position_size * current_price
-            for strategy in signals:
-                signals[strategy] = {'buy': False, 'sell': False}
-            chosen_strategy = random.choice(list(signals.keys()))
-            signals[chosen_strategy]['sell'] = True
-            dashboard_manager.add_trade({
-                'timestamp': datetime.now().isoformat(),
-                'symbol': args.symbol,
-                'side': 'sell',
-                'price': current_price,
-                'quantity': position_size,
-                'pnl': pnl
-            })
-            logger.info(f"SELL: {position_size:.8f} BTC at ${current_price:.2f} (PnL: ${pnl:.2f})")
-            position_size = 0.0
-            entry_price = 0.0
-        
-        dashboard_manager.update_portfolio_value(portfolio_value)
-        dashboard_manager.update_position(position_size, entry_price, current_price)
-        dashboard_manager.update_strategy_signals(signals)
-        dashboard_manager.update_system_stats(get_system_stats())
-        
-        metrics['total_trades'] = iteration // 2
-        metrics['winning_trades'] = int(metrics['total_trades'] * random.uniform(0.5, 0.7))
-        metrics['losing_trades'] = metrics['total_trades'] - metrics['winning_trades']
-        if metrics['total_trades'] > 0:
-            metrics['win_rate'] = metrics['winning_trades'] / metrics['total_trades'] * 100
-            metrics['profit_factor'] = random.uniform(1.2, 2.8)
-            metrics['sharpe_ratio'] = random.uniform(0.8, 2.5)
-            metrics['max_drawdown'] = random.uniform(3.0, 12.0)
-        dashboard_manager.update_metrics(metrics)
-        
-        time.sleep(1)
-
-def run_dashboard_simulation(logger, args):
-    dashboard_manager = ConsoleDashboardManager(logger)
-    price_fetcher = PriceFetcher(logger, symbol=args.symbol, timeframe="1m")
-    
-    price_fetcher.start()
-    simulation_thread = threading.Thread(target=run_simulation, args=(dashboard_manager, price_fetcher, logger, args))
-    simulation_thread.daemon = True
-    simulation_thread.start()
-    
-    try:
-        dashboard_manager.start_dashboard()
-    except Exception as e:
-        logger.error(f"Dashboard failed: {e}", exc_info=True)
-    finally:
-        price_fetcher.stop()
-        dashboard_manager.stop_dashboard()
-        simulation_thread.join(timeout=2)
+        logger.info("Initializing PaperBot...")
+        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
+    else:
+        # This case should not be reachable due to argparse choices, but included for safety
+        logger.error(f"Invalid mode specified: {args.mode}")
+        raise ValueError(f"Invalid mode: {args.mode}")
 
 def main():
+    """Main execution function."""
     print(ELVIS_ASCII)
     args = parse_arguments()
-    log_level = getattr(logging, args.log_level)
-    logger = setup_logger("ELVIS", log_to_file=LOGGING_CONFIG['LOG_TO_FILE'], log_level=log_level)
     
-    if not all([API_CONFIG['BINANCE_API_KEY'], API_CONFIG['BINANCE_API_SECRET']]) and args.mode == 'live':
-        print_error(logger, "Missing API keys for live mode. Please set them in the .env file.")
-        sys.exit(1)
+    # Setup logger
+    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    logger = setup_logger("ELVIS", log_to_file=LOGGING_CONFIG.get('LOG_TO_FILE', True), log_level=log_level)
     
-    if args.mode == 'live' and not TRADING_CONFIG['PRODUCTION_MODE']:
-        print_error(logger, "PRODUCTION_MODE is disabled. Cannot run in live mode.")
-        sys.exit(1)
-    
-    try:
-        if args.mode == 'paper':
-            print_info(logger, "Running dashboard simulation in paper mode with real-time candlestick data")
-            run_dashboard_simulation(logger, args)
+    logger.info("Starting ELVIS...")
+    logger.info(f"Arguments: Mode={args.mode}, Symbol={args.symbol}, Timeframe={args.timeframe}, Strategy={args.strategy}, Leverage={args.leverage}")
+
+    # Check API keys only if running in live mode
+    if args.mode == 'live':
+        if not all([API_CONFIG.get('BINANCE_API_KEY'), API_CONFIG.get('BINANCE_API_SECRET')]):
+            print_error(logger, "Missing Binance API keys for live mode. Please set BINANCE_API_KEY and BINANCE_API_SECRET in the .env file or environment variables.")
+            sys.exit(1)
+        
+        # Check production mode flag
+        if not TRADING_CONFIG.get('PRODUCTION_MODE', False):
+            print_error(logger, "PRODUCTION_MODE is disabled in config.py. Cannot run in live mode for safety. Set PRODUCTION_MODE = True to enable live trading.")
+            sys.exit(1)
         else:
-            bot = initialize_bot(args, logger)
-            print_info(logger, f"Bot initialized in {args.mode} mode for {args.symbol} on {args.timeframe} with {args.strategy}")
-            bot.run()
+             print_info(logger, "PRODUCTION_MODE enabled. Running in live trading mode.")
+
+    elif args.mode == 'paper':
+         print_info(logger, "Running in paper trading mode.")
+         # Note: PaperBot will handle dashboard internally if needed.
+
+    elif args.mode == 'backtest':
+         print_info(logger, "Running in backtesting mode.")
+
+    try:
+        # Initialize and run the bot for the selected mode
+        bot = initialize_bot(args, logger)
+        print_info(logger, f"Bot initialized successfully for {args.mode} mode.")
+        bot.run() # Each bot class should implement its own run loop
+        logger.info(f"ELVIS {args.mode} run completed.")
+        
+    except ValueError as ve:
+        # Handle known errors like invalid strategy or mode
+        print_error(logger, f"Configuration error: {ve}")
+        sys.exit(1)
+    except ImportError as ie:
+         print_error(logger, f"Import error: {ie}. Ensure all dependencies are installed and modules exist.")
+         sys.exit(1)
     except Exception as e:
-        print_error(logger, f"Error: {e}")
+        # Catch unexpected errors during initialization or run
+        print_error(logger, f"An unexpected error occurred: {e}", exc_info=True) # Log traceback
         sys.exit(1)
 
 if __name__ == "__main__":
