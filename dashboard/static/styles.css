@@ -1,0 +1,101 @@
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+        }
+        
+        header {
+            background-color: #35424a;
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        header h1 {
+            margin-bottom: 10px;
+        }
+        
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        
+        .dashboard-row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        
+        .dashboard-card {
+            flex: 1;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 0 10px;
+            min-width: 300px;
+        }
+        
+        .dashboard-card h2 {
+            margin-bottom: 15px;
+            color: #35424a;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        table th, table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        table th {
+            background-color: #f2f2f2;
+        }
+        
+        .positive {
+            color: green;
+        }
+        
+        .negative {
+            color: red;
+        }
+        
+        footer {
+            background-color: #35424a;
+            color: #ffffff;
+            text-align: center;
+            padding: 10px;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-row {
+                flex-direction: column;
+            }
+            
+            .dashboard-card {
+                margin: 10px 0;
+            }
+        }
+        

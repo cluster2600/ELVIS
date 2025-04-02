@@ -14,6 +14,7 @@ from core.data.processors.binance_processor import BinanceProcessor
 from trading.strategies.technical_strategy import TechnicalStrategy
 from trading.risk.risk_manager import RiskManager
 from core.metrics.performance_monitor import PerformanceMonitor
+from utils.console_dashboard import ConsoleDashboardManager
 from config import TRADING_CONFIG, TECH_INDICATORS
 
 class PaperBot:
@@ -68,6 +69,10 @@ class PaperBot:
         # Performance monitor
         self.performance_monitor = PerformanceMonitor(self.logger)
         
+        # Dashboard
+        self.dashboard_manager = ConsoleDashboardManager(self.logger)
+        self.dashboard_manager.start_dashboard()
+        
         self.logger.info(f"Paper trading bot initialized for {symbol} on {timeframe} timeframe with {leverage}x leverage")
     
     def run(self):
@@ -116,9 +121,12 @@ class PaperBot:
                     elif sell_signal and self.position > 0:
                         self.execute_sell(current_price)
                     
-                    # Check for stop loss or take profit
-                    if self.position > 0:
-                        self.check_exit_conditions(current_price)
+                # Check for stop loss or take profit
+                if self.position > 0:
+                    self.check_exit_conditions(current_price)
+                
+                # Update dashboard
+                self._update_console_dashboard(data, current_price)
                 
                 # Sleep
                 self.logger.info(f"Sleeping for {TRADING_CONFIG['SLEEP_INTERVAL']} seconds...")
@@ -130,6 +138,7 @@ class PaperBot:
             self.logger.error(f"Paper trading bot error: {e}")
         finally:
             self.running = False
+            self.dashboard_manager.stop_dashboard()
             self.logger.info("Paper trading bot stopped")
     
     def execute_buy(self, price: float, data: pd.DataFrame):
@@ -290,7 +299,7 @@ class PaperBot:
         
         # Create mock data
         mock_data = []
-        base_price = 30000.0  # Starting price for BTC
+        base_price = 75655.0  # Current price for BTC (as of April 2025)
         current_price = base_price
         
         for date in dates:
@@ -366,7 +375,7 @@ class PaperBot:
         
         # Create mock data
         mock_data = []
-        base_price = 30000.0  # Starting price for BTC
+        base_price = 75655.0  # Current price for BTC (as of April 2025)
         current_price = base_price
         
         for date in dates:
@@ -408,3 +417,78 @@ class PaperBot:
         df = pd.DataFrame(mock_data)
         self.logger.info(f"Generated mock data with {len(mock_data)} candles and indicators")
         return df
+        
+    def _update_console_dashboard(self, data: pd.DataFrame, current_price: float) -> None:
+        """
+        Update the console dashboard with the latest data.
+        
+        Args:
+            data (pd.DataFrame): The market data.
+            current_price (float): The current price.
+        """
+        try:
+            # Update portfolio value
+            total_value = self.portfolio_value
+            if self.position > 0:
+                total_value += self.position * current_price
+            
+            self.dashboard_manager.update_portfolio_value(total_value)
+            
+            # Update position information
+            self.dashboard_manager.update_position(
+                self.position,
+                self.entry_price if self.position > 0 else 0.0,
+                current_price
+            )
+            
+            # Update metrics
+            metrics = {
+                'portfolio_value': total_value,
+                'position_size': self.position,
+                'entry_price': self.entry_price if self.position > 0 else 0.0,
+                'current_price': current_price,
+                'unrealized_pnl': (current_price - self.entry_price) * self.position if self.position > 0 else 0.0,
+                'unrealized_pnl_pct': ((current_price / self.entry_price) - 1) * 100 if self.position > 0 else 0.0
+            }
+            
+            # Add performance metrics
+            if hasattr(self.performance_monitor, 'get_metrics'):
+                performance_metrics = self.performance_monitor.get_metrics()
+                metrics.update(performance_metrics)
+            
+            self.dashboard_manager.update_metrics(metrics)
+            
+            # Update strategy signals
+            if hasattr(self.strategy, 'generate_signals'):
+                buy_signal, sell_signal = self.strategy.generate_signals(data.tail(50))
+                
+                strategy_signals = {
+                    self.strategy.__class__.__name__: {
+                        'buy': buy_signal,
+                        'sell': sell_signal
+                    }
+                }
+                
+                self.dashboard_manager.update_strategy_signals(strategy_signals)
+            
+            # Update market data
+            if not data.empty and 'close' in data.columns:
+                # Get the last 20 candles
+                recent_data = data.tail(20)
+                
+                # Format for dashboard
+                prices = []
+                for _, row in recent_data.iterrows():
+                    prices.append({
+                        'time': row['date'].strftime('%H:%M:%S') if isinstance(row['date'], datetime) else str(row['date']),
+                        'price': row['close']
+                    })
+                
+                market_data = {
+                    'prices': prices
+                }
+                
+                self.dashboard_manager.update_market_data(market_data)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating console dashboard: {e}")

@@ -1,0 +1,74 @@
+
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>ELVIS Dashboard</title>
+            <link rel="stylesheet" href="static/styles.css">
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        </head>
+        <body>
+            <header>
+                <h1>ELVIS Dashboard</h1>
+                <p>Enhanced Leveraged Virtual Investment System</p>
+            </header>
+            
+            <div class="dashboard-container">
+                <div class="dashboard-row">
+                    <div class="dashboard-card">
+                        <h2>Portfolio Value</h2>
+                        <canvas id="portfolioChart"></canvas>
+                    </div>
+                    <div class="dashboard-card">
+                        <h2>Performance Metrics</h2>
+                        <div id="metricsContainer"></div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-row">
+                    <div class="dashboard-card">
+                        <h2>Recent Trades</h2>
+                        <div class="table-container">
+                            <table id="tradesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Price</th>
+                                        <th>Quantity</th>
+                                        <th>PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <h2>Strategy Signals</h2>
+                        <div id="signalsContainer"></div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-row">
+                    <div class="dashboard-card">
+                        <h2>Model Performance</h2>
+                        <canvas id="modelChart"></canvas>
+                    </div>
+                    <div class="dashboard-card">
+                        <h2>Market Data</h2>
+                        <canvas id="marketChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <footer>
+                <p>ELVIS Dashboard - Last updated: <span id="lastUpdated"></span></p>
+            </footer>
+            
+            <script src="static/dashboard.js"></script>
+        </body>
+        </html>
+        

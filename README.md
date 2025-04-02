@@ -115,10 +115,60 @@ To run the bot, use the provided script:
 ./run_elvis.sh --mode paper --symbol BTCUSDT --timeframe 1h --leverage 75
 ```
 
+To run the bot with the console dashboard enabled:
+```bash
+./run_dashboard.sh
+```
+
 Available modes:
 - `live`: Live trading with real money
 - `paper`: Paper trading (simulated)
 - `backtest`: Backtesting with historical data
+
+### Console Dashboard
+ELVIS includes a real-time console dashboard for monitoring trading performance directly in your terminal:
+
+- **Portfolio Information**: Track your portfolio value, position size, and unrealized PnL
+- **Performance Metrics**: View key metrics like win rate, profit factor, and Sharpe ratio
+- **Recent Trades**: See your most recent trades with PnL information
+- **Strategy Signals**: Monitor buy/sell signals from your active strategy
+
+The console dashboard features:
+- Color-coded information (green for positive values, red for negative)
+- Real-time updates as trades are executed
+- Compact display that fits in a standard terminal window
+- Low resource usage compared to web-based dashboards
+
+To use the console dashboard:
+1. Run the bot with the dashboard enabled using `./run_dashboard.sh`
+2. The dashboard will appear directly in your terminal
+3. Press 'q' to quit the dashboard and stop the bot
+
+```
+┌─────────────────────── ELVIS Console Dashboard ───────────────────────┐
+│                                                                       │
+│ Portfolio Information                                                 │
+│   Portfolio Value: $1,250.45                                          │
+│   Position Size: 0.00125000 BTC                                       │
+│   Entry Price: $75,420.50                                             │
+│   Current Price: $75,655.24                                           │
+│                                                                       │
+│ Performance Metrics                                                   │
+│   Total Trades: 42          Win Rate: 68.5%        Profit Factor: 2.34│
+│   Winning Trades: 28        Losing Trades: 14      Sharpe Ratio: 1.87 │
+│                                                                       │
+│ Recent Trades                                                         │
+│   Time     Symbol   Side    Price       Quantity        PnL           │
+│   12:30:45 BTCUSDT  BUY     $75,420.50  0.00250000      +$58.69       │
+│   11:15:22 BTCUSDT  SELL    $75,380.75  0.00250000      -$24.75       │
+│   09:45:10 BTCUSDT  BUY     $75,310.25  0.00300000      +$103.50      │
+│                                                                       │
+│ Strategy Signals                                                      │
+│   EMA-RSI Strategy: BUY                                               │
+│   Technical Strategy: HOLD                                            │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+```
 
 ## Recent Updates  
 - **Project Renaming**: Renamed to ELVIS (Enhanced Leveraged Virtual Investment System).

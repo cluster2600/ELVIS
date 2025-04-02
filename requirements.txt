@@ -1,10 +1,10 @@
 # Core dependencies
 pandas>=2.0.0
 numpy>=1.26.0
-requests>=2.31.0
+requests>=2.31.0  # Used for API calls in PriceFetcher and other components
 python-binance>=1.0.19
 scikit-learn>=1.0.2
-tensorflow-macos==2.16.2
+tensorflow-macos==2.15.0
 tensorflow-metal>=1.1.0
 tensorflow_decision_forests==1.8.1
 streamlit>=1.38.0
@@ -57,6 +57,8 @@ dash>=2.10.0
 dash-bootstrap-components>=1.4.0
 flask>=2.3.0
 flask-socketio>=5.3.0
+windows-curses>=2.3.1; platform_system == "Windows"  # For console dashboard on Windows
+psutil>=5.9.0  # For system monitoring in console dashboard
 
 # Monte Carlo simulation
 tqdm>=4.65.0

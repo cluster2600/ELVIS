@@ -225,6 +225,18 @@ class PerformanceMonitor:
         except Exception as e:
             self.logger.error(f"Error saving metrics: {e}")
     
+    def get_metrics(self) -> Dict[str, float]:
+        """
+        Get the current performance metrics.
+        If metrics haven't been calculated yet, calculate them.
+        
+        Returns:
+            Dict[str, float]: The performance metrics.
+        """
+        if not self.metrics:
+            return self.calculate_metrics()
+        return self.metrics
+    
     def load_metrics(self) -> Dict[str, float]:
         """
         Load metrics from file.
