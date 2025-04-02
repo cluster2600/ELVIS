@@ -32,6 +32,7 @@ MODE="paper"
 SYMBOL="BTCUSDT"
 TIMEFRAME="1h"
 LEVERAGE=75
+STRATEGY="technical"
 LOG_LEVEL="INFO"
 
 # Parse command line arguments
@@ -51,6 +52,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --leverage)
             LEVERAGE="$2"
+            shift 2
+            ;;
+        --strategy)
+            STRATEGY="$2"
             shift 2
             ;;
         --log-level)
@@ -83,5 +88,5 @@ if [ "$MODE" == "live" ]; then
     sleep 5
 fi
 
-echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage..."
-python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --log-level $LOG_LEVEL
+echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage using $STRATEGY strategy..."
+python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --strategy $STRATEGY --log-level $LOG_LEVEL
