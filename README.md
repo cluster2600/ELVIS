@@ -1,5 +1,7 @@
 # ELVIS Trading System
 
+![ELVIS Logo](images/elvis.png)
+
 ELVIS (Enhanced Leveraged Virtual Investment System) is a comprehensive trading system that combines machine learning, risk management, and advanced analytics for cryptocurrency trading.
 
 ## Features
