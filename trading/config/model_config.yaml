@@ -1,0 +1,80 @@
+# Model training configuration
+
+# General settings
+model_dir: models
+log_dir: logs
+random_seed: 42
+
+# Data preparation
+feature_scaler_path: models/feature_scaler.joblib
+train_test_split: 0.8
+batch_size: 32
+
+# Transformer model configuration
+transformer:
+  input_dim: 64  # Number of input features
+  d_model: 256   # Dimension of the model
+  nhead: 8       # Number of attention heads
+  num_layers: 4  # Number of transformer layers
+  dim_feedforward: 1024  # Dimension of the feedforward network
+  dropout: 0.1   # Dropout rate
+  learning_rate: 0.0001
+  epochs: 100
+  early_stopping_patience: 10
+
+# Reinforcement learning configuration
+rl:
+  env:
+    max_steps: 1000
+    initial_balance: 10000
+    transaction_cost: 0.001
+    reward_scaling: 1.0
+    observation_space: 64  # Number of features in observation space
+    action_space: 3       # Number of possible actions (buy, sell, hold)
+    
+  agent:
+    total_timesteps: 100000
+    eval_freq: 10000
+    n_eval_episodes: 10
+    learning_rate: 0.0003
+    gamma: 0.99
+    ent_coef: 0.01
+    batch_size: 64
+    buffer_size: 100000
+    learning_starts: 1000
+    train_freq: 1
+    gradient_steps: 1
+    target_update_interval: 1000
+    exploration_fraction: 0.1
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.05
+
+# Hyperparameter optimization
+hyperparameter_optimization:
+  n_trials: 100
+  timeout: 3600  # Timeout in seconds
+  direction: minimize  # minimize or maximize
+  metric: mse  # Metric to optimize
+
+# Model evaluation
+evaluation:
+  metrics:
+    - mse
+    - mae
+    - r2
+    - sharpe_ratio
+    - max_drawdown
+    - win_rate
+  cross_validation:
+    n_splits: 5
+    test_size: 0.2
+
+# Explainable AI
+explainable_ai:
+  shap:
+    n_samples: 100
+    feature_perturbation: tree_path_dependent
+  lime:
+    n_samples: 1000
+    kernel_width: 0.75
+    discretize_continuous: true 

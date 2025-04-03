@@ -1,0 +1,135 @@
+# Data Processing Configuration
+
+# Data Source Configuration
+data_source:
+  exchange: binance
+  api_key: null  # Set your API key
+  api_secret: null  # Set your API secret
+  onchain_api_key: null  # Set your blockchain API key
+  data_dir: data
+  cache_dir: cache
+
+# Feature Engineering Configuration
+feature_engineering:
+  technical_indicators:
+    - rsi
+    - stoch
+    - macd
+    - bbands
+    - atr
+    - ema
+    - vwap
+  market_regime_features: true
+  onchain_features: true
+  orderbook_features: true
+  funding_features: true
+  feature_selection: true
+  n_features: 50
+
+# Technical Indicator Parameters
+technical_indicators:
+  rsi:
+    window: 14
+    overbought: 70
+    oversold: 30
+  stoch:
+    window: 14
+    smooth_window: 3
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+  bbands:
+    window: 20
+    std_dev: 2
+  atr:
+    window: 14
+  ema:
+    window: 20
+  vwap:
+    window: 14
+
+# Market Regime Parameters
+market_regime:
+  volatility_window: 20
+  trend_window: 50
+  momentum_window: 20
+  regime_thresholds:
+    high_volatility: 1.5
+    low_volatility: 0.5
+    high_momentum: 1.0
+    low_momentum: -1.0
+
+# On-chain Data Parameters
+onchain_data:
+  metrics:
+    - hash_rate
+    - difficulty
+    - tx_volume
+    - active_addresses
+    - mining_revenue
+  lookback_window: 30
+  update_frequency: 1h
+
+# Order Book Parameters
+orderbook:
+  depth: 20
+  update_frequency: 1m
+  metrics:
+    - bid_ask_spread
+    - order_imbalance
+    - depth_imbalance
+    - weighted_mid_price
+
+# Funding Rate Parameters
+funding_rates:
+  update_frequency: 8h
+  metrics:
+    - funding_rate
+    - predicted_funding
+    - funding_velocity
+
+# Data Quality Configuration
+data_quality:
+  handle_missing_data: true
+  detect_outliers: true
+  outlier_threshold: 3.0
+  validation_rules:
+    price:
+      min: 0
+      max: 1e6
+    volume:
+      min: 0
+    returns:
+      min: -1
+      max: 1
+    funding_rate:
+      min: -0.01
+      max: 0.01
+
+# Feature Selection Parameters
+feature_selection:
+  method: mutual_info_regression
+  n_features: 50
+  threshold: 0.01
+  scoring: f1
+  cv: 5
+
+# Data Processing Pipeline
+pipeline:
+  steps:
+    - name: handle_missing_data
+      type: imputer
+      method: knn
+      n_neighbors: 5
+    - name: detect_outliers
+      type: outlier_detector
+      method: zscore
+      threshold: 3.0
+    - name: scale_features
+      type: scaler
+      method: robust
+    - name: select_features
+      type: selector
+      method: mutual_info_regression
+      n_features: 50 

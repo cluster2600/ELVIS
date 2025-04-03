@@ -1,0 +1,50 @@
+# Risk Management Configuration
+
+# Position Sizing Parameters
+position_sizing:
+  max_position_size: 0.1  # Maximum position size as fraction of portfolio
+  min_position_size: 0.01  # Minimum position size
+  kelly_fraction: 0.5  # Fraction of Kelly criterion to use
+  volatility_scaling: true  # Whether to scale positions based on volatility
+  regime_based_scaling: true  # Whether to adjust position sizes based on market regime
+
+# Drawdown Protection Parameters
+drawdown_protection:
+  max_drawdown: 0.2  # Maximum allowed drawdown
+  circuit_breaker_levels:  # Drawdown levels for circuit breakers
+    - 0.1  # 10% drawdown
+    - 0.15  # 15% drawdown
+    - 0.2  # 20% drawdown
+  volatility_threshold: 0.3  # Volatility threshold for position scaling
+  pause_threshold: 0.4  # Volatility threshold for trading pause
+
+# Correlation Analysis Parameters
+correlation_analysis:
+  lookback_window: 60  # Days to look back for correlation calculation
+  correlation_threshold: 0.7  # Threshold for high correlation
+  min_pairs_distance: 2.0  # Minimum standard deviations for pair trading
+  rebalance_frequency: 5  # Days between correlation updates
+
+# Market Regime Parameters
+market_regime:
+  trend_window: 20  # Days for trend calculation
+  volatility_window: 20  # Days for volatility calculation
+  regime_thresholds:
+    high_volatility: 0.3
+    low_volatility: 0.15
+
+# Portfolio Optimization Parameters
+portfolio_optimization:
+  target_volatility: 0.15  # Target portfolio volatility
+  min_weight: 0.01  # Minimum weight for any asset
+  max_weight: 0.3  # Maximum weight for any asset
+  rebalance_threshold: 0.05  # Threshold for portfolio rebalancing
+
+# Risk Limits
+risk_limits:
+  max_leverage: 2.0  # Maximum allowed leverage
+  max_concentration: 0.3  # Maximum position concentration
+  max_correlation: 0.7  # Maximum allowed correlation between positions
+  max_daily_loss: 0.05  # Maximum allowed daily loss
+  max_weekly_loss: 0.1  # Maximum allowed weekly loss
+  max_monthly_loss: 0.2  # Maximum allowed monthly loss 

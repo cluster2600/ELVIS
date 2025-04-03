@@ -1,0 +1,97 @@
+# Testing and Validation Configuration
+
+# Monte Carlo Simulation Parameters
+monte_carlo:
+  n_simulations: 1000
+  confidence_level: 0.95
+  random_seed: 42
+  market_conditions:
+    - normal
+    - high_volatility
+    - low_volatility
+    - trending_up
+    - trending_down
+    - mean_reverting
+  stress_test_scenarios:
+    - flash_crash
+    - liquidity_crisis
+    - market_crash
+    - volatility_spike
+    - correlation_breakdown
+
+# Walk-Forward Analysis Parameters
+walk_forward:
+  n_splits: 5
+  train_size: 200
+  test_size: 50
+  optimization_window: 20
+  regime_based: true
+  regime_threshold: 0.7
+  optimization_method: bayesian
+  optimization_metric: sharpe_ratio
+  parameter_ranges:
+    rsi:
+      min: 10
+      max: 30
+    macd:
+      fast_period:
+        min: 8
+        max: 16
+      slow_period:
+        min: 20
+        max: 30
+      signal_period:
+        min: 5
+        max: 12
+
+# Statistical Validation Parameters
+statistical:
+  tests:
+    - sharpe_ratio
+    - sortino_ratio
+    - calmar_ratio
+    - max_drawdown
+    - var
+    - cvar
+    - white_reality_check
+  bootstrap_samples: 1000
+  significance_level: 0.05
+  metrics:
+    - returns
+    - volatility
+    - sharpe_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+
+# Performance Metrics Thresholds
+performance_thresholds:
+  min_sharpe_ratio: 1.0
+  max_drawdown: 0.2
+  min_win_rate: 0.5
+  min_profit_factor: 1.5
+  max_var: 0.05
+  max_cvar: 0.1
+
+# Visualization Parameters
+visualization:
+  plot_style: seaborn
+  color_palette: deep
+  figure_size: [12, 8]
+  save_format: png
+  dpi: 300
+  plot_types:
+    - returns_distribution
+    - drawdown_curve
+    - equity_curve
+    - parameter_sensitivity
+    - regime_performance
+
+# Output Configuration
+output:
+  results_dir: results
+  plots_dir: plots
+  reports_dir: reports
+  save_format: json
+  compression: true
+  backup: true 

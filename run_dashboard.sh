@@ -1,52 +1,78 @@
 #!/bin/bash
 
-# Run ELVIS with console dashboard enabled
-# This script runs the ELVIS bot in paper trading mode with the console dashboard enabled
-
-# ASCII Art for ELVIS
-echo " _______  _        __      __  _____   _____ "
-echo "|  ____| | |       \ \    / / |_   _| / ____|"
-echo "| |__    | |        \ \  / /    | |  | (___  "
-echo "|  __|   | |         \ \/ /     | |   \___ \ "
-echo "| |____  | |____      \  /     _| |_  ____) |"
-echo "|______| |______|      \/     |_____||_____/ "
-echo ""
-echo "Enhanced Leveraged Virtual Investment System - Console Dashboard Mode"
-echo ""
-echo "Press 'q' to quit the dashboard"
+# Print header
+echo "============================================="
+echo "Starting ELVIS Trading System Dashboard"
+echo "============================================="
 echo ""
 
-# Check if Python virtual environment exists
-VENV_DIR="venv310"
-if [ -d "$VENV_DIR" ]; then
-    echo "Using Python virtual environment: $VENV_DIR"
-    source "$VENV_DIR/bin/activate"
-else
-    echo "Warning: Python virtual environment not found. Using system Python."
-fi
-
-# Install dependencies (macOS doesn't need windows-curses)
-pip install websocket-client psutil >/dev/null 2>&1 || {
-    echo "Error: Failed to install required Python packages."
-    exit 1
+# Function to check Python version
+check_python_version() {
+    local version=$(python3.10 --version 2>&1 | awk '{print $2}')
+    if [[ $version == 3.10.* ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
-# Set working directory to nested project root
-cd /Users/maxime/BTC_BOT/BTC_BOT
+# Check if Python 3.10 is installed and is the correct version
+if ! command -v python3.10 &> /dev/null || ! check_python_version; then
+    echo "❌ Python 3.10 not found or incorrect version. Please install Python 3.10 first."
+    echo "You can install it using: brew install python@3.10"
+    echo "After installation, make sure to run: brew link python@3.10"
+    exit 1
+fi
 
-# Run the bot in paper trading mode with Ensemble strategy
-echo "Starting ELVIS in paper trading mode with Ensemble strategy..."
-# Redirect stderr to /dev/null to prevent log messages from appearing in the terminal
-python main.py --mode paper --strategy ensemble --leverage 125 --log-level INFO "$@" 2>/dev/null
+# Check if virtual environment exists
+if [ ! -d "venv310" ]; then
+    echo "❌ Virtual environment not found. Creating it..."
+    python3.10 -m venv venv310
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to create virtual environment"
+        exit 1
+    fi
+fi
 
-# Check exit status
+# Activate virtual environment
+echo "🔌 Activating virtual environment..."
+source venv310/bin/activate
 if [ $? -eq 0 ]; then
-    echo "ELVIS dashboard stopped successfully."
+    echo "✅ Virtual environment activated"
+    echo "📦 Python version: $(python --version)"
 else
-    echo "Error: ELVIS dashboard encountered an issue."
+    echo "❌ Failed to activate virtual environment"
+    exit 1
 fi
 
-# Deactivate virtual environment if it was activated
-if [ -d "$VENV_DIR" ]; then
-    deactivate
+# Install requirements if not already installed
+echo "📦 Checking requirements..."
+pip install -r requirements.txt
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to install requirements"
+    exit 1
 fi
+
+# Run the dashboard
+echo "🚀 Starting dashboard..."
+echo "📊 Mode: Paper Trading"
+echo "🤖 Strategy: Ensemble"
+echo "📈 Leverage: 125x"
+echo "📝 Log Level: INFO"
+echo "🖥️ Dashboard: Console"
+
+# Run the main script with proper arguments
+python main.py \
+    --mode paper \
+    --strategy ensemble \
+    --leverage 125 \
+    --log-level INFO \
+    --dashboard console
+
+# Deactivate virtual environment when done
+deactivate
+
+echo ""
+echo "============================================="
+echo "Dashboard Session Ended"
+echo "============================================="

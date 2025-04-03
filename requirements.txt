@@ -1,75 +1,89 @@
 # Core dependencies
-pandas>=2.0.0
-numpy>=1.26.0
-requests>=2.31.0  # Used for API calls in PriceFetcher and other components
+numpy>=1.24.3
+pandas>=2.0.3
+scikit-learn>=1.3.0
+matplotlib>=3.7.2
+seaborn>=0.12.2
+tqdm>=4.65.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+websockets>=11.0.3
+aiohttp>=3.8.5
+cryptography>=41.0.3
+pyyaml>=6.0.1
 python-binance>=1.0.19
-scikit-learn>=1.0.2
-tensorflow-macos==2.15.0 # Keep specific TF versions for macOS compatibility
-tensorflow-metal>=1.1.0
-tensorflow_decision_forests==1.8.1
-# Removed streamlit, plotly - Not used for console dashboard
-python-dotenv==1.0.0
-openai>=0.27.0 # Keep for potential future integrations? Review if unused.
-websockets>=10.3 # Used by PriceFetcher
-black==23.12.1
-pylint==3.0.3
-pytest==7.4.4
-ccxt>=4.1.87
-joblib==1.2.0
-ta-lib>=0.4.0
-yfinance>=0.2.0
-exchange_calendars>=4.5
-stockstats>=0.5.0
+ccxt>=4.1.13
+ta>=0.10.2
+pytz>=2023.3
+tzlocal>=5.0.1
+schedule>=1.2.0
+psutil>=5.9.5
+colorama>=0.4.6
+termcolor>=2.3.0
+curses-menu>=0.9.0
+python-telegram-bot>=20.6
+
+# Machine Learning
+shap>=0.42.1
+tensorflow-macos
+tensorflow-metal
+tensorflow-probability
+tensorflow-hub
+tensorflow-datasets
+tensorflow-estimator
+tensorflow-io-gcs-filesystem
+tensorflow-metadata
+tensorflow-model-optimization
+tensorflow-serving-api>=2.16.1
+tensorflow-text
+tensorflow-decision-forests>=1.8.0
+gast
+protobuf
+typing-extensions
+
+# Deep Learning
+torch>=2.0.1
+torchvision>=0.15.2
+tensorboard>=2.13.0
+
+# Reinforcement Learning
+stable-baselines3>=2.0.0
+gym>=0.26.0
+
+# Natural Language Processing
+transformers>=4.30.0
+tokenizers>=0.13.3
+
+# Explainable AI
+lime>=0.2.0.1
+plotly>=5.18.0
+
+# Testing and Development
+pytest-cov>=4.1.0
+hypothesis>=6.80.0
+sphinx>=7.1.0
+sphinx-rtd-theme>=1.2.0
+nbsphinx>=0.9.0
+pre-commit>=3.3.0
+mypy>=1.3.0
+isort>=5.12.0
+flake8>=6.0.0
+
+# Additional ML and integration packages
+openai>=0.27.0
+joblib>=1.2.0
 optuna>=3.6.0
-git+https://github.com/fracdiff/fracdiff.git@0.9.1
-ta>=0.11.0
+multiprocess>=0.70.14
 
 # Logging and notification
 colorlog>=6.8.0
-python-telegram-bot>=20.0.0 # Used by notification_utils
-
-# Ensemble models - Dependencies handled by sub-models (TF, Torch, etc.)
-# Removed ydf, coremltools
 
 # Sentiment analysis
-newsapi-python==0.2.7
+newsapi-python>=0.2.7
 nltk>=3.8.1
 textblob>=0.17.1
 tweepy>=4.14.0
 vaderSentiment>=3.3.2
 
-# Transformer models
-torch>=2.0.0
-transformers>=4.30.0
-tokenizers>=0.13.3
-
-# Reinforcement learning
-gym>=0.26.0
-stable-baselines3>=2.0.0
-tensorboard>=2.13.0
-
-# Dashboard and visualization (Console)
-matplotlib>=3.7.0 # Used for generating report plots
-seaborn>=0.12.0 # Used for generating report plots
-# Removed dash, dash-bootstrap-components, flask, flask-socketio - Not used for console dashboard
-windows-curses>=2.3.1; platform_system == "Windows"  # For console dashboard on Windows
-psutil>=5.9.0  # For system monitoring in console dashboard
-
 # Monte Carlo simulation
-tqdm>=4.65.0
-multiprocess>=0.70.14
-
-# Testing and validation
-pytest-cov>=4.1.0
-hypothesis>=6.80.0
-
-# Documentation
-sphinx>=7.1.0
-sphinx-rtd-theme>=1.2.0
-nbsphinx>=0.9.0
-
-# Development tools
-pre-commit>=3.3.0
-mypy>=1.3.0
-isort>=5.12.0
-flake8>=6.0.0
+multiprocess>=0.70.14  # Already included above, kept for clarity

@@ -18,6 +18,7 @@ import logging
 import sys
 import time
 from utils import setup_logger, print_info, print_error
+from utils.console_dashboard import ConsoleDashboardManager
 from config import API_CONFIG, TRADING_CONFIG, LOGGING_CONFIG
 
 def parse_arguments():
@@ -37,6 +38,8 @@ def parse_arguments():
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default=LOGGING_CONFIG.get('LOG_LEVEL', 'INFO'),
                         help=f'Logging level (default: {LOGGING_CONFIG["LOG_LEVEL"]})')
+    parser.add_argument('--dashboard', type=str, choices=['console', 'none'], default='none',
+                        help='Dashboard type (default: none)')
     return parser.parse_args()
 
 def get_strategy(strategy_name, logger):
@@ -58,22 +61,22 @@ def get_strategy(strategy_name, logger):
     logger.info(f"Selected strategy: {strategy_name}")
     return strategies[strategy_name](logger)
 
-def initialize_bot(args, logger):
+def initialize_bot(args, logger, dashboard_manager=None):
     """Initializes the appropriate bot based on the mode."""
     strategy_instance = get_strategy(args.strategy, logger)
     
     if args.mode == 'live':
         from trading.live_bot import LiveBot
         logger.info("Initializing LiveBot...")
-        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
+        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
     elif args.mode == 'backtest':
         from trading.backtest_bot import BacktestBot
         logger.info("Initializing BacktestBot...")
-        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
+        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
     elif args.mode == 'paper':
         from trading.paper_bot import PaperBot
         logger.info("Initializing PaperBot...")
-        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
+        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
     else:
         logger.error(f"Invalid mode specified: {args.mode}")
         raise ValueError(f"Invalid mode: {args.mode}")
@@ -87,7 +90,7 @@ def main():
     logger = setup_logger("ELVIS", log_to_file=LOGGING_CONFIG.get('LOG_TO_FILE', True), log_level=log_level)
     
     logger.info("Starting ELVIS...")
-    logger.info(f"Arguments: Mode={args.mode}, Symbol={args.symbol}, Timeframe={args.timeframe}, Strategy={args.strategy}, Leverage={args.leverage}")
+    logger.info(f"Arguments: Mode={args.mode}, Symbol={args.symbol}, Timeframe={args.timeframe}, Strategy={args.strategy}, Leverage={args.leverage}, Dashboard={args.dashboard}")
 
     if args.mode == 'live':
         if not all([API_CONFIG.get('BINANCE_API_KEY'), API_CONFIG.get('BINANCE_API_SECRET')]):
@@ -104,10 +107,24 @@ def main():
         print_info(logger, "Running in backtesting mode.")
 
     try:
-        bot = initialize_bot(args, logger)
+        # Initialize dashboard if requested
+        dashboard_manager = None
+        if args.dashboard == 'console':
+            dashboard_manager = ConsoleDashboardManager(logger)
+            print_info(logger, "Console dashboard initialized.")
+
+        bot = initialize_bot(args, logger, dashboard_manager)
         print_info(logger, f"Bot initialized successfully for {args.mode} mode.")
+        
+        # Run the bot
         bot.run()
+        
         logger.info(f"ELVIS {args.mode} run completed.")
+        
+        # Stop dashboard if it was started
+        if dashboard_manager:
+            dashboard_manager.stop_dashboard()
+            
     except ValueError as ve:
         print_error(logger, f"Configuration error: {ve}")
         sys.exit(1)

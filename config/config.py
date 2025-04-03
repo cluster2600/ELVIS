@@ -42,12 +42,14 @@ TRADING_CONFIG = {
     'DAILY_LOSS_LIMIT_USD': -500.0,
     'COOLDOWN': 3600.0,  # 1 hour
     'SLEEP_INTERVAL': 300.0,  # 5 minutes
-    'MAX_TRADES_PER_DAY': 2,
+    'MAX_TRADES_PER_DAY': 10,  # Increased from 2 to 10
     'MIN_CAPITAL_USD': 1000.0,
     'DATA_LIMIT': 200,  # Number of recent candles to fetch
     'PRODUCTION_MODE': False,  # Set to False for non-production mode
     'DEFAULT_MODE': 'paper',  # 'live', 'paper', or 'backtest'
-    'CREATE_MOCK_POSITION': True  # Create a mock position for testing the dashboard
+    'CREATE_MOCK_POSITION': True,  # Create mock positions for testing the dashboard
+    'MOCK_TRADES_COUNT': 50,  # Number of mock trades to generate
+    'MOCK_POSITIONS_COUNT': 5  # Number of mock positions to create
 }
 
 # --- Configuration Validation ---
