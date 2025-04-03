@@ -1,8 +1,25 @@
-# ELVIS Trading System
+# ELVIS: Enhanced Leveraged Virtual Investment System
 
 ![ELVIS Logo](images/elvis.png)
 
-ELVIS (Enhanced Leveraged Virtual Investment System) is a comprehensive trading system that combines machine learning, risk management, and advanced analytics for cryptocurrency trading.
+## Overview
+ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for developing and deploying cryptocurrency trading bots on Binance Futures, specifically targeting BTC/USDT. It integrates various trading strategies, machine learning models (including Random Forest, Neural Networks, Transformers, and Reinforcement Learning), risk management techniques, and performance monitoring tools.
+
+## Sources
+
+This project is inspired by and builds upon several academic papers and research:
+
+- **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.
+- **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features** by Annelotte Bonenkamp (Bachelor Thesis, University of Amsterdam, June 2021)
+- **Attention Is All You Need** by Vaswani et al. (Transformer architecture)
+- **Proximal Policy Optimization Algorithms** by Schulman et al. (PPO implementation)
+- **A Comprehensive Guide to Machine Learning for Trading** by Marcos Lopez de Prado
+
+> **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**  
+> ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.  
+> This project is for educational purposes only and is not production-ready without extensive validation.  
+> Leveraged trading carries high risk—use simulation or Binance Testnet first.  
+> To enable live trading (at your own risk), set `PRODUCTION_MODE: True` in `config/config.py`.
 
 ## Features
 
