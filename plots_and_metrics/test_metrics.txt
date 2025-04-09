@@ -1,14 +1,14 @@
 {
   "total_closed_trades": 27,
   "total_trades": 55,
-  "winning_trades": 15,
-  "losing_trades": 12,
-  "win_rate": 55.55555555555556,
-  "total_pnl": 56.44938002745118,
-  "avg_pnl_per_closed_trade": 2.090717778794488,
-  "avg_win": 5.29033947575028,
-  "avg_loss": -1.908809342400251,
-  "profit_factor": 3.464423710527508,
-  "sharpe_ratio": 12.484988107761318,
-  "max_drawdown": 482.3572143494387
+  "winning_trades": 12,
+  "losing_trades": 15,
+  "win_rate": 44.44444444444444,
+  "total_pnl": 11.66369406257245,
+  "avg_pnl_per_closed_trade": 0.4319886689841648,
+  "avg_win": 3.352239722049177,
+  "avg_loss": -1.9042121734678445,
+  "profit_factor": 1.408347144822319,
+  "sharpe_ratio": 18.926999651325126,
+  "max_drawdown": 894.4065615463371
 }

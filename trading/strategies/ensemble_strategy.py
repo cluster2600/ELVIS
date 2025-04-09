@@ -9,8 +9,8 @@ from typing import Optional
 from trading.strategies.base_strategy import BaseStrategy
 
 class EnsembleStrategy(BaseStrategy):
-    def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf", 
-                 coreml_model_path="/Users/maxime/BTC_BOT/models/trading_model.mlmodel", 
+    def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
+                 coreml_model_path="/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage",
                  mlx_url="http://localhost:1234/v1/completions"):
         super().__init__(logger)
         self.logger = logger
@@ -22,7 +22,7 @@ class EnsembleStrategy(BaseStrategy):
         self.CLASSES = ["BUY", "HOLD", "SELL"]
         self.mlx_url = mlx_url
         self.mlx_available = False
-        
+
         # Load models during initialization
         self.logger.debug(f"Current working directory: {os.getcwd()}")
         self.logger.debug(f"Attempting to load YDF model from: {ydf_model_path}")
@@ -35,7 +35,8 @@ class EnsembleStrategy(BaseStrategy):
         try:
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"YDF model file not found at {model_path}")
-            ydf_model = ydf.from_tensorflow_decision_forests(model_path)
+            # Use ydf.load_model() for native YDF models instead of from_tensorflow_decision_forests
+            ydf_model = ydf.load_model(model_path)
             self.logger.info(f"YDF model loaded from {model_path}")
             return ydf_model
         except Exception as e:
@@ -45,6 +46,8 @@ class EnsembleStrategy(BaseStrategy):
     def _load_coreml_model(self, model_path):
         """Load the Core ML model."""
         try:
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Core ML model file not found at {model_path}")
             nn_model = ct.models.MLModel(model_path)
             self.logger.info(f"Core ML model loaded from {model_path}")
             return nn_model
@@ -75,7 +78,7 @@ class EnsembleStrategy(BaseStrategy):
         try:
             headers = {"Content-Type": "application/json"}
             data = {
-                "model": "llama-3.2-3b-instruct",  # Specify the model
+                "model": "llama-3.2-3b-instruct",
                 "prompt": prompt,
                 "max_tokens": max_tokens,
                 "temperature": 0.7,
@@ -109,23 +112,29 @@ class EnsembleStrategy(BaseStrategy):
         # YDF prediction
         try:
             ydf_input = pd.DataFrame([features])
-            ydf_pred = self.ydf_model.predict(ydf_input)
-            ydf_probs = ydf_pred[0] if isinstance(ydf_pred[0], np.ndarray) else np.array([0.0, 1.0, 0.0])
+            ydf_pred = self.ydf_model.predict(ydf_input)  # YDF prediction
+            # Ensure ydf_pred is in probability format (depends on model output)
+            if isinstance(ydf_pred, dict) and "probabilities" in ydf_pred:
+                ydf_probs = np.array([ydf_pred["probabilities"][cls] for cls in self.CLASSES], dtype=np.float32)
+            elif isinstance(ydf_pred, np.ndarray) and ydf_pred.shape[-1] == len(self.CLASSES):
+                ydf_probs = ydf_pred[0]
+            else:
+                ydf_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # Default to HOLD
         except Exception as e:
             self.logger.warning(f"YDF prediction failed: {e}")
-            ydf_probs = np.array([0.0, 1.0, 0.0])
+            ydf_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
         # Core ML NN prediction
         try:
-            nn_input = np.array([[features[col] for col in self.REQUIRED_FEATURES]], dtype=np.float32)
-            nn_pred = self.nn_model.predict({"input": nn_input})
+            nn_input = {col: np.array([features[col]], dtype=np.float32) for col in self.REQUIRED_FEATURES}
+            nn_pred = self.nn_model.predict(nn_input)
             probs_dict = nn_pred.get('classLabel_probs', nn_pred.get('classProbability', {}))
             nn_probs = np.array([probs_dict.get(cls, 0.0) for cls in self.CLASSES], dtype=np.float32)
             if nn_probs.sum() == 0:
-                nn_probs = np.array([0.0, 1.0, 0.0])
+                nn_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
         except Exception as e:
             self.logger.warning(f"Core ML prediction failed: {e}")
-            nn_probs = np.array([0.0, 1.0, 0.0])
+            nn_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
 
         # MLX prediction
         prompt = f"Market features: {', '.join(f'{k}: {v}' for k, v in features.items())}. Recommend: BUY, SELL, or HOLD."
@@ -150,8 +159,8 @@ class EnsembleStrategy(BaseStrategy):
     def calculate_position_size(self, portfolio_value: float, price: float, volatility: float) -> float:
         """Calculate position size (default implementation, can be overridden by bot)."""
         risk_per_trade = portfolio_value * 0.01  # 1% risk
-        position_size = risk_per_trade / price
-        self.logger.debug(f"Calculated position size: {position_size} based on portfolio: {portfolio_value}, price: {price}")
+        position_size = risk_per_trade / (price * volatility)  # Adjust for volatility
+        self.logger.debug(f"Calculated position size: {position_size} based on portfolio: {portfolio_value}, price: {price}, volatility: {volatility}")
         return position_size
 
     def calculate_stop_loss(self, data: pd.DataFrame, entry_price: float) -> Optional[float]:

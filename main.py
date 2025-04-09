@@ -16,10 +16,10 @@ ELVIS_ASCII = r"""
 import argparse
 import logging
 import sys
-import time
 from utils import setup_logger, print_info, print_error
 from utils.console_dashboard import ConsoleDashboardManager
 from config import API_CONFIG, TRADING_CONFIG, LOGGING_CONFIG
+from utils.trading_dashboard import TradingDashboard  # Import the enhanced dashboard
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -34,12 +34,12 @@ def parse_arguments():
                         help=f'Initial leverage (default: {TRADING_CONFIG["LEVERAGE_MIN"]})')
     parser.add_argument('--strategy', type=str,
                         choices=['technical', 'mean_reversion', 'trend_following', 'ema_rsi', 'ensemble'],
-                        default='technical', help='Trading strategy (default: technical)')
+                        default='ema_rsi', help='Trading strategy (default: ema_rsi)')
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default=LOGGING_CONFIG.get('LOG_LEVEL', 'INFO'),
                         help=f'Logging level (default: {LOGGING_CONFIG["LOG_LEVEL"]})')
-    parser.add_argument('--dashboard', type=str, choices=['console', 'none'], default='none',
-                        help='Dashboard type (default: none)')
+    parser.add_argument('--dashboard', type=str, choices=['console', 'none'], default='console',
+                        help='Dashboard type (default: console)')
     return parser.parse_args()
 
 def get_strategy(strategy_name, logger):
@@ -74,9 +74,8 @@ def initialize_bot(args, logger, dashboard_manager=None):
         logger.info("Initializing BacktestBot...")
         return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
     elif args.mode == 'paper':
-        from trading.paper_bot import PaperBot
-        logger.info("Initializing PaperBot...")
-        return PaperBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
+        logger.info("Initializing TradingDashboard for paper mode...")
+        return TradingDashboard(logger=logger, dashboard_manager=dashboard_manager)
     else:
         logger.error(f"Invalid mode specified: {args.mode}")
         raise ValueError(f"Invalid mode: {args.mode}")
@@ -102,7 +101,7 @@ def main():
         else:
             print_info(logger, "PRODUCTION_MODE enabled. Running in live trading mode.")
     elif args.mode == 'paper':
-        print_info(logger, "Running in paper trading mode.")
+        print_info(logger, "Running in paper trading mode with enhanced dashboard.")
     elif args.mode == 'backtest':
         print_info(logger, "Running in backtesting mode.")
 

@@ -36,16 +36,25 @@ class BinanceProcessor(BaseProcessor):
         super().__init__('binance', start_date, end_date, time_interval, logger, **kwargs)
         
         # Initialize Binance client
-        self.api_key = API_CONFIG['BINANCE_API_KEY']
-        self.api_secret = API_CONFIG['BINANCE_API_SECRET']
+        self.api_key = API_CONFIG.get('BINANCE_API_KEY') # Use .get() for safety
+        self.api_secret = API_CONFIG.get('BINANCE_API_SECRET') # Use .get() for safety
+        self.exchange = None # Initialize as None
         
-        # Initialize exchange
-        self.exchange = ccxt.binance({
-            'apiKey': self.api_key,
-            'secret': self.api_secret,
-            'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
-        })
+        # Initialize exchange only if API keys are provided
+        if self.api_key and self.api_secret:
+            try:
+                self.exchange = ccxt.binance({
+                    'apiKey': self.api_key,
+                    'secret': self.api_secret,
+                    'enableRateLimit': True,
+                    'options': {'defaultType': 'future'}
+                })
+                self.logger.info("Initialized Binance exchange client.")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Binance exchange: {e}")
+                self.exchange = None # Ensure it's None on failure
+        else:
+            self.logger.warning("Binance API keys not found. Exchange client not initialized. Mock data will be used.")
         
         # Cache for OHLCV data to reduce API calls
         self.ohlcv_cache = {}
@@ -83,13 +92,17 @@ class BinanceProcessor(BaseProcessor):
                     ohlcv = self.ohlcv_cache[ticker]
                 else:
                     self.logger.info(f"Fetching OHLCV data for {ticker}")
-                    # Fetch OHLCV data
-                    ohlcv = self.exchange.fetch_ohlcv(
-                        ticker, 
-                        timeframe=self.time_interval,
-                        since=start_timestamp,
-                        limit=1000  # Maximum limit
-                    )
+                    # Fetch OHLCV data only if exchange is initialized
+                    if self.exchange:
+                        ohlcv = self.exchange.fetch_ohlcv(
+                            ticker,
+                            timeframe=self.time_interval,
+                            since=start_timestamp,
+                            limit=1000  # Maximum limit
+                        )
+                    else:
+                        self.logger.warning(f"Binance exchange not initialized. Cannot fetch real data for {ticker}.")
+                        ohlcv = [] # Ensure ohlcv is empty list if exchange is None
                     
                 # If no data was returned, generate mock data
                 if not ohlcv:

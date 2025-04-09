@@ -34,6 +34,7 @@ TIMEFRAME="1h"
 LEVERAGE=75
 STRATEGY="technical"
 LOG_LEVEL="INFO"
+DASHBOARD="none" # Add dashboard argument
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -62,12 +63,22 @@ while [[ $# -gt 0 ]]; do
             LOG_LEVEL="$2"
             shift 2
             ;;
+        --dashboard) # Add dashboard parsing
+            DASHBOARD="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
             ;;
     esac
 done
+
+# Set defaults for dashboard run
+MODE="paper"
+STRATEGY="ensemble"
+LEVERAGE=125
+DASHBOARD="console" # Enable console dashboard
 
 # Check if trying to run in live mode
 if [ "$MODE" == "live" ]; then
@@ -88,5 +99,5 @@ if [ "$MODE" == "live" ]; then
     sleep 5
 fi
 
-echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage using $STRATEGY strategy..."
-python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --strategy $STRATEGY --log-level $LOG_LEVEL
+echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage using $STRATEGY strategy with $DASHBOARD dashboard..."
+python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --strategy $STRATEGY --log-level $LOG_LEVEL --dashboard $DASHBOARD

@@ -22,24 +22,25 @@ colorama>=0.4.6
 termcolor>=2.3.0
 curses-menu>=0.9.0
 python-telegram-bot>=20.6
+rich>=13.7.0
 
 # Machine Learning
 shap>=0.42.1
-tensorflow-macos
-tensorflow-metal
-tensorflow-probability
-tensorflow-hub
-tensorflow-datasets
-tensorflow-estimator
-tensorflow-io-gcs-filesystem
-tensorflow-metadata
-tensorflow-model-optimization
-tensorflow-serving-api>=2.16.1
-tensorflow-text
-tensorflow-decision-forests>=1.8.0
-gast
-protobuf
-typing-extensions
+tensorflow-macos==2.16.2
+tensorflow-metal==1.2.0
+tensorflow-probability # Keep unpinned for now unless conflict arises
+tensorflow-hub # Keep unpinned for now unless conflict arises
+tensorflow-datasets # Keep unpinned for now unless conflict arises
+tensorflow-estimator # Keep unpinned for now unless conflict arises
+tensorflow-io-gcs-filesystem # Keep unpinned for now unless conflict arises
+tensorflow-metadata # Keep unpinned for now unless conflict arises
+tensorflow-model-optimization # Keep unpinned for now unless conflict arises
+tensorflow-serving-api==2.16.1
+# tensorflow-text==2.18.1 # Removed due to incompatibility with TF 2.16.2 on macos-arm
+# tensorflow-decision-forests==1.8.1 # Removed due to incompatibility with TF 2.16.2
+gast!=0.5.0,!=0.5.1,!=0.5.2,>=0.2.1 # Keep broad for now
+protobuf!=4.21.0,!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5,<5.0.0dev,>=3.20.3 # Keep broad for now
+typing-extensions # Keep unpinned for now unless conflict arises
 
 # Deep Learning
 torch>=2.0.1

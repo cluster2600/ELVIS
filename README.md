@@ -132,6 +132,18 @@ def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict =
 
 ```
 elvis-trading/
+## Changelog
+
+### Recent Updates (within 48 hours)
+- config/config.py: Updated configuration settings
+- utils/trading_dashboard.py: Modified trading dashboard functionality
+- utils/console_dashboard.py: Improved console dashboard features
+- test_binance_api.py: Updated Binance API tests
+- test_symbols.py: Modified symbol tests
+- trading/strategies/ensemble_strategy.py: Enhanced ensemble strategy
+- trading/execution/binance_executor.py: Improved Binance execution
+- trading/scripts/dashboard.py: Updated dashboard script
+- trading/scripts/run_dashboard.py: Modified dashboard run script
 ├── trading/
 │   ├── models/
 │   │   ├── transformer_models.py

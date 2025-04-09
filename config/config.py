@@ -1,31 +1,19 @@
 """
 Configuration module for the ELVIS project.
 This module centralizes all configuration parameters for the project.
-
-ELVIS: Enhanced Leveraged Virtual Investment System
-"""
-
-# ASCII Art for ELVIS
-ELVIS_ASCII = r"""
-  _____ _     _      _____ 
- |  ___| |   (_)    /     \
- | |   | |__  _    /_______\
- | |   | '_ \| |   |  ***  | 
- | |___| | | | |   |_______|
- |_____|_| |_|_|   |  ***  |
-Enhanced Leveraged Virtual Investment System
 """
 
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 # API Configuration
 API_CONFIG = {
     'BINANCE_API_KEY': os.getenv('BINANCE_API_KEY'),
     'BINANCE_API_SECRET': os.getenv('BINANCE_API_SECRET'),
+    'TESTNET_FUTURES_API': os.getenv('TESTNET_FUTURES_API'),  # Updated for futures testnet
+    'TESTNET_FUTURES_SECRET': os.getenv('TESTNET_FUTURES_SECRET'),  # Updated for futures testnet
     'TELEGRAM_TOKEN': os.getenv('TELEGRAM_TOKEN'),
     'TELEGRAM_CHAT_ID': os.getenv('TELEGRAM_CHAT_ID')
 }
@@ -40,19 +28,18 @@ TRADING_CONFIG = {
     'TAKE_PROFIT_PCT': 0.03,
     'DAILY_PROFIT_TARGET_USD': 1000.0,
     'DAILY_LOSS_LIMIT_USD': -500.0,
-    'COOLDOWN': 3600.0,  # 1 hour
-    'SLEEP_INTERVAL': 300.0,  # 5 minutes
-    'MAX_TRADES_PER_DAY': 10,  # Increased from 2 to 10
+    'COOLDOWN': 3600.0,
+    'SLEEP_INTERVAL': 300.0,
+    'MAX_TRADES_PER_DAY': 10,
     'MIN_CAPITAL_USD': 1000.0,
-    'DATA_LIMIT': 200,  # Number of recent candles to fetch
-    'PRODUCTION_MODE': False,  # Set to False for non-production mode
-    'DEFAULT_MODE': 'paper',  # 'live', 'paper', or 'backtest'
-    'CREATE_MOCK_POSITION': True,  # Create mock positions for testing the dashboard
-    'MOCK_TRADES_COUNT': 50,  # Number of mock trades to generate
-    'MOCK_POSITIONS_COUNT': 5  # Number of mock positions to create
+    'DATA_LIMIT': 200,
+    'PRODUCTION_MODE': False,  # Keep False for testnet
+    'DEFAULT_MODE': 'paper',
+    'CREATE_MOCK_POSITION': True,
+    'MOCK_TRADES_COUNT': 50,
+    'MOCK_POSITIONS_COUNT': 5
 }
 
-# --- Configuration Validation ---
 def validate_config():
     """Basic validation for critical config values."""
     assert 1 <= TRADING_CONFIG['LEVERAGE_MIN'] <= 125, "LEVERAGE_MIN must be between 1 and 125"
@@ -68,15 +55,17 @@ def validate_config():
     assert TRADING_CONFIG['SLEEP_INTERVAL'] > 0, "SLEEP_INTERVAL must be positive"
     assert TRADING_CONFIG['DATA_LIMIT'] > 10, "DATA_LIMIT should be reasonably large (e.g., > 10)"
     assert TRADING_CONFIG['DEFAULT_MODE'] in ['live', 'paper', 'backtest'], "Invalid DEFAULT_MODE"
+    if not TRADING_CONFIG.get('PRODUCTION_MODE', False):
+        assert API_CONFIG['TESTNET_FUTURES_API'], "TESTNET_FUTURES_API must be set in .env for testnet mode"
+        assert API_CONFIG['TESTNET_FUTURES_SECRET'], "TESTNET_FUTURES_SECRET must be set in .env for testnet mode"
+    else:
+        assert API_CONFIG['BINANCE_API_KEY'], "BINANCE_API_KEY must be set in .env for production mode"
+        assert API_CONFIG['BINANCE_API_SECRET'], "BINANCE_API_SECRET must be set in .env for production mode"
 
-# Run validation on import
 validate_config()
-# --- End Validation ---
 
-# Technical Indicators
 TECH_INDICATORS = ['rsi', 'macd', 'dx', 'obv']
 
-# Backtesting Configuration
 BACKTEST_CONFIG = {
     'TRADE_START_DATE': "2023-01-01",
     'TRADE_END_DATE': "2023-01-31",
@@ -87,7 +76,6 @@ BACKTEST_CONFIG = {
     ]
 }
 
-# File Paths
 FILE_PATHS = {
     'TRAIN_RESULTS_DIR': './train_results/',
     'DATA_DIR': './data/trade_data/',
@@ -98,7 +86,6 @@ FILE_PATHS = {
     'DASHBOARD_DIR': './dashboard/'
 }
 
-# Logging Configuration
 LOGGING_CONFIG = {
     'LOG_LEVEL': 'INFO',
     'LOG_TO_FILE': True

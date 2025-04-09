@@ -1,21 +1,12 @@
 #!/bin/bash
-
-# Print header
 echo "============================================="
 echo "Starting ELVIS Trading System Dashboard"
 echo "============================================="
 echo ""
-
-# Get the directory where the script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-# Add the project root to PYTHONPATH
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
-
-# Run the dashboard script
 echo "🚀 Starting dashboard..."
-./trading/scripts/run_dashboard.sh
-
+python3 "$SCRIPT_DIR/run_dashboard.py"
 echo ""
 echo "============================================="
 echo "Dashboard Session Ended"

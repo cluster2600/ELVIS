@@ -13,7 +13,7 @@ import threading
 from utils.price_fetcher import PriceFetcher
 from trading.strategies.base_strategy import BaseStrategy
 from trading.risk.risk_manager import RiskManager
-from trading.performance_monitor import PerformanceMonitor
+from core.metrics.performance_monitor import PerformanceMonitor # Corrected import path
 from config import TRADING_CONFIG
 import psutil
 
@@ -367,7 +367,7 @@ class PaperBot:
             unrealized_pnl_pct = (unrealized_pnl / (self.entry_price * self.position)) * 100 if self.position != 0 else 0.0
             
             # Get performance metrics
-            performance_metrics = self.performance_monitor.get_performance_metrics()
+            performance_metrics = self.performance_monitor.calculate_metrics()
             
             # Update dashboard metrics
             metrics = {
@@ -380,16 +380,15 @@ class PaperBot:
                 'total_trades': len(self.performance_monitor.trades),
                 'winning_trades': sum(1 for t in self.performance_monitor.trades if t.get('pnl', 0) > 0),
                 'losing_trades': sum(1 for t in self.performance_monitor.trades if t.get('pnl', 0) < 0),
-                'win_rate': performance_metrics['win_rate'] * 100,
-                'profit_factor': performance_metrics['profit_factor'],
-                'sharpe_ratio': performance_metrics['sharpe_ratio'],
-                'max_drawdown': performance_metrics['max_drawdown'],
+                'win_rate': performance_metrics.get('win_rate', 0.0) * 100,
+                'profit_factor': performance_metrics.get('profit_factor', 0.0),
+                'sharpe_ratio': performance_metrics.get('sharpe_ratio', 0.0),
+                'max_drawdown': performance_metrics.get('max_drawdown', 0.0),
                 'market_regime': 'Bullish' if current_price > self.entry_price else 'Bearish' if current_price < self.entry_price else 'Neutral',
                 'regime_confidence': 0.75,  # Placeholder for actual confidence calculation
                 'cpu_usage': psutil.cpu_percent(),
                 'memory_usage': psutil.virtual_memory().percent,
-                'uptime': int(time.time() - self.start_time),
-                'api_calls': self.price_fetcher.api_calls
+                'uptime': int(time.time() - self.start_time)
             }
             self.dashboard_manager.update_metrics(metrics)
             
