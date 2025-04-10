@@ -22,6 +22,7 @@ import os
 from .transformer_models import FinancialTransformer
 from .rl_agents import MultiAgentTradingSystem
 from .explainable_ai import ModelExplainer, SHAPExplainer, LIMEExplainer
+from .ensemble_models import StackingEnsemble, WeightedEnsemble, NeuralEnsemble
 
 class ModelTrainer:
     """Handles model training, validation, and evaluation."""
@@ -43,54 +44,61 @@ class ModelTrainer:
         os.makedirs(self.model_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
         
+        # Initialize ensemble models
+        self.ensemble_models = {
+            'stacking': StackingEnsemble(config.get('stacking_config', {})),
+            'weighted': WeightedEnsemble(config.get('weighted_config', {})),
+            'neural': NeuralEnsemble(config.get('neural_config', {}))
+        }
+        
     def prepare_data(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Prepare data for training.
         
         Args:
-            data: DataFrame containing features and target
+            data: DataFrame containing the training data
             
         Returns:
-            Tuple of (X, y) numpy arrays
+            Tuple of (X, y) arrays
         """
-        try:
-            # Split features and target
-            X = data.drop(columns=['target']).values
-            y = data['target'].values
-            
-            # Normalize features
-            self.feature_scaler = joblib.load(os.path.join(self.model_dir, 'feature_scaler.joblib'))
-            X = self.feature_scaler.transform(X)
-            
-            return X, y
-        except Exception as e:
-            self.logger.error(f"Error preparing data: {str(e)}")
-            raise
-            
+        # Extract features and target
+        features = self.config.get('features', [])
+        target = self.config.get('target', 'price')
+        
+        X = data[features].values
+        y = data[target].values
+        
+        return X, y
+        
     def create_data_loaders(self, X: np.ndarray, y: np.ndarray, 
                           batch_size: int = 32) -> Tuple[DataLoader, DataLoader]:
         """
-        Create PyTorch data loaders for training and validation.
+        Create train and validation data loaders.
         
         Args:
-            X: Feature matrix
-            y: Target vector
-            batch_size: Batch size for data loading
+            X: Feature array
+            y: Target array
+            batch_size: Batch size for training
             
         Returns:
             Tuple of (train_loader, val_loader)
         """
-        # Convert to PyTorch tensors
-        X_tensor = torch.FloatTensor(X)
-        y_tensor = torch.FloatTensor(y)
+        # Split data into train and validation
+        tscv = TimeSeriesSplit(n_splits=5)
+        train_idx, val_idx = list(tscv.split(X))[-1]
         
-        # Create dataset
-        dataset = TensorDataset(X_tensor, y_tensor)
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
         
-        # Split into train and validation
-        train_size = int(0.8 * len(dataset))
-        val_size = len(dataset) - train_size
-        train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+        # Create datasets
+        train_dataset = TensorDataset(
+            torch.FloatTensor(X_train),
+            torch.FloatTensor(y_train)
+        )
+        val_dataset = TensorDataset(
+            torch.FloatTensor(X_val),
+            torch.FloatTensor(y_val)
+        )
         
         # Create data loaders
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -98,6 +106,119 @@ class ModelTrainer:
         
         return train_loader, val_loader
         
+    def train_ensemble(self, X: np.ndarray, y: np.ndarray) -> Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]]:
+        """
+        Train all ensemble models.
+        
+        Args:
+            X: Feature array
+            y: Target array
+            
+        Returns:
+            Dictionary of trained ensemble models
+        """
+        trained_models = {}
+        
+        for name, model in self.ensemble_models.items():
+            self.logger.info(f"Training {name} ensemble model...")
+            model.fit(X, y)
+            trained_models[name] = model
+            
+        return trained_models
+        
+    def evaluate_ensemble(self, models: Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]],
+                         X: np.ndarray, y: np.ndarray) -> Dict[str, Dict[str, float]]:
+        """
+        Evaluate ensemble models.
+        
+        Args:
+            models: Dictionary of trained ensemble models
+            X: Feature array
+            y: Target array
+            
+        Returns:
+            Dictionary of evaluation metrics for each model
+        """
+        results = {}
+        
+        for name, model in models.items():
+            predictions = model.predict(X)
+            
+            metrics = {
+                'mse': mean_squared_error(y, predictions),
+                'mae': mean_absolute_error(y, predictions),
+                'r2': r2_score(y, predictions)
+            }
+            
+            results[name] = metrics
+            
+        return results
+        
+    def save_ensemble(self, models: Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]],
+                     path: Optional[str] = None):
+        """
+        Save trained ensemble models.
+        
+        Args:
+            models: Dictionary of trained ensemble models
+            path: Optional path to save models
+        """
+        if path is None:
+            path = os.path.join(self.model_dir, 'ensemble_models')
+            
+        os.makedirs(path, exist_ok=True)
+        
+        for name, model in models.items():
+            model_path = os.path.join(path, f'{name}_model.joblib')
+            joblib.dump(model, model_path)
+            
+    def load_ensemble(self, path: Optional[str] = None) -> Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]]:
+        """
+        Load trained ensemble models.
+        
+        Args:
+            path: Optional path to load models from
+            
+        Returns:
+            Dictionary of loaded ensemble models
+        """
+        if path is None:
+            path = os.path.join(self.model_dir, 'ensemble_models')
+            
+        loaded_models = {}
+        
+        for name in self.ensemble_models.keys():
+            model_path = os.path.join(path, f'{name}_model.joblib')
+            if os.path.exists(model_path):
+                loaded_models[name] = joblib.load(model_path)
+                
+        return loaded_models
+        
+    def explain_ensemble(self, models: Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]],
+                        X: np.ndarray, feature_names: List[str]) -> Dict[str, Dict]:
+        """
+        Generate explanations for ensemble models.
+        
+        Args:
+            models: Dictionary of trained ensemble models
+            X: Feature array
+            feature_names: List of feature names
+            
+        Returns:
+            Dictionary of explanations for each model
+        """
+        explanations = {}
+        
+        for name, model in models.items():
+            if isinstance(model, NeuralEnsemble):
+                explainer = SHAPExplainer(model.models[0], feature_names, X[:100])
+            else:
+                explainer = LIMEExplainer(model.models[0], feature_names, X)
+                
+            explanations[name] = explainer.explain(X)
+            
+        return explanations
+
     def train_transformer(self, train_loader: DataLoader, val_loader: DataLoader,
                          model_config: Dict) -> FinancialTransformer:
         """

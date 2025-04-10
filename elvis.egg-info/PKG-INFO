@@ -1,0 +1,36 @@
+Metadata-Version: 2.4
+Name: elvis
+Version: 0.1.0
+Summary: Enhanced Leveraged Virtual Investment System
+Requires-Python: >=3.8
+License-File: LICENSE
+Requires-Dist: python-binance
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: ta-lib
+Requires-Dist: psutil
+Requires-Dist: python-dotenv
+Requires-Dist: prometheus-client
+Requires-Dist: rich
+Requires-Dist: curses-menu
+Requires-Dist: requests
+Requires-Dist: websocket-client
+Requires-Dist: scikit-learn
+Requires-Dist: tensorflow-macos>=2.16.2; platform_system == "Darwin" and platform_machine == "arm64"
+Requires-Dist: tensorflow>=2.16.2; platform_system != "Darwin" or platform_machine != "arm64"
+Requires-Dist: transformers
+Requires-Dist: torch
+Requires-Dist: gym
+Requires-Dist: stable-baselines3
+Requires-Dist: dash
+Requires-Dist: flask
+Requires-Dist: plotly
+Requires-Dist: pytest
+Requires-Dist: pytest-cov
+Requires-Dist: hypothesis
+Requires-Dist: pre-commit
+Requires-Dist: mypy
+Requires-Dist: isort
+Requires-Dist: flake8
+Dynamic: license-file
+Dynamic: requires-python

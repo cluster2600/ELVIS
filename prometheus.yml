@@ -6,3 +6,5 @@ scrape_configs:
   - job_name: 'elvis'
     static_configs:
       - targets: ['localhost:8000']  # ELVIS will expose metrics here
+    metrics_path: '/metrics'  # Standard Prometheus metrics endpoint
+    scheme: 'http'

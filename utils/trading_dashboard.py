@@ -15,6 +15,7 @@ import curses
 from logging.handlers import RotatingFileHandler
 from binance.client import Client
 from datetime import datetime, timedelta
+import os
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent
@@ -280,10 +281,29 @@ class ConsoleDashboard:
             pass
 
 class TradingDashboard:
-    def __init__(self, logger=None, dashboard_manager=None):
-        self.logger = logger or logging.getLogger(__name__)
-        self.dashboard_manager = dashboard_manager
-        self.logger.info("Starting dashboard initialization")
+    def __init__(self, strategy, risk_manager=None, mode='live'):
+        """Initialize the trading dashboard with strategy and risk manager."""
+        self.strategy = strategy
+        self.risk_manager = risk_manager or AdvancedRiskManager()
+        self.mode = mode
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize Binance client
+        self.client = Client(
+            api_key=os.getenv('BINANCE_API_KEY'),
+            api_secret=os.getenv('BINANCE_API_SECRET'),
+            testnet=(mode != 'live')
+        )
+        
+        # Initialize performance monitor
+        self.performance_monitor = PerformanceMonitor()
+        
+        # Initialize metrics
+        self._initialize_metrics()
+        
+        self.logger.info(f"TradingDashboard initialized in {mode} mode")
+        self.logger.info(f"Using strategy: {strategy.__class__.__name__}")
+        self.logger.info(f"Using risk manager: {self.risk_manager.__class__.__name__}")
         
         self.executor = BinanceExecutor(self.logger)
         self.executor.initialize()
@@ -292,63 +312,6 @@ class TradingDashboard:
         self.is_testnet = not TRADING_CONFIG.get('PRODUCTION_MODE', False)
         self.logger.info(f"Running in {'Testnet' if self.is_testnet else 'Production'} mode")
         
-        self.performance_monitor = PerformanceMonitor(self.logger)
-        
-        # Initialize configuration with expanded data structures
-        self.config = {
-            'PRODUCTION_MODE': not self.is_testnet,
-            'portfolio_value': 0.0,
-            'available_margin': 0.0,
-            'current_price': 0.0,
-            'spot_price': 0.0,
-            'price_spread': 0.0,
-            'order_book': {'bids': [], 'asks': []},
-            'indicators': {},
-            'leverage': self.executor.current_leverage,
-            'funding_rate': 0.0,
-            'total_trades': 0,
-            'winning_trades': 0,
-            'losing_trades': 0,
-            'cpu_usage': 0.0,
-            'memory_usage': 0.0,
-            'uptime': 0,
-            'price_history': deque(maxlen=50),
-            'volume_history': deque(maxlen=50),
-            'recent_trades': deque(maxlen=10),
-            'open_positions': [],
-            'local_positions': [],  # Persistent simulated positions
-            'pending_orders': [],
-            'liquidation_price': 0.0,
-            'unrealized_pnl': 0.0,
-            'realized_pnl': 0.0,
-            'account_risk_level': 'LOW',
-            'daily_return': 0.0,
-            'weekly_return': 0.0,
-            'sharpe_ratio': 0.0,
-            'win_rate': 0.0,
-            'max_drawdown': 0.0,
-            'sentiment': {
-                'funding_rate': 0.0,
-                'open_interest': 0.0,
-                'long_short_ratio': 0.0,
-                'fear_greed_index': 50
-            },
-            'alerts': [],
-            'candlestick_data': {
-                '1m': deque(maxlen=100),
-                '5m': deque(maxlen=100),
-                '15m': deque(maxlen=100),
-                '1h': deque(maxlen=100),
-                '1d': deque(maxlen=100)
-            },
-            'futures_contracts': {
-                'weekly': {'price': 0.0, 'expiry': ''},
-                'monthly': {'price': 0.0, 'expiry': ''},
-                'quarterly': {'price': 0.0, 'expiry': ''}
-            }
-        }
-        
-        self.logger.info("Dashboard initialized")
         self.trade_size = 0.002
         self.ema_short_period = 9
         self.ema_long_period = 21
@@ -436,68 +399,101 @@ class TradingDashboard:
             curses.endwin()
             self.logger.info("Trading dashboard stopped")
             
-    def _update_all_data(self) -> None:
-        self.logger.info("Updating all data from Binance")
-        self.config['PRODUCTION_MODE'] = not self.is_testnet
-        
+    def _update_all_data(self):
+        """Update all market data and check for trading signals."""
         try:
-            account = self.executor.client.account()
-            self.config['portfolio_value'] = float(account['totalWalletBalance'])
-            self.config['available_margin'] = float(account['availableBalance'])
-            PORTFOLIO_VALUE_GAUGE.set(self.config['portfolio_value'])
-        except Exception as e:
-            self.logger.error(f"Failed to fetch account info: {e}")
-        
-        symbol = 'BTCUSDT'
-        try:
-            # Fetch current price
-            ticker = self.executor.client.mark_price(symbol=symbol)
-            self.config['current_price'] = float(ticker['markPrice'])
-            self.config['price_history'].append(self.config['current_price'])
-            PRICE_GAUGE.set(self.config['current_price'])
+            # Get account information
+            account = self.client.get_account()
+            self.balance = float(account['totalWalletBalance'])
             
-            # Fetch spot price
-            spot_ticker = self.spot_client.get_symbol_ticker(symbol=symbol)
-            self.config['spot_price'] = float(spot_ticker['price'])
+            # Get current price
+            current_price = float(self.client.get_symbol_ticker(symbol=TRADING_CONFIG['SYMBOL'])['price'])
             
-            # Calculate price spread
-            self.config['price_spread'] = self.config['current_price'] - self.config['spot_price']
+            # Get order book data
+            order_book = self.client.get_order_book(symbol=TRADING_CONFIG['SYMBOL'])
             
-            # Fetch order book
-            order_book = self.executor.client.depth(symbol=symbol, limit=5)
-            self.config['order_book'] = {'bids': order_book['bids'], 'asks': order_book['asks']}
-            
-            # Calculate and set order book metrics
+            # Calculate order book metrics
             bids = order_book['bids']
             asks = order_book['asks']
-            
-            ORDER_BOOK_BIDS_GAUGE.set(len(bids))
-            ORDER_BOOK_ASKS_GAUGE.set(len(asks))
-            
             bid_volume = sum(float(bid[1]) for bid in bids)
             ask_volume = sum(float(ask[1]) for ask in asks)
+            spread = float(asks[0][0]) - float(bids[0][0])
+            
+            # Update order book metrics
+            ORDER_BOOK_BIDS_GAUGE.set(len(bids))
+            ORDER_BOOK_ASKS_GAUGE.set(len(asks))
             ORDER_BOOK_BID_VOLUME_GAUGE.set(bid_volume)
             ORDER_BOOK_ASK_VOLUME_GAUGE.set(ask_volume)
+            ORDER_BOOK_SPREAD_GAUGE.set(spread)
             
-            if bids and asks:
-                best_bid = float(bids[0][0])
-                best_ask = float(asks[0][0])
-                spread = best_ask - best_bid
-                ORDER_BOOK_SPREAD_GAUGE.set(spread)
+            # Get funding rate
+            funding_rate = float(self.client.futures_funding_rate(symbol=TRADING_CONFIG['SYMBOL'])[0]['fundingRate'])
             
-            # Fetch funding rate
-            funding = self.executor.client.funding_rate(symbol=symbol, limit=1)
-            self.config['funding_rate'] = float(funding[0]['fundingRate']) * 100
-            FUNDING_RATE_GAUGE.set(self.config['funding_rate'])
+            # Get positions
+            positions = self.client.get_position_risk(symbol=TRADING_CONFIG['SYMBOL'])
+            current_position = None
             
-            # Fetch futures contracts
-            self._update_futures_contracts(symbol)
+            for position in positions:
+                if float(position['positionAmt']) != 0:
+                    current_position = position
+                    break
             
-            # Fetch candlestick data for different timeframes
-            self._update_candlestick_data(symbol)
+            # Handle entry price with fallback
+            if current_position:
+                entry_price = None
+                for field in ['avgPrice', 'entryPrice', 'price']:
+                    if field in current_position:
+                        entry_price = float(current_position[field])
+                        break
+                
+                if entry_price is None:
+                    self.logger.warning("Could not find entry price in position data")
+                    return
+                
+                self.current_position = {
+                    'size': float(current_position['positionAmt']),
+                    'entry_price': entry_price,
+                    'unrealized_pnl': float(current_position['unRealizedProfit'])
+                }
+            else:
+                self.current_position = None
+            
+            # Get pending orders
+            pending_orders = self.client.get_open_orders(symbol=TRADING_CONFIG['SYMBOL'])
+            pending_buy_orders = [order for order in pending_orders if order['side'] == 'BUY']
+            pending_sell_orders = [order for order in pending_orders if order['side'] == 'SELL']
+            
+            # Update pending orders metrics
+            PENDING_ORDERS_GAUGE.set(len(pending_orders))
+            PENDING_ORDERS_BUY_GAUGE.set(len(pending_buy_orders))
+            PENDING_ORDERS_SELL_GAUGE.set(len(pending_sell_orders))
+            
+            # Update performance metrics
+            self.performance_monitor.update_metrics(current_price)
+            
+            # Get strategy signals
+            buy_signal, sell_signal = self.strategy.generate_signals(current_price)
+            
+            # Log signals for debugging
+            self.logger.debug(f"Strategy signals - Buy: {buy_signal}, Sell: {sell_signal}")
+            
+            # Execute trades based on signals
+            if buy_signal and not self.current_position:
+                quantity = self.strategy.calculate_position_size(current_price)
+                self.logger.info(f"Buy signal generated - Quantity: {quantity}, Price: {current_price}")
+                self.execute_buy(quantity)
+            
+            elif sell_signal and self.current_position:
+                quantity = abs(self.current_position['size'])
+                self.logger.info(f"Sell signal generated - Quantity: {quantity}, Price: {current_price}")
+                self.execute_sell(quantity)
+            
+            # Update CPU and memory usage
+            CPU_USAGE_GAUGE.set(psutil.cpu_percent())
+            MEMORY_USAGE_GAUGE.set(psutil.Process().memory_percent())
             
         except Exception as e:
-            self.logger.error(f"Failed to fetch market data: {e}", exc_info=True)
+            self.logger.error(f"Error updating data: {str(e)}")
         
         self._update_technical_indicators()
         try:
@@ -561,7 +557,7 @@ class TradingDashboard:
                 pos['pnl'] = (pos['current_price'] - pos['entry_price']) * pos['size']
         
         try:
-            trades = self.executor.client.get_account_trades(symbol=symbol, limit=10)
+            trades = self.executor.client.get_account_trades(symbol=TRADING_CONFIG['SYMBOL'], limit=10)
             self.config['recent_trades'] = deque([
                 {
                     'symbol': t['symbol'],
@@ -590,18 +586,8 @@ class TradingDashboard:
         except Exception as e:
             self.logger.error(f"Failed to fetch recent trades: {e}", exc_info=True)
         
-        # Update pending orders metrics
-        pending_buy_orders = [o for o in self.pending_orders if o['side'] == 'buy']
-        pending_sell_orders = [o for o in self.pending_orders if o['side'] == 'sell']
-        PENDING_ORDERS_GAUGE.set(len(self.pending_orders))
-        PENDING_ORDERS_BUY_GAUGE.set(len(pending_buy_orders))
-        PENDING_ORDERS_SELL_GAUGE.set(len(pending_sell_orders))
-        
-        # Update performance metrics
-        self._update_performance_metrics()
-        
         # Update sentiment data
-        self._update_sentiment_data(symbol)
+        self._update_sentiment_data(TRADING_CONFIG['SYMBOL'])
         
         # Check alerts
         self._check_alerts()
@@ -1153,6 +1139,76 @@ class TradingDashboard:
         except Exception as e:
             self.logger.error(f"Error generating signals: {e}")
             return False, False
+
+    def execute_buy(self, quantity=None):
+        """Execute a buy order with risk management."""
+        try:
+            if self.mode != 'live':
+                self.logger.warning("Not in live mode - skipping trade execution")
+                return False
+
+            # Get current market data
+            current_price = float(self.client.get_symbol_ticker(symbol=TRADING_CONFIG['SYMBOL'])['price'])
+            
+            # Calculate quantity if not provided
+            if quantity is None:
+                quantity = self.strategy.calculate_position_size(current_price)
+            
+            # Check risk manager conditions
+            if not self.risk_manager.can_open_position(quantity, current_price):
+                self.logger.warning("Risk manager blocked trade execution")
+                return False
+            
+            # Execute the trade
+            order = self.client.create_order(
+                symbol=TRADING_CONFIG['SYMBOL'],
+                side='BUY',
+                type='MARKET',
+                quantity=quantity
+            )
+            
+            self.logger.info(f"Buy order executed: {order}")
+            self.performance_monitor.record_trade('BUY', quantity, current_price)
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error executing buy order: {str(e)}")
+            return False
+
+    def execute_sell(self, quantity=None):
+        """Execute a sell order with risk management."""
+        try:
+            if self.mode != 'live':
+                self.logger.warning("Not in live mode - skipping trade execution")
+                return False
+
+            # Get current market data
+            current_price = float(self.client.get_symbol_ticker(symbol=TRADING_CONFIG['SYMBOL'])['price'])
+            
+            # Calculate quantity if not provided
+            if quantity is None:
+                quantity = self.strategy.calculate_position_size(current_price)
+            
+            # Check risk manager conditions
+            if not self.risk_manager.can_close_position(quantity, current_price):
+                self.logger.warning("Risk manager blocked trade execution")
+                return False
+            
+            # Execute the trade
+            order = self.client.create_order(
+                symbol=TRADING_CONFIG['SYMBOL'],
+                side='SELL',
+                type='MARKET',
+                quantity=quantity
+            )
+            
+            self.logger.info(f"Sell order executed: {order}")
+            self.performance_monitor.record_trade('SELL', quantity, current_price)
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error executing sell order: {str(e)}")
+            return False
 
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)

@@ -5,8 +5,9 @@ import ydf
 import requests
 import coremltools as ct
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from trading.strategies.base_strategy import BaseStrategy
+from trading.models.ensemble_models import StackingEnsemble, WeightedEnsemble, NeuralEnsemble
 
 class EnsembleStrategy(BaseStrategy):
     def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
@@ -23,7 +24,12 @@ class EnsembleStrategy(BaseStrategy):
         self.mlx_url = mlx_url
         self.mlx_available = False
 
-        # Load models during initialization
+        # Initialize ensemble models
+        self.stacking_ensemble = StackingEnsemble()
+        self.weighted_ensemble = WeightedEnsemble()
+        self.neural_ensemble = NeuralEnsemble()
+
+        # Load legacy models
         self.logger.debug(f"Current working directory: {os.getcwd()}")
         self.logger.debug(f"Attempting to load YDF model from: {ydf_model_path}")
         self.ydf_model = self._load_ydf_model(ydf_model_path)
@@ -100,61 +106,85 @@ class EnsembleStrategy(BaseStrategy):
         return "HOLD"
 
     def generate_signals(self, data):
-        """Generate trading signals using the ensemble model."""
+        """Generate trading signals using the enhanced ensemble model."""
         if isinstance(data, pd.DataFrame) and not data.empty:
             features = data.iloc[-1].to_dict()
-            features['price'] = features.get('close', 0.0)  # Map 'close' to 'price'
+            features['price'] = features.get('close', 0.0)
         else:
             features = data if isinstance(data, dict) else {}
 
         features = self._ensure_required_features(features)
+        feature_array = np.array([[v for v in features.values()]])
 
+        # Get predictions from legacy models
+        legacy_predictions = self._get_legacy_predictions(features)
+        
+        # Get predictions from new ensemble models
+        stacking_pred = self.stacking_ensemble.predict(feature_array)
+        weighted_pred = self.weighted_ensemble.predict(feature_array)
+        neural_pred = self.neural_ensemble.predict(feature_array)
+
+        # Combine all predictions
+        all_predictions = [
+            legacy_predictions['ydf'],
+            legacy_predictions['nn'],
+            stacking_pred,
+            weighted_pred,
+            neural_pred
+        ]
+        if self.mlx_available:
+            all_predictions.append(legacy_predictions['mlx'])
+
+        # Calculate final ensemble prediction
+        avg_probs = np.mean([pred for pred in all_predictions if pred is not None], axis=0)
+        decision_idx = np.argmax(avg_probs)
+        decision = self.CLASSES[decision_idx]
+        confidence = float(avg_probs[decision_idx])
+
+        self.logger.debug(f"Enhanced ensemble predictions - Legacy: {legacy_predictions}")
+        self.logger.debug(f"Stacking: {stacking_pred}, Weighted: {weighted_pred}, Neural: {neural_pred}")
+        self.logger.info(f"Final ensemble decision: {decision}, Confidence: {confidence:.4f}")
+        
+        return {"signal": decision, "confidence": confidence}
+
+    def _get_legacy_predictions(self, features) -> Dict[str, np.ndarray]:
+        """Get predictions from legacy models."""
+        predictions = {}
+        
         # YDF prediction
         try:
             ydf_input = pd.DataFrame([features])
-            ydf_pred = self.ydf_model.predict(ydf_input)  # YDF prediction
-            # Ensure ydf_pred is in probability format (depends on model output)
+            ydf_pred = self.ydf_model.predict(ydf_input)
             if isinstance(ydf_pred, dict) and "probabilities" in ydf_pred:
-                ydf_probs = np.array([ydf_pred["probabilities"][cls] for cls in self.CLASSES], dtype=np.float32)
+                predictions['ydf'] = np.array([ydf_pred["probabilities"][cls] for cls in self.CLASSES])
             elif isinstance(ydf_pred, np.ndarray) and ydf_pred.shape[-1] == len(self.CLASSES):
-                ydf_probs = ydf_pred[0]
+                predictions['ydf'] = ydf_pred[0]
             else:
-                ydf_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # Default to HOLD
+                predictions['ydf'] = np.array([0.0, 1.0, 0.0])
         except Exception as e:
             self.logger.warning(f"YDF prediction failed: {e}")
-            ydf_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+            predictions['ydf'] = np.array([0.0, 1.0, 0.0])
 
         # Core ML NN prediction
         try:
             nn_input = {col: np.array([features[col]], dtype=np.float32) for col in self.REQUIRED_FEATURES}
             nn_pred = self.nn_model.predict(nn_input)
             probs_dict = nn_pred.get('classLabel_probs', nn_pred.get('classProbability', {}))
-            nn_probs = np.array([probs_dict.get(cls, 0.0) for cls in self.CLASSES], dtype=np.float32)
-            if nn_probs.sum() == 0:
-                nn_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+            predictions['nn'] = np.array([probs_dict.get(cls, 0.0) for cls in self.CLASSES])
+            if predictions['nn'].sum() == 0:
+                predictions['nn'] = np.array([0.0, 1.0, 0.0])
         except Exception as e:
             self.logger.warning(f"Core ML prediction failed: {e}")
-            nn_probs = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+            predictions['nn'] = np.array([0.0, 1.0, 0.0])
 
         # MLX prediction
-        prompt = f"Market features: {', '.join(f'{k}: {v}' for k, v in features.items())}. Recommend: BUY, SELL, or HOLD."
-        mlx_output = self._mlx_generate(prompt)
-        mlx_decision = self._parse_mlx_decision(mlx_output)
-        mlx_probs = np.array([1.0 if cls == mlx_decision else 0.0 for cls in self.CLASSES], dtype=np.float32)
-
-        # Ensemble with available models
-        available_probs = [ydf_probs, nn_probs]
         if self.mlx_available:
-            available_probs.append(mlx_probs)
-        avg_probs = np.mean(available_probs, axis=0)
-        decision_idx = np.argmax(avg_probs)
-        decision = self.CLASSES[decision_idx]
-        confidence = avg_probs[decision_idx]
-
-        self.logger.debug(f"YDF: {ydf_probs}, NN: {nn_probs}, MLX: {mlx_probs}, Avg: {avg_probs}")
-        self.logger.info(f"Ensemble decision: {decision}, Confidence: {confidence:.4f}")
+            prompt = f"Market features: {', '.join(f'{k}: {v}' for k, v in features.items())}. Recommend: BUY, SELL, or HOLD."
+            mlx_output = self._mlx_generate(prompt)
+            mlx_decision = self._parse_mlx_decision(mlx_output)
+            predictions['mlx'] = np.array([1.0 if cls == mlx_decision else 0.0 for cls in self.CLASSES])
         
-        return {"signal": decision, "confidence": float(confidence)}
+        return predictions
 
     def calculate_position_size(self, portfolio_value: float, price: float, volatility: float) -> float:
         """Calculate position size (default implementation, can be overridden by bot)."""

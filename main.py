@@ -30,6 +30,7 @@ from prometheus_client import start_http_server, Gauge, Counter
 from utils import setup_logger, print_info, print_error
 from config import API_CONFIG, TRADING_CONFIG, LOGGING_CONFIG
 from utils.trading_dashboard import TradingDashboard
+from trading.risk.advanced_risk_manager import AdvancedRiskManager
 
 # Load environment variables from .env file
 load_dotenv()
@@ -115,27 +116,51 @@ def get_strategy(strategy_name, logger):
         available = ", ".join(strategies.keys())
         logger.error(f"Invalid strategy: {strategy_name}. Available: {available}")
         raise ValueError(f"Invalid strategy: {strategy_name}")
+    
     logger.info(f"Selected strategy: {strategy_name}")
+    
+    # Initialize strategy with appropriate parameters
+    if strategy_name == 'ensemble':
+        # Load model paths from environment or use defaults
+        ydf_model_path = os.getenv('YDF_MODEL_PATH', "/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf")
+        coreml_model_path = os.getenv('COREML_MODEL_PATH', "/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage")
+        mlx_url = os.getenv('MLX_URL', "http://localhost:1234/v1/completions")
+        
+        return strategies[strategy_name](
+            logger=logger,
+            ydf_model_path=ydf_model_path,
+            coreml_model_path=coreml_model_path,
+            mlx_url=mlx_url
+        )
+    
     return strategies[strategy_name](logger)
 
-def initialize_bot(args, logger):
-    """Initializes the appropriate bot based on the mode."""
-    strategy_instance = get_strategy(args.strategy, logger)
-    
-    if args.mode == 'live':
-        from trading.live_bot import LiveBot
-        logger.info("Initializing LiveBot...")
-        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
-    elif args.mode == 'backtest':
-        from trading.backtest_bot import BacktestBot
-        logger.info("Initializing BacktestBot...")
-        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
-    elif args.mode == 'paper':
-        logger.info("Initializing TradingDashboard for paper mode with Prometheus...")
-        return TradingDashboardWithDB(args.symbol, args.timeframe, args.leverage, strategy_instance, logger)
-    else:
-        logger.error(f"Invalid mode specified: {args.mode}")
-        raise ValueError(f"Invalid mode: {args.mode}")
+def initialize_bot(strategy_class, mode='live'):
+    """Initialize the trading bot with the specified strategy and mode."""
+    try:
+        # Initialize the advanced risk manager
+        risk_manager = AdvancedRiskManager(
+            max_position_size=TRADING_CONFIG['MAX_POSITION_SIZE'],
+            max_daily_trades=TRADING_CONFIG['MAX_DAILY_TRADES'],
+            max_daily_loss=TRADING_CONFIG['MAX_DAILY_LOSS'],
+            max_drawdown=TRADING_CONFIG['MAX_DRAWDOWN'],
+            risk_per_trade=TRADING_CONFIG['RISK_PER_TRADE']
+        )
+        
+        # Initialize the strategy
+        strategy = strategy_class()
+        
+        # Initialize the bot with the strategy and risk manager
+        bot = TradingDashboard(
+            strategy=strategy,
+            risk_manager=risk_manager,
+            mode=mode
+        )
+        
+        return bot
+    except Exception as e:
+        print_error(f"Failed to initialize bot: {str(e)}")
+        sys.exit(1)
 
 class TradingDashboardWithDB(TradingDashboard):
     """Enhanced TradingDashboard with database and Prometheus integration."""
@@ -614,7 +639,7 @@ def main():
         print_info(logger, "Running in backtesting mode.")
 
     try:
-        bot = initialize_bot(args, logger)
+        bot = initialize_bot(get_strategy(args.strategy, logger), args.mode)
         print_info(logger, f"Bot initialized successfully for {args.mode} mode.")
         bot.run()
         logger.info(f"ELVIS {args.mode} run completed.")

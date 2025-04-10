@@ -1,0 +1,32 @@
+python-binance
+pandas
+numpy
+ta-lib
+psutil
+python-dotenv
+prometheus-client
+rich
+curses-menu
+requests
+websocket-client
+scikit-learn
+transformers
+torch
+gym
+stable-baselines3
+dash
+flask
+plotly
+pytest
+pytest-cov
+hypothesis
+pre-commit
+mypy
+isort
+flake8
+
+[:platform_system != "Darwin" or platform_machine != "arm64"]
+tensorflow>=2.16.2
+
+[:platform_system == "Darwin" and platform_machine == "arm64"]
+tensorflow-macos>=2.16.2
