@@ -130,59 +130,87 @@ def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict =
 
 ## Project Structure
 
-```
-elvis-trading/
-## Changelog
+The ELVIS project is structured into several key directories and files. Below is an overview of the main components and their interactions.
 
-### Recent Updates (within 48 hours)
-- config/config.py: Updated configuration settings
-- utils/trading_dashboard.py: Modified trading dashboard functionality
-- utils/console_dashboard.py: Improved console dashboard features
-- test_binance_api.py: Updated Binance API tests
-- test_symbols.py: Modified symbol tests
-- trading/strategies/ensemble_strategy.py: Enhanced ensemble strategy
-- trading/execution/binance_executor.py: Improved Binance execution
-- trading/scripts/dashboard.py: Updated dashboard script
-- trading/scripts/run_dashboard.py: Modified dashboard run script
-├── trading/
-│   ├── models/
-│   │   ├── transformer_models.py
-│   │   ├── rl_agents.py
-│   │   └── explainable_ai.py
-│   ├── risk_management/
-│   │   └── risk_manager.py
-│   ├── data/
-│   │   └── data_processor.py
-│   ├── testing/
-│   │   └── strategy_validator.py
-│   ├── config/
-│   │   ├── model_config.yaml
-│   │   ├── risk_config.yaml
-│   │   ├── data_config.yaml
-│   │   └── validation_config.yaml
-│   └── scripts/
-│       ├── train_models.py
-│       └── validate_strategy.py
-├── examples/
-│   └── simple_strategy.py
-├── setup.py
-└── README.md
-```
+### Main Components:
+
+1. **`main.py`**: The entry point of the application. It initializes and runs the appropriate trading bot based on command-line arguments.
+2. **`utils`**: Contains utility functions and classes.
+   - `console_dashboard.py`: Provides a console-based dashboard for monitoring trading activity.
+   - `trading_dashboard.py`: Provides a trading dashboard with real-time data and performance metrics.
+3. **`config`**: Contains configuration settings for the application.
+4. **`trading`**: Contains modules related to trading strategies and execution.
+   - `strategies`: Contains various trading strategies.
+     - `base_strategy.py`: Defines a base class for trading strategies.
+     - `technical_strategy.py`, `mean_reversion_strategy.py`, `trend_following_strategy.py`, `ema_rsi_strategy.py`, `ensemble_strategy.py`: Implement specific trading strategies.
+   - `execution`: Contains execution strategies.
+     - `base_executor.py`: Defines a base class for execution strategies.
+     - `binance_executor.py`: Implements a Binance execution strategy.
+5. **`core`**: Contains core functionality.
+   - `data/processors`: Contains data processing modules.
+     - `base_processor.py`: Defines a base class for data processors.
+     - `binance_processor.py`: Implements a Binance data processor.
+   - `models`: Contains machine learning models.
+     - `base_model.py`: Defines a base class for machine learning models.
+     - `ensemble_model.py`: Implements an ensemble model.
+
+### Dependency Map:
+
+- `main.py`:
+  - Imports from `utils`: `setup_logger`, `console_dashboard`, `trading_dashboard`
+  - Imports from `config`: Configuration settings
+  - Imports from `trading.strategies`: Various trading strategies
+  - Initializes and runs the trading bot based on command-line arguments
 
 ## Dependencies
 
-- Python >= 3.10
-- numpy
-- pandas
-- scipy
-- scikit-learn
-- matplotlib
-- seaborn
-- tqdm
-- rich
-- pyyaml
-- ccxt
-- ta
+### Core Dependencies
+- `Python >= 3.10`
+- `numpy`: For numerical computations
+- `pandas`: For data manipulation and analysis
+- `scipy`: For scientific computing and statistical analysis
+- `scikit-learn`: For machine learning algorithms
+- `matplotlib` and `seaborn`: For data visualization
+- `tqdm`: For progress bars
+- `rich`: For rich text and beautiful formatting in the terminal
+- `pyyaml`: For parsing YAML configuration files
+- `ccxt`: For interacting with cryptocurrency exchanges
+- `ta`: For technical analysis indicators
+
+### Database Dependencies
+- `psycopg2`: For PostgreSQL database interaction
+
+### System Monitoring
+- `psutil`: For system monitoring (CPU, memory usage)
+
+### Development Dependencies
+- List any additional dependencies required for development, testing, or deployment
+
+### Environment Variables
+The project uses environment variables for configuration. Create a `.env` file in the root directory with the following variables:
+- `DB_NAME`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_HOST`
+- `DB_PORT`
+- `BINANCE_API_KEY`
+- `BINANCE_API_SECRET`
+
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/elvis-trading.git
+   cd elvis-trading
+   ```
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+3. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Contributing
 

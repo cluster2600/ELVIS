@@ -24,9 +24,9 @@ class BinanceExecutor(BaseExecutor):
         self.client = None
         self.orders = {}
         self.positions = {}  # Local position tracking
-        self.telegram_token = API_CONFIG['TELEGRAM_TOKEN']
-        self.telegram_chat_id = API_CONFIG['TELEGRAM_CHAT_ID']
-        self.current_leverage = TRADING_CONFIG['LEVERAGE_MIN']
+        self.telegram_token = API_CONFIG.get('TELEGRAM_TOKEN')
+        self.telegram_chat_id = API_CONFIG.get('TELEGRAM_CHAT_ID')
+        self.current_leverage = TRADING_CONFIG.get('LEVERAGE_MIN', 5)  # Default to 5 if not set
     
     def initialize(self) -> None:
         try:
@@ -42,7 +42,7 @@ class BinanceExecutor(BaseExecutor):
             self.logger.info(f"Server time: {server_time}")
             self._test_public_data()
             account = self.client.account()
-            self.logger.info(f"Account initialized: {account['totalWalletBalance']}")
+            self.logger.info(f"Account initialized: {account['totalWalletBalance']} USDT")
             self.set_leverage(TRADING_CONFIG['SYMBOL'], self.current_leverage)
             self.logger.info("Binance Futures executor initialized")
         except Exception as e:
@@ -141,24 +141,28 @@ class BinanceExecutor(BaseExecutor):
     def adjust_quantity(self, symbol: str, quantity: float, current_price: float) -> float:
         try:
             self.logger.info(f"Adjusting quantity for {symbol}: {quantity}")
-            exchange_info = self.client.get_exchange_info()
-            symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == symbol), None)
+            # Use get_symbol_info from UMFutures (corrected method name)
+            symbol_info = self.client.get_symbol_info(symbol)
             if not symbol_info:
                 raise ValueError(f"Symbol {symbol} not found in exchange info")
+            
             precision = symbol_info['quantityPrecision']
             step_size = float(next(f['stepSize'] for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE'))
+            
             adjusted_quantity = math.floor(quantity / step_size) * step_size
+            adjusted_quantity = round(adjusted_quantity, precision)
+            
             self.logger.info(f"Adjusted quantity for {symbol}: {adjusted_quantity}")
             return adjusted_quantity
         except Exception as e:
             self.logger.error(f"Error adjusting quantity for {symbol}: {e}")
-            return quantity
+            return quantity  # Fallback to original quantity
     
     def execute_buy(self, symbol: str, quantity: float, price: float, **kwargs) -> Dict[str, Any]:
         try:
             self.logger.info(f"Executing buy order for {symbol}: {quantity} @ {price}")
             adjusted_quantity = self.adjust_quantity(symbol, quantity, price)
-            order_type = 'MARKET'  # Switch to market order for immediate execution
+            order_type = 'MARKET'
             params = {
                 'symbol': symbol,
                 'side': 'BUY',
@@ -168,7 +172,6 @@ class BinanceExecutor(BaseExecutor):
             order = self.client.new_order(**params)
             self.orders[order['orderId']] = order
             self.logger.info(f"Buy order executed: {order}")
-            # Update local position immediately
             self.positions[symbol] = {
                 'symbol': symbol,
                 'contracts': adjusted_quantity,
@@ -179,8 +182,7 @@ class BinanceExecutor(BaseExecutor):
                 'side': 'long'
             }
             self._send_notification(f"🟢 BUY {adjusted_quantity} {symbol} @ {price} (Leverage: {self.current_leverage}x)")
-            # Verify order status
-            time.sleep(1)  # Wait briefly for fill
+            time.sleep(1)
             status = self.get_order_status(order['orderId'])
             self.logger.debug(f"Buy order status: {status}")
             return order
@@ -193,7 +195,7 @@ class BinanceExecutor(BaseExecutor):
         try:
             self.logger.info(f"Executing sell order for {symbol}: {quantity} @ {price}")
             adjusted_quantity = self.adjust_quantity(symbol, quantity, price)
-            order_type = 'MARKET'  # Switch to market order
+            order_type = 'MARKET'
             params = {
                 'symbol': symbol,
                 'side': 'SELL',
@@ -203,11 +205,9 @@ class BinanceExecutor(BaseExecutor):
             order = self.client.new_order(**params)
             self.orders[order['orderId']] = order
             self.logger.info(f"Sell order executed: {order}")
-            # Clear local position
             if symbol in self.positions:
                 del self.positions[symbol]
             self._send_notification(f"🔴 SELL {adjusted_quantity} {symbol} @ {price}")
-            # Verify order status
             time.sleep(1)
             status = self.get_order_status(order['orderId'])
             self.logger.debug(f"Sell order status: {status}")

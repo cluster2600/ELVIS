@@ -27,14 +27,13 @@ fi
 
 # Check for command line arguments
 MODE="paper"  # Default fallback if config can't be read
-# Set default mode
-MODE="paper"
 SYMBOL="BTCUSDT"
 TIMEFRAME="1h"
-LEVERAGE=75
-STRATEGY="technical"
+LEVERAGE=125
+STRATEGY="ensemble"
 LOG_LEVEL="INFO"
-DASHBOARD="none" # Add dashboard argument
+DASHBOARD="console"
+ENVIRONMENT="testnet"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -63,8 +62,12 @@ while [[ $# -gt 0 ]]; do
             LOG_LEVEL="$2"
             shift 2
             ;;
-        --dashboard) # Add dashboard parsing
+        --dashboard)
             DASHBOARD="$2"
+            shift 2
+            ;;
+        --environment)
+            ENVIRONMENT="$2"
             shift 2
             ;;
         *)
@@ -74,30 +77,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Set defaults for dashboard run
-MODE="paper"
-STRATEGY="ensemble"
-LEVERAGE=125
-DASHBOARD="console" # Enable console dashboard
-
 # Check if trying to run in live mode
-if [ "$MODE" == "live" ]; then
-    # Try to read PRODUCTION_MODE from config.py
-    PRODUCTION_MODE="false"
-    if [ -f "config/config.py" ]; then
-        PRODUCTION_MODE_VALUE=$(grep "PRODUCTION_MODE" config/config.py | grep -o "True\|False")
-        if [ "$PRODUCTION_MODE_VALUE" == "False" ]; then
-            echo "⚠️  WARNING: PRODUCTION_MODE is disabled in config. Cannot run in live mode."
-            echo "To enable live trading, set PRODUCTION_MODE to True in config/config.py"
-            echo "Exiting..."
-            exit 1
-        fi
-    fi
-    
-    echo "⚠️  WARNING: Starting ELVIS in LIVE mode. Real trading will occur!"
+if [ "$MODE" == "live" ] && [ "$ENVIRONMENT" == "production" ]; then
+    echo "⚠️  WARNING: Starting ELVIS in LIVE mode on PRODUCTION environment. Real trading will occur!"
+    echo "You have 5 seconds to cancel (Ctrl+C)..."
+    sleep 5
+elif [ "$MODE" == "live" ] && [ "$ENVIRONMENT" == "testnet" ]; then
+    echo "⚠️  WARNING: Starting ELVIS in LIVE mode on TESTNET environment. Paper trading will occur!"
     echo "You have 5 seconds to cancel (Ctrl+C)..."
     sleep 5
 fi
 
-echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage using $STRATEGY strategy with $DASHBOARD dashboard..."
-python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --strategy $STRATEGY --log-level $LOG_LEVEL --dashboard $DASHBOARD
+echo "Starting ELVIS in $MODE mode for $SYMBOL on $TIMEFRAME timeframe with $LEVERAGE leverage using $STRATEGY strategy with $DASHBOARD dashboard on $ENVIRONMENT environment..."
+python main.py --mode $MODE --symbol $SYMBOL --timeframe $TIMEFRAME --leverage $LEVERAGE --strategy $STRATEGY --log-level $LOG_LEVEL --dashboard $DASHBOARD --environment $ENVIRONMENT

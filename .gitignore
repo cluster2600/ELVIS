@@ -41,3 +41,4 @@ model_rf.ydf/
 
 # Backups
 your_bot_script.py.bak
+.env
