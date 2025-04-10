@@ -55,6 +55,13 @@ This project is inspired by and builds upon several academic papers and research
   - Stress testing
   - Performance metrics
 
+- **Monitoring & Visualization**
+  - Real-time Prometheus metrics
+  - Grafana dashboards for trading analytics
+  - System resource monitoring
+  - Order book depth visualization
+  - Performance tracking and alerts
+
 ## Installation
 
 1. Clone the repository:
@@ -74,6 +81,19 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e .
 ```
 
+4. Set up monitoring (optional):
+```bash
+# Install Prometheus
+brew install prometheus  # macOS
+# or
+sudo apt-get install prometheus  # Ubuntu/Debian
+
+# Install Grafana
+brew install grafana  # macOS
+# or
+sudo apt-get install grafana  # Ubuntu/Debian
+```
+
 ## Configuration
 
 The system uses YAML configuration files for different components:
@@ -82,6 +102,8 @@ The system uses YAML configuration files for different components:
 - `trading/config/risk_config.yaml`: Risk management parameters
 - `trading/config/data_config.yaml`: Data processing settings
 - `trading/config/validation_config.yaml`: Strategy validation parameters
+- `grafana/provisioning/datasources/datasources.yml`: Prometheus data source configuration
+- `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provisioning
 
 ## Usage
 
@@ -111,6 +133,30 @@ The validation script supports:
 - Walk-forward analysis
 - Statistical tests
 - Stress testing
+
+### Monitoring with Grafana
+
+ELVIS includes a comprehensive Grafana dashboard for real-time monitoring:
+
+1. Start Prometheus:
+```bash
+prometheus --config.file=prometheus.yml
+```
+
+2. Start Grafana:
+```bash
+grafana-server
+```
+
+3. Access the dashboard at `http://localhost:3000` (default Grafana port)
+
+The dashboard includes:
+- Real-time BTC/USDT price tracking
+- Portfolio value and performance metrics
+- Technical indicators (EMA, RSI, MACD, Bollinger Bands)
+- Order book depth and volume analysis
+- System resource monitoring
+- Pending orders tracking
 
 ### Example Strategy
 
@@ -165,6 +211,11 @@ def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict =
 - `/data_pipeline`: Data processing and ETL
 - `/strategy_engine`: Trading strategy implementation
 
+#### Monitoring Module (`/grafana`)
+- `/provisioning/datasources`: Prometheus data source configuration
+- `/provisioning/dashboards`: Grafana dashboard provisioning
+- `/dashboards`: JSON dashboard definitions
+
 ### Testing and Development
 - `test_elvis.py`: Main test suite
 - `test_console_dashboard.py`: Dashboard testing
@@ -211,6 +262,10 @@ def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict =
    - `utils/notification_utils.py` → `services/telegram/`
    - Notifications are sent through Telegram service
 
+6. **Monitoring Flow**:
+   - `main.py` → Prometheus metrics → Grafana dashboards
+   - Real-time metrics are collected and visualized
+
 ### Unconnected Components
 1. **Standalone Testing Files**:
    - `test_symbols.py`
@@ -234,6 +289,8 @@ def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict =
 - Binance API access
 - Telegram Bot Token (for notifications)
 - CoreML (for model deployment)
+- Prometheus (for metrics collection)
+- Grafana (for visualization)
 
 ## Contributing
 

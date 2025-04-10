@@ -50,6 +50,7 @@
 3.  **Tested:** Ran `./run_dashboard.sh` successfully, confirming the initialization errors are resolved and the dashboard starts correctly with simulated data.
 
 **Result:** The `rich`-based dashboard launched via `run_dashboard.sh` now initializes correctly without errors.
+
 ## eureka
 
 **Date:** 2025-04-03
@@ -74,6 +75,8 @@
 - Historical worst-case analysis
 - Position-level risk decomposition
 - Customizable stress scenarios
+
+## eureka
 
 **Date:** 2025-04-03
 
@@ -614,3 +617,79 @@ eureka
   - trading/execution/binance_executor.py
   - trading/scripts/dashboard.py
   - trading/scripts/run_dashboard.py
+
+## [eureka] 2024-03-21 - Fixed Binance Futures API Integration
+
+### Fixed
+- Corrected Binance Futures API method names:
+  - Changed `get_mark_price` to `mark_price`
+  - Changed `get_order_book` to `depth`
+  - Changed `get_funding_rate` to `funding_rate`
+- Fixed position data field names:
+  - Changed `entryPrice` to `avgPrice` for position entry price
+- Removed duplicate code in main execution block
+
+### Technical Details
+- Updated method calls to match Binance Futures API specifications
+- Improved error handling for API responses
+- Fixed position data parsing to use correct field names
+
+## [eureka] 2024-03-21 - Enhanced Position Data Handling and Trade Signal Debugging
+
+### Fixed
+- Improved position data handling to be more robust:
+  - Added fallback mechanism to try multiple field names for entry price (`avgPrice`, `entryPrice`, `price`)
+  - Added warning logging when entry price field cannot be found
+  - Implemented graceful skipping of positions with missing data instead of crashing
+
+### Enhanced
+- Added detailed debug logging for trade signals:
+  - Logs buy/sell signals and calculated quantities
+  - Logs current price and position information
+  - Helps diagnose why trades might not be executing
+
+### Technical Details
+- Made position data parsing more resilient to API response format changes
+- Improved error handling to prevent crashes when position data is incomplete
+- Added comprehensive logging to help diagnose trading issues
+
+## [eureka] 2024-03-21 - Enhanced Trading Metrics
+### Added
+- New Prometheus metrics for order book analysis:
+  - `elvis_order_book_bids`: Number of bids in order book
+  - `elvis_order_book_asks`: Number of asks in order book
+  - `elvis_order_book_bid_volume`: Total volume of bids
+  - `elvis_order_book_ask_volume`: Total volume of asks
+  - `elvis_order_book_spread`: Spread between best bid and ask
+- New Prometheus metrics for order tracking:
+  - `elvis_pending_orders`: Total number of pending orders
+  - `elvis_pending_orders_buy`: Number of pending buy orders
+  - `elvis_pending_orders_sell`: Number of pending sell orders
+
+### Technical Details
+- Order book metrics are calculated from 5 levels of depth
+- Spread is calculated as the difference between best ask and best bid
+- Pending orders are tracked by side (buy/sell) for better trade flow analysis
+- All metrics are updated in real-time during the trading cycle
+
+## [eureka] 2024-03-21 - Grafana Dashboard Implementation
+
+### Added
+- Comprehensive Grafana dashboard for ELVIS trading metrics
+- Prometheus data source configuration
+- Dashboard provisioning setup
+- Real-time visualization of:
+  - BTC/USDT price trends
+  - Portfolio value and performance
+  - Technical indicators (EMA, RSI, MACD, Bollinger Bands)
+  - Order book depth and volume
+  - System resource usage
+  - Pending orders tracking
+
+### Technical Details
+- Dashboard configured with dark theme for better visibility
+- Appropriate units for each metric (USD, BTC, percentage)
+- Color-coded thresholds for important metrics
+- 6-hour default time range
+- Responsive grid layout
+- Automatic provisioning through Grafana's provisioning system

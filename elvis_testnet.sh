@@ -8,4 +8,4 @@ fi
 
 # Run main.py with specified arguments
 echo "Starting ELVIS in paper mode with console dashboard..."
-venv/bin/python main.py --mode paper --dashboard console
+venv/bin/python main.py --mode paper

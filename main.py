@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Main entry point for the ELVIS project.
-Initializes and runs the appropriate trading bot based on command-line arguments.
+Main entry point for the ELVIS project with Prometheus integration.
 """
 
 ELVIS_ASCII = r"""
@@ -20,15 +19,15 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import pandas as pd
 import numpy as np
 import talib
 import psutil
 from collections import deque
+from prometheus_client import start_http_server, Gauge, Counter
 from utils import setup_logger, print_info, print_error
-from utils.console_dashboard import ConsoleDashboardManager
 from config import API_CONFIG, TRADING_CONFIG, LOGGING_CONFIG
 from utils.trading_dashboard import TradingDashboard
 
@@ -43,6 +42,34 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT")
 }
+
+# Prometheus metrics
+PRICE_GAUGE = Gauge('elvis_current_price', 'Current BTC/USDT price')
+PORTFOLIO_VALUE_GAUGE = Gauge('elvis_portfolio_value', 'Portfolio value in USDT')
+TRADE_COUNT = Counter('elvis_trade_count', 'Number of trades executed', ['side'])
+CPU_USAGE_GAUGE = Gauge('elvis_cpu_usage', 'CPU usage percentage')
+MEMORY_USAGE_GAUGE = Gauge('elvis_memory_usage', 'Memory usage percentage')
+OPEN_POSITIONS_GAUGE = Gauge('elvis_open_positions', 'Number of open positions')
+# New metrics for indicators
+EMA_SHORT_GAUGE = Gauge('elvis_ema_short', 'Short-term EMA (9)')
+EMA_LONG_GAUGE = Gauge('elvis_ema_long', 'Long-term EMA (21)')
+RSI_GAUGE = Gauge('elvis_rsi', 'Relative Strength Index')
+MACD_GAUGE = Gauge('elvis_macd', 'MACD value')
+MACD_SIGNAL_GAUGE = Gauge('elvis_macd_signal', 'MACD signal line')
+SMA_GAUGE = Gauge('elvis_sma', 'Simple Moving Average (20)')
+BB_UPPER_GAUGE = Gauge('elvis_bb_upper', 'Bollinger Band Upper')
+BB_LOWER_GAUGE = Gauge('elvis_bb_lower', 'Bollinger Band Lower')
+# New metrics for order book and pending orders
+ORDER_BOOK_BIDS_GAUGE = Gauge('elvis_order_book_bids', 'Number of bids in order book')
+ORDER_BOOK_ASKS_GAUGE = Gauge('elvis_order_book_asks', 'Number of asks in order book')
+ORDER_BOOK_BID_VOLUME_GAUGE = Gauge('elvis_order_book_bid_volume', 'Total volume of bids in order book')
+ORDER_BOOK_ASK_VOLUME_GAUGE = Gauge('elvis_order_book_ask_volume', 'Total volume of asks in order book')
+ORDER_BOOK_SPREAD_GAUGE = Gauge('elvis_order_book_spread', 'Spread between best bid and ask')
+PENDING_ORDERS_GAUGE = Gauge('elvis_pending_orders', 'Number of pending orders')
+PENDING_ORDERS_BUY_GAUGE = Gauge('elvis_pending_orders_buy', 'Number of pending buy orders')
+PENDING_ORDERS_SELL_GAUGE = Gauge('elvis_pending_orders_sell', 'Number of pending sell orders')
+# Sentiment metrics
+FUNDING_RATE_GAUGE = Gauge('elvis_funding_rate', 'Current funding rate percentage')
 
 def get_db_connection():
     """Establishes a connection to the PostgreSQL database."""
@@ -70,8 +97,6 @@ def parse_arguments():
     parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default=LOGGING_CONFIG.get('LOG_LEVEL', 'INFO'),
                         help=f'Logging level (default: {LOGGING_CONFIG["LOG_LEVEL"]})')
-    parser.add_argument('--dashboard', type=str, choices=['console', 'none'], default='console',
-                        help='Dashboard type (default: console)')
     return parser.parse_args()
 
 def get_strategy(strategy_name, logger):
@@ -93,29 +118,29 @@ def get_strategy(strategy_name, logger):
     logger.info(f"Selected strategy: {strategy_name}")
     return strategies[strategy_name](logger)
 
-def initialize_bot(args, logger, dashboard_manager=None):
+def initialize_bot(args, logger):
     """Initializes the appropriate bot based on the mode."""
     strategy_instance = get_strategy(args.strategy, logger)
     
     if args.mode == 'live':
         from trading.live_bot import LiveBot
         logger.info("Initializing LiveBot...")
-        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
+        return LiveBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
     elif args.mode == 'backtest':
         from trading.backtest_bot import BacktestBot
         logger.info("Initializing BacktestBot...")
-        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger, dashboard_manager=dashboard_manager)
+        return BacktestBot(args.symbol, args.timeframe, args.leverage, strategy=strategy_instance, logger=logger)
     elif args.mode == 'paper':
-        logger.info("Initializing TradingDashboard for paper mode with database integration...")
-        return TradingDashboardWithDB(args.symbol, args.timeframe, args.leverage, strategy_instance, logger, dashboard_manager)
+        logger.info("Initializing TradingDashboard for paper mode with Prometheus...")
+        return TradingDashboardWithDB(args.symbol, args.timeframe, args.leverage, strategy_instance, logger)
     else:
         logger.error(f"Invalid mode specified: {args.mode}")
         raise ValueError(f"Invalid mode: {args.mode}")
 
 class TradingDashboardWithDB(TradingDashboard):
-    """Enhanced TradingDashboard with database integration for paper mode."""
-    def __init__(self, symbol, timeframe, leverage, strategy, logger, dashboard_manager=None):
-        super().__init__(logger=logger, dashboard_manager=dashboard_manager)
+    """Enhanced TradingDashboard with database and Prometheus integration."""
+    def __init__(self, symbol, timeframe, leverage, strategy, logger):
+        super().__init__(logger=logger)
         self.symbol = symbol
         self.timeframe = timeframe
         self.leverage = leverage
@@ -128,12 +153,12 @@ class TradingDashboardWithDB(TradingDashboard):
         self.trade_size = 0.002
         self.portfolio_value = TRADING_CONFIG.get('MIN_CAPITAL_USD', 10000)
         self.config['portfolio_value'] = self.portfolio_value
-        self.pending_orders = []  # For limit/stop orders
-        self.alerts = {'price_high': 80000, 'price_low': 70000}  # Custom price thresholds
-        self.trade_history = deque(maxlen=100)  # For backtesting/historical data
+        self.pending_orders = []
+        self.alerts = {'price_high': 80000, 'price_low': 70000}
+        self.trade_history = deque(maxlen=100)
 
     def log_trade(self, timestamp, symbol, side, price, quantity, pnl=0.0):
-        """Logs a trade to the database and updates dashboard."""
+        """Logs a trade to the database and updates Prometheus metrics."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
@@ -158,15 +183,14 @@ class TradingDashboardWithDB(TradingDashboard):
                     'pnl': pnl
                 })
                 self.trade_history.append(trade)
-                if self.dashboard_manager:
-                    self.dashboard_manager.add_trade(trade)
+                TRADE_COUNT.labels(side=side).inc()
                 self.logger.info(f"Trade logged: {symbol} {side} at {price}")
         except Exception as e:
             self.conn.rollback()
             self.logger.error(f"Failed to log trade: {e}")
 
     def update_open_position(self, symbol, size, entry_price, current_price, leverage, pnl=0.0):
-        """Updates or inserts an open position in the database and dashboard."""
+        """Updates or inserts an open position in the database."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("SELECT id FROM open_positions WHERE symbol = %s", (symbol,))
@@ -192,8 +216,7 @@ class TradingDashboardWithDB(TradingDashboard):
                     """, (symbol, size, entry_price, current_price, leverage, pnl))
                 self.conn.commit()
                 self.config['open_positions'] = [p for p in self.config['open_positions'] if p['symbol'] != symbol] + [position]
-                if self.dashboard_manager:
-                    self.dashboard_manager.update_open_positions(self.config['open_positions'])
+                OPEN_POSITIONS_GAUGE.set(len(self.config['open_positions']))
                 self.logger.info(f"Open position updated: {symbol} at {current_price}")
         except Exception as e:
             self.conn.rollback()
@@ -209,9 +232,6 @@ class TradingDashboardWithDB(TradingDashboard):
             signal = signals.get('signal', 'HOLD')
             buy_signal = signal == 'BUY'
             sell_signal = signal == 'SELL'
-        else:
-            self.logger.warning(f"Unexpected signal format: {signals}")
-            return False, False, 0
         min_notional = 100
         quantity = max(self.trade_size, min_notional / current_price)
         return buy_signal and not position, sell_signal and position, quantity
@@ -346,7 +366,6 @@ class TradingDashboardWithDB(TradingDashboard):
         elif current_price <= self.alerts['price_low']:
             self.logger.warning(f"Price alert: BTC below {self.alerts['price_low']}")
 
-    # Override _update_all_data to fix API method and key issues
     def _update_all_data(self):
         self.logger.info("Updating all data from Binance")
         self.config['PRODUCTION_MODE'] = not self.is_testnet
@@ -355,33 +374,64 @@ class TradingDashboardWithDB(TradingDashboard):
             account = self.executor.client.account()
             self.config['portfolio_value'] = float(account['totalWalletBalance'])
             self.config['available_margin'] = float(account['availableBalance'])
+            PORTFOLIO_VALUE_GAUGE.set(self.config['portfolio_value'])
         except Exception as e:
             self.logger.error(f"Failed to fetch account info: {e}")
         
         symbol = 'BTCUSDT'
         try:
-            ticker = self.executor.client.mark_price(symbol)
+            ticker = self.executor.client.mark_price(symbol=symbol)
             self.config['current_price'] = float(ticker['markPrice'])
             self.config['price_history'].append(self.config['current_price'])
+            PRICE_GAUGE.set(self.config['current_price'])
+            
             spot_ticker = self.spot_client.get_symbol_ticker(symbol=symbol)
             self.config['spot_price'] = float(spot_ticker['price'])
-            # Fixed: Use futures_order_book() for Futures API
-            order_book = self.executor.client.futures_order_book(symbol=symbol, limit=5)
+            
+            order_book = self.executor.client.depth(symbol=symbol, limit=5)
             self.config['order_book'] = {'bids': order_book['bids'], 'asks': order_book['asks']}
-            funding = self.executor.client.get_funding_rate(symbol=symbol)
+            
+            bids = order_book['bids']
+            asks = order_book['asks']
+            
+            ORDER_BOOK_BIDS_GAUGE.set(len(bids))
+            ORDER_BOOK_ASKS_GAUGE.set(len(asks))
+            
+            bid_volume = sum(float(bid[1]) for bid in bids)
+            ask_volume = sum(float(ask[1]) for ask in asks)
+            ORDER_BOOK_BID_VOLUME_GAUGE.set(bid_volume)
+            ORDER_BOOK_ASK_VOLUME_GAUGE.set(ask_volume)
+            
+            if bids and asks:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                spread = best_ask - best_bid
+                ORDER_BOOK_SPREAD_GAUGE.set(spread)
+            
+            funding = self.executor.client.funding_rate(symbol=symbol, limit=1)
             self.config['funding_rate'] = float(funding[0]['fundingRate']) * 100
+            FUNDING_RATE_GAUGE.set(self.config['funding_rate'])
         except Exception as e:
             self.logger.error(f"Failed to fetch market data: {e}", exc_info=True)
         
         self._update_technical_indicators()
         try:
             account = self.executor.client.account()
-            self.logger.debug(f"Account positions: {account['positions']}")  # Added for debugging
+            self.logger.debug(f"Account positions: {account['positions']}")
             real_positions = []
             for pos in account['positions']:
                 if float(pos['positionAmt']) != 0:
                     size = float(pos['positionAmt'])
-                    entry_price = float(pos['entryPrice'])
+                    entry_price = None
+                    for field in ['avgPrice', 'entryPrice', 'price']:
+                        if field in pos:
+                            entry_price = float(pos[field])
+                            break
+                    
+                    if entry_price is None:
+                        self.logger.warning(f"Could not find entry price for position: {pos}")
+                        continue
+                        
                     leverage = float(pos['leverage'])
                     pnl = float(pos['unrealizedProfit'])
                     real_positions.append({
@@ -395,7 +445,6 @@ class TradingDashboardWithDB(TradingDashboard):
                     })
             
             self.config['open_positions'] = self.config['local_positions'].copy()
-            
             for real_pos in real_positions:
                 matching_local = next((p for p in self.config['open_positions'] if p['symbol'] == real_pos['symbol'] and p['entry_price'] == real_pos['entry_price']), None)
                 if matching_local:
@@ -406,7 +455,8 @@ class TradingDashboardWithDB(TradingDashboard):
                 pos['current_price'] = self.config['current_price']
                 pos['pnl'] = (pos['current_price'] - pos['entry_price']) * pos['size']
             
-            self.logger.info(f"Positions updated: {len(self.config['open_positions'])} open - {self.config['open_positions']}")
+            OPEN_POSITIONS_GAUGE.set(len(self.config['open_positions']))
+            self.logger.info(f"Positions updated: {len(self.config['open_positions'])} open")
         except Exception as e:
             self.logger.error(f"Failed to update positions: {e}", exc_info=True)
             self.config['open_positions'] = self.config['local_positions'].copy()
@@ -436,28 +486,35 @@ class TradingDashboardWithDB(TradingDashboard):
                     'quantity': float(trade['qty']),
                     'pnl': float(trade['realizedPnl'])
                 })
-            self.logger.debug(f"Fetched recent trades: {list(self.config['recent_trades'])}")
+            self.logger.debug(f"Fetched recent trades: {len(self.config['recent_trades'])} trades")
         except Exception as e:
             self.logger.error(f"Failed to fetch recent trades: {e}", exc_info=True)
         
+        pending_buy_orders = [o for o in self.pending_orders if o['side'] == 'buy']
+        pending_sell_orders = [o for o in self.pending_orders if o['side'] == 'sell']
+        PENDING_ORDERS_GAUGE.set(len(self.pending_orders))
+        PENDING_ORDERS_BUY_GAUGE.set(len(pending_buy_orders))
+        PENDING_ORDERS_SELL_GAUGE.set(len(pending_sell_orders))
+        
         self.config['cpu_usage'] = psutil.cpu_percent()
         self.config['memory_usage'] = psutil.virtual_memory().percent
+        CPU_USAGE_GAUGE.set(self.config['cpu_usage'])
+        MEMORY_USAGE_GAUGE.set(self.config['memory_usage'])
+        # Update indicator metrics
+        indicators = self.config.get('indicators', {})
+        EMA_SHORT_GAUGE.set(indicators.get('ema_short', 0.0))
+        EMA_LONG_GAUGE.set(indicators.get('ema_long', 0.0))
+        RSI_GAUGE.set(indicators.get('rsi', 0.0))
+        MACD_GAUGE.set(indicators.get('macd', {}).get('macd', 0.0))
+        MACD_SIGNAL_GAUGE.set(indicators.get('macd', {}).get('signal', 0.0))
+        SMA_GAUGE.set(indicators.get('sma', 0.0))
+        BB_UPPER_GAUGE.set(indicators.get('bb_upper', 0.0))
+        BB_LOWER_GAUGE.set(indicators.get('bb_lower', 0.0))
 
     def run(self):
-        """Runs paper trading with enhanced dashboard."""
-        self.logger.info("Starting paper trading with enhanced dashboard...")
-        if self.dashboard_manager:
-            self.dashboard_manager.start_dashboard()
-            self.dashboard_manager.register_action('b', lambda: self._manual_buy('market'))
-            self.dashboard_manager.register_action('s', lambda: self._manual_sell('market'))
-            self.dashboard_manager.register_action('l', lambda: self._manual_buy('limit', self.config['current_price'] * 0.99))
-            self.dashboard_manager.register_action('t', lambda: self._manual_sell('stop', self.config['current_price'] * 0.95))
-            self.dashboard_manager.register_action('c', self._close_all_positions)
-            self.dashboard_manager.register_action('+', lambda: self._adjust_leverage(1))
-            self.dashboard_manager.register_action('-', lambda: self._adjust_leverage(-1))
-            self.dashboard_manager.register_action('p', lambda: self._set_tp_sl(tp_price=self.config['current_price'] * 1.05))
-            self.dashboard_manager.register_action('o', lambda: self._set_tp_sl(sl_price=self.config['current_price'] * 0.95))
-
+        """Runs paper trading with Prometheus metrics exposed."""
+        self.logger.info("Starting paper trading with Prometheus metrics...")
+        start_http_server(8000)
         start_time = time.time()
         while self.running:
             try:
@@ -513,7 +570,7 @@ class TradingDashboardWithDB(TradingDashboard):
                 if len(price_data) >= 20:
                     df['sma'] = talib.SMA(df['close'], timeperiod=20)
                     df['bb_upper'], df['bb_middle'], df['bb_lower'] = talib.BBANDS(df['close'], timeperiod=20)
-                    df['volume'] = 100  # Placeholder
+                    df['volume'] = 100
                     self.config['indicators'].update({
                         'sma': df['sma'].iloc[-1],
                         'bb_upper': df['bb_upper'].iloc[-1],
@@ -523,26 +580,10 @@ class TradingDashboardWithDB(TradingDashboard):
 
                 self.config['sentiment'] = {
                     'funding_rate': self.config.get('funding_rate', 0.0),
-                    'open_interest': 0.0,  # Placeholder
-                    'long_short_ratio': 0.0,  # Placeholder
-                    'fear_greed_index': 50  # Placeholder
+                    'open_interest': 0.0,
+                    'long_short_ratio': 0.0,
+                    'fear_greed_index': 50
                 }
-
-                if self.dashboard_manager:
-                    self.dashboard_manager.update_portfolio_value(self.portfolio_value)
-                    metrics = self.performance_monitor.calculate_metrics()
-                    metrics['win_rate'] *= 100
-                    metrics['daily_return'] = ((self.portfolio_value / TRADING_CONFIG.get('MIN_CAPITAL_USD', 10000)) - 1) * 100
-                    metrics['weekly_return'] = metrics['daily_return'] * 7
-                    self.dashboard_manager.update_metrics(metrics)
-                    self.dashboard_manager.update_open_positions(self.config['open_positions'])
-                    self.dashboard_manager.update_strategy_signals({self.strategy.__class__.__name__: 'BUY' if buy_signal else 'SELL' if sell_signal else 'HOLD'})
-                    self.dashboard_manager.update_market_data({
-                        'pending_orders': self.pending_orders,
-                        'indicators': self.config['indicators'],
-                        'sentiment': self.config['sentiment'],
-                        'trade_history': list(self.trade_history)
-                    })
 
                 self.config['uptime'] = int(time.time() - start_time)
                 time.sleep(5)
@@ -551,8 +592,6 @@ class TradingDashboardWithDB(TradingDashboard):
                 time.sleep(5)
 
         self.conn.close()
-        if self.dashboard_manager:
-            self.dashboard_manager.stop_dashboard()
         self.logger.info("Paper trading stopped.")
 
 def main():
@@ -564,43 +603,26 @@ def main():
     logger = setup_logger("ELVIS", log_to_file=LOGGING_CONFIG.get('LOG_TO_FILE', True), log_level=log_level)
     
     logger.info("Starting ELVIS...")
-    logger.info(f"Arguments: Mode={args.mode}, Symbol={args.symbol}, Timeframe={args.timeframe}, Strategy={args.strategy}, Leverage={args.leverage}, Dashboard={args.dashboard}")
+    logger.info(f"Arguments: Mode={args.mode}, Symbol={args.symbol}, Timeframe={args.timeframe}, Strategy={args.strategy}, Leverage={args.leverage}")
 
-    if args.mode == 'live':
-        if not all([API_CONFIG.get('BINANCE_API_KEY'), API_CONFIG.get('BINANCE_API_SECRET')]):
-            print_error(logger, "Missing Binance API keys for live mode. Please set BINANCE_API_KEY and BINANCE_API_SECRET in the .env file or environment variables.")
-            sys.exit(1)
-        if not TRADING_CONFIG.get('PRODUCTION_MODE', False):
-            print_error(logger, "PRODUCTION_MODE is disabled in config.py. Cannot run in live mode for safety. Set PRODUCTION_MODE = True to enable live trading.")
-            sys.exit(1)
-        else:
-            print_info(logger, "PRODUCTION_MODE enabled. Running in live trading mode.")
+    if args.mode == 'live' and not TRADING_CONFIG.get('PRODUCTION_MODE', False):
+        print_error(logger, "PRODUCTION_MODE is disabled in config.py. Cannot run in live mode for safety. Set PRODUCTION_MODE = True to enable live trading.")
+        sys.exit(1)
     elif args.mode == 'paper':
-        print_info(logger, "Running in paper trading mode with database integration.")
+        print_info(logger, "Running in paper trading mode with Prometheus integration.")
     elif args.mode == 'backtest':
         print_info(logger, "Running in backtesting mode.")
 
     try:
-        dashboard_manager = None
-        if args.dashboard == 'console':
-            dashboard_manager = ConsoleDashboardManager(logger)
-            print_info(logger, "Console dashboard initialized.")
-
-        bot = initialize_bot(args, logger, dashboard_manager)
+        bot = initialize_bot(args, logger)
         print_info(logger, f"Bot initialized successfully for {args.mode} mode.")
-        
         bot.run()
-        
         logger.info(f"ELVIS {args.mode} run completed.")
-        
-        if dashboard_manager:
-            dashboard_manager.stop_dashboard()
-            
     except ValueError as ve:
         print_error(logger, f"Configuration error: {ve}")
         sys.exit(1)
     except ImportError as ie:
-        print_error(logger, f"Import error: {ie}. Ensure all dependencies are installed and modules exist.")
+        print_error(logger, f"Import error: {ie}. Ensure all dependencies are installed.")
         sys.exit(1)
     except Exception as e:
         print_error(logger, f"An unexpected error occurred: {e}", exc_info=True)

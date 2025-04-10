@@ -14,6 +14,7 @@ import talib
 import curses
 from logging.handlers import RotatingFileHandler
 from binance.client import Client
+from datetime import datetime, timedelta
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent
@@ -293,12 +294,14 @@ class TradingDashboard:
         
         self.performance_monitor = PerformanceMonitor(self.logger)
         
+        # Initialize configuration with expanded data structures
         self.config = {
             'PRODUCTION_MODE': not self.is_testnet,
             'portfolio_value': 0.0,
             'available_margin': 0.0,
             'current_price': 0.0,
             'spot_price': 0.0,
+            'price_spread': 0.0,
             'order_book': {'bids': [], 'asks': []},
             'indicators': {},
             'leverage': self.executor.current_leverage,
@@ -313,7 +316,36 @@ class TradingDashboard:
             'volume_history': deque(maxlen=50),
             'recent_trades': deque(maxlen=10),
             'open_positions': [],
-            'local_positions': []  # Persistent simulated positions
+            'local_positions': [],  # Persistent simulated positions
+            'pending_orders': [],
+            'liquidation_price': 0.0,
+            'unrealized_pnl': 0.0,
+            'realized_pnl': 0.0,
+            'account_risk_level': 'LOW',
+            'daily_return': 0.0,
+            'weekly_return': 0.0,
+            'sharpe_ratio': 0.0,
+            'win_rate': 0.0,
+            'max_drawdown': 0.0,
+            'sentiment': {
+                'funding_rate': 0.0,
+                'open_interest': 0.0,
+                'long_short_ratio': 0.0,
+                'fear_greed_index': 50
+            },
+            'alerts': [],
+            'candlestick_data': {
+                '1m': deque(maxlen=100),
+                '5m': deque(maxlen=100),
+                '15m': deque(maxlen=100),
+                '1h': deque(maxlen=100),
+                '1d': deque(maxlen=100)
+            },
+            'futures_contracts': {
+                'weekly': {'price': 0.0, 'expiry': ''},
+                'monthly': {'price': 0.0, 'expiry': ''},
+                'quarterly': {'price': 0.0, 'expiry': ''}
+            }
         }
         
         self.logger.info("Dashboard initialized")
@@ -323,6 +355,9 @@ class TradingDashboard:
         self.rsi_period = 14
         self.rsi_oversold = 45
         self.rsi_overbought = 55
+        self.pending_orders = []
+        self.alerts = {'price_high': 80000, 'price_low': 70000}
+        self.trade_history = deque(maxlen=100)
         
     def run(self):
         self.logger.info("Starting trading dashboard...")
@@ -409,25 +444,121 @@ class TradingDashboard:
             account = self.executor.client.account()
             self.config['portfolio_value'] = float(account['totalWalletBalance'])
             self.config['available_margin'] = float(account['availableBalance'])
+            PORTFOLIO_VALUE_GAUGE.set(self.config['portfolio_value'])
         except Exception as e:
             self.logger.error(f"Failed to fetch account info: {e}")
         
         symbol = 'BTCUSDT'
         try:
-            ticker = self.executor.client.mark_price(symbol)
+            # Fetch current price
+            ticker = self.executor.client.mark_price(symbol=symbol)
             self.config['current_price'] = float(ticker['markPrice'])
             self.config['price_history'].append(self.config['current_price'])
+            PRICE_GAUGE.set(self.config['current_price'])
+            
+            # Fetch spot price
             spot_ticker = self.spot_client.get_symbol_ticker(symbol=symbol)
             self.config['spot_price'] = float(spot_ticker['price'])
-            order_book = self.executor.client.get_order_book(symbol=symbol, limit=5)
+            
+            # Calculate price spread
+            self.config['price_spread'] = self.config['current_price'] - self.config['spot_price']
+            
+            # Fetch order book
+            order_book = self.executor.client.depth(symbol=symbol, limit=5)
             self.config['order_book'] = {'bids': order_book['bids'], 'asks': order_book['asks']}
-            funding = self.executor.client.get_funding_rate(symbol=symbol)
-            self.config['funding_rate'] = float(funding['fundingRate']) * 100
+            
+            # Calculate and set order book metrics
+            bids = order_book['bids']
+            asks = order_book['asks']
+            
+            ORDER_BOOK_BIDS_GAUGE.set(len(bids))
+            ORDER_BOOK_ASKS_GAUGE.set(len(asks))
+            
+            bid_volume = sum(float(bid[1]) for bid in bids)
+            ask_volume = sum(float(ask[1]) for ask in asks)
+            ORDER_BOOK_BID_VOLUME_GAUGE.set(bid_volume)
+            ORDER_BOOK_ASK_VOLUME_GAUGE.set(ask_volume)
+            
+            if bids and asks:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                spread = best_ask - best_bid
+                ORDER_BOOK_SPREAD_GAUGE.set(spread)
+            
+            # Fetch funding rate
+            funding = self.executor.client.funding_rate(symbol=symbol, limit=1)
+            self.config['funding_rate'] = float(funding[0]['fundingRate']) * 100
+            FUNDING_RATE_GAUGE.set(self.config['funding_rate'])
+            
+            # Fetch futures contracts
+            self._update_futures_contracts(symbol)
+            
+            # Fetch candlestick data for different timeframes
+            self._update_candlestick_data(symbol)
+            
         except Exception as e:
-            self.logger.error(f"Failed to fetch market data: {e}")
+            self.logger.error(f"Failed to fetch market data: {e}", exc_info=True)
         
         self._update_technical_indicators()
-        self._update_positions()
+        try:
+            account = self.executor.client.account()
+            self.logger.debug(f"Account positions: {account['positions']}")
+            real_positions = []
+            for pos in account['positions']:
+                if float(pos['positionAmt']) != 0:
+                    size = float(pos['positionAmt'])
+                    # Try different field names for entry price
+                    entry_price = None
+                    for field in ['avgPrice', 'entryPrice', 'price']:
+                        if field in pos:
+                            entry_price = float(pos[field])
+                            break
+                    
+                    if entry_price is None:
+                        self.logger.warning(f"Could not find entry price for position: {pos}")
+                        continue
+                        
+                    leverage = float(pos['leverage'])
+                    pnl = float(pos['unrealizedProfit'])
+                    liquidation_price = float(pos['liquidationPrice'])
+                    real_positions.append({
+                        'symbol': pos['symbol'],
+                        'size': size,
+                        'entry_price': entry_price,
+                        'current_price': self.config['current_price'],
+                        'leverage': leverage,
+                        'pnl': pnl,
+                        'liquidation_price': liquidation_price,
+                        'time': int(time.time() * 1000)
+                    })
+            
+            self.config['open_positions'] = self.config['local_positions'].copy()
+            for real_pos in real_positions:
+                matching_local = next((p for p in self.config['open_positions'] if p['symbol'] == real_pos['symbol'] and p['entry_price'] == real_pos['entry_price']), None)
+                if matching_local:
+                    self.config['open_positions'] = [p for p in self.config['open_positions'] if p != matching_local]
+                self.config['open_positions'].append(real_pos)
+            
+            for pos in self.config['open_positions']:
+                pos['current_price'] = self.config['current_price']
+                pos['pnl'] = (pos['current_price'] - pos['entry_price']) * pos['size']
+            
+            OPEN_POSITIONS_GAUGE.set(len(self.config['open_positions']))
+            self.logger.info(f"Positions updated: {len(self.config['open_positions'])} open")
+            
+            # Calculate unrealized PnL
+            self.config['unrealized_pnl'] = sum(pos['pnl'] for pos in self.config['open_positions'])
+            
+            # Calculate liquidation price (simplified)
+            if self.config['open_positions']:
+                self.config['liquidation_price'] = min(pos['liquidation_price'] for pos in self.config['open_positions'])
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update positions: {e}", exc_info=True)
+            self.config['open_positions'] = self.config['local_positions'].copy()
+            for pos in self.config['open_positions']:
+                pos['current_price'] = self.config['current_price']
+                pos['pnl'] = (pos['current_price'] - pos['entry_price']) * pos['size']
         
         try:
             trades = self.executor.client.get_account_trades(symbol=symbol, limit=10)
@@ -451,56 +582,209 @@ class TradingDashboard:
                     'quantity': float(trade['qty']),
                     'pnl': float(trade['realizedPnl'])
                 })
-            self.logger.debug(f"Fetched recent trades: {list(self.config['recent_trades'])}")
+            self.logger.debug(f"Fetched recent trades: {len(self.config['recent_trades'])} trades")
+            
+            # Calculate realized PnL
+            self.config['realized_pnl'] = sum(float(t['realizedPnl']) for t in trades)
+            
         except Exception as e:
-            self.logger.error(f"Failed to fetch recent trades: {e}")
+            self.logger.error(f"Failed to fetch recent trades: {e}", exc_info=True)
+        
+        # Update pending orders metrics
+        pending_buy_orders = [o for o in self.pending_orders if o['side'] == 'buy']
+        pending_sell_orders = [o for o in self.pending_orders if o['side'] == 'sell']
+        PENDING_ORDERS_GAUGE.set(len(self.pending_orders))
+        PENDING_ORDERS_BUY_GAUGE.set(len(pending_buy_orders))
+        PENDING_ORDERS_SELL_GAUGE.set(len(pending_sell_orders))
+        
+        # Update performance metrics
+        self._update_performance_metrics()
+        
+        # Update sentiment data
+        self._update_sentiment_data(symbol)
+        
+        # Check alerts
+        self._check_alerts()
         
         self.config['cpu_usage'] = psutil.cpu_percent()
         self.config['memory_usage'] = psutil.virtual_memory().percent
+        CPU_USAGE_GAUGE.set(self.config['cpu_usage'])
+        MEMORY_USAGE_GAUGE.set(self.config['memory_usage'])
         
-    def _update_technical_indicators(self):
-        prices = list(self.config['price_history'])
-        if len(prices) < self.rsi_period:
-            return
+    def _update_futures_contracts(self, symbol):
+        """Fetch futures contract prices for different expiry periods"""
         try:
-            df = pd.DataFrame({'close': prices})
-            df['ema_short'] = talib.EMA(df['close'], timeperiod=self.ema_short_period)
-            df['ema_long'] = talib.EMA(df['close'], timeperiod=self.ema_long_period)
-            df['rsi'] = talib.RSI(df['close'], timeperiod=self.rsi_period)
-            macd, signal, _ = talib.MACD(df['close'])
-            self.config['indicators'] = {
-                'ema_short': df['ema_short'].iloc[-1] if not pd.isna(df['ema_short'].iloc[-1]) else 0.0,
-                'ema_long': df['ema_long'].iloc[-1] if not pd.isna(df['ema_long'].iloc[-1]) else 0.0,
-                'rsi': df['rsi'].iloc[-1] if not pd.isna(df['rsi'].iloc[-1]) else 0.0,
-                'macd': {'macd': macd[-1] if not np.isnan(macd[-1]) else 0.0, 'signal': signal[-1] if not np.isnan(signal[-1]) else 0.0}
-            }
-            self.logger.debug(f"Indicators: {self.config['indicators']}")
-        except Exception as e:
-            self.logger.error(f"Failed to update technical indicators: {e}")
+            # Fetch all futures contracts
+            exchange_info = self.executor.client.exchange_info()
+            futures_symbols = [s['symbol'] for s in exchange_info['symbols'] if s['symbol'].startswith(symbol) and s['symbol'] != symbol]
             
-    def _generate_signals(self, data: pd.DataFrame) -> tuple:
-        if data.empty or len(data) < self.rsi_period:
-            self.logger.warning("Insufficient data for signals")
-            return False, False
-        try:
-            df = data.copy()
-            df['ema_short'] = talib.EMA(df['close'].values, timeperiod=self.ema_short_period)
-            df['ema_long'] = talib.EMA(df['close'].values, timeperiod=self.ema_long_period)
-            df['rsi'] = talib.RSI(df['close'].values, timeperiod=self.rsi_period)
-            latest = df.iloc[-1]
-            buy_signal = (
-                latest['ema_short'] > latest['ema_long'] and 
-                latest['rsi'] < self.rsi_oversold
-            )
-            sell_signal = (
-                latest['ema_short'] < latest['ema_long'] and 
-                latest['rsi'] > self.rsi_overbought
-            )
-            self.logger.info(f"Signal Check: EMA9={latest['ema_short']:.2f}, EMA21={latest['ema_long']:.2f}, RSI={latest['rsi']:.2f}, Buy={buy_signal}, Sell={sell_signal}")
-            return buy_signal, sell_signal
+            # Group by expiry
+            weekly = []
+            monthly = []
+            quarterly = []
+            
+            for sym in futures_symbols:
+                if 'W' in sym:  # Weekly
+                    weekly.append(sym)
+                elif 'M' in sym:  # Monthly
+                    monthly.append(sym)
+                elif 'Q' in sym:  # Quarterly
+                    quarterly.append(sym)
+            
+            # Get the nearest expiry for each
+            if weekly:
+                weekly_price = self.executor.client.mark_price(symbol=weekly[0])
+                self.config['futures_contracts']['weekly'] = {
+                    'price': float(weekly_price['markPrice']),
+                    'expiry': weekly[0]
+                }
+            
+            if monthly:
+                monthly_price = self.executor.client.mark_price(symbol=monthly[0])
+                self.config['futures_contracts']['monthly'] = {
+                    'price': float(monthly_price['markPrice']),
+                    'expiry': monthly[0]
+                }
+            
+            if quarterly:
+                quarterly_price = self.executor.client.mark_price(symbol=quarterly[0])
+                self.config['futures_contracts']['quarterly'] = {
+                    'price': float(quarterly_price['markPrice']),
+                    'expiry': quarterly[0]
+                }
+                
         except Exception as e:
-            self.logger.error(f"Error generating signals: {e}")
-            return False, False
+            self.logger.error(f"Failed to fetch futures contracts: {e}")
+    
+    def _update_candlestick_data(self, symbol):
+        """Fetch candlestick data for different timeframes"""
+        timeframes = {
+            '1m': Client.KLINE_INTERVAL_1MINUTE,
+            '5m': Client.KLINE_INTERVAL_5MINUTE,
+            '15m': Client.KLINE_INTERVAL_15MINUTE,
+            '1h': Client.KLINE_INTERVAL_1HOUR,
+            '1d': Client.KLINE_INTERVAL_1DAY
+        }
+        
+        for tf, interval in timeframes.items():
+            try:
+                klines = self.executor.client.klines(symbol=symbol, interval=interval, limit=100)
+                candles = []
+                for k in klines:
+                    candles.append({
+                        'time': k[0],
+                        'open': float(k[1]),
+                        'high': float(k[2]),
+                        'low': float(k[3]),
+                        'close': float(k[4]),
+                        'volume': float(k[5])
+                    })
+                self.config['candlestick_data'][tf] = deque(candles, maxlen=100)
+            except Exception as e:
+                self.logger.error(f"Failed to fetch {tf} candlestick data: {e}")
+    
+    def _update_performance_metrics(self):
+        """Update performance metrics like Sharpe ratio, win rate, etc."""
+        try:
+            # Get metrics from performance monitor
+            metrics = self.performance_monitor.get_metrics()
+            
+            self.config['total_trades'] = metrics.get('total_trades', 0)
+            self.config['winning_trades'] = metrics.get('winning_trades', 0)
+            self.config['losing_trades'] = metrics.get('losing_trades', 0)
+            self.config['win_rate'] = metrics.get('win_rate', 0.0)
+            self.config['profit_factor'] = metrics.get('profit_factor', 0.0)
+            self.config['sharpe_ratio'] = metrics.get('sharpe_ratio', 0.0)
+            self.config['max_drawdown'] = metrics.get('max_drawdown', 0.0)
+            
+            # Calculate daily and weekly returns
+            if len(self.trade_history) > 0:
+                today = datetime.now().date()
+                week_ago = today - timedelta(days=7)
+                
+                daily_trades = [t for t in self.trade_history if datetime.fromtimestamp(t['time'] / 1000).date() == today]
+                weekly_trades = [t for t in self.trade_history if datetime.fromtimestamp(t['time'] / 1000).date() >= week_ago]
+                
+                daily_pnl = sum(t['pnl'] for t in daily_trades)
+                weekly_pnl = sum(t['pnl'] for t in weekly_trades)
+                
+                self.config['daily_return'] = daily_pnl / self.config['portfolio_value'] if self.config['portfolio_value'] > 0 else 0.0
+                self.config['weekly_return'] = weekly_pnl / self.config['portfolio_value'] if self.config['portfolio_value'] > 0 else 0.0
+            
+            # Calculate account risk level
+            position_value = sum(abs(pos['size'] * pos['current_price']) for pos in self.config['open_positions'])
+            margin_ratio = position_value / self.config['portfolio_value'] if self.config['portfolio_value'] > 0 else 0.0
+            
+            if margin_ratio > 0.8:
+                self.config['account_risk_level'] = 'HIGH'
+            elif margin_ratio > 0.5:
+                self.config['account_risk_level'] = 'MEDIUM'
+            else:
+                self.config['account_risk_level'] = 'LOW'
+                
+        except Exception as e:
+            self.logger.error(f"Failed to update performance metrics: {e}")
+    
+    def _update_sentiment_data(self, symbol):
+        """Update sentiment data like funding rate, open interest, etc."""
+        try:
+            # Funding rate is already fetched in _update_all_data
+            
+            # Fetch open interest
+            open_interest = self.executor.client.open_interest(symbol=symbol)
+            self.config['sentiment']['open_interest'] = float(open_interest['openInterest'])
+            
+            # Fetch long/short ratio
+            long_short_ratio = self.executor.client.long_short_ratio(symbol=symbol, period='5m', limit=1)
+            self.config['sentiment']['long_short_ratio'] = float(long_short_ratio[0]['longShortRatio'])
+            
+            # Fear & Greed index (simplified calculation)
+            # In a real implementation, this would come from an external API
+            price_change = (self.config['current_price'] - self.config['price_history'][-2]) / self.config['price_history'][-2] if len(self.config['price_history']) > 1 else 0
+            volume_change = 0  # Would need volume history
+            
+            # Simple calculation based on price change
+            if price_change > 0.05:  # 5% increase
+                self.config['sentiment']['fear_greed_index'] = 80  # Greed
+            elif price_change > 0.02:  # 2% increase
+                self.config['sentiment']['fear_greed_index'] = 60  # Greed
+            elif price_change < -0.05:  # 5% decrease
+                self.config['sentiment']['fear_greed_index'] = 20  # Fear
+            elif price_change < -0.02:  # 2% decrease
+                self.config['sentiment']['fear_greed_index'] = 40  # Fear
+            else:
+                self.config['sentiment']['fear_greed_index'] = 50  # Neutral
+                
+        except Exception as e:
+            self.logger.error(f"Failed to update sentiment data: {e}")
+    
+    def _check_alerts(self):
+        """Check and trigger alerts based on conditions"""
+        current_price = self.config['current_price']
+        
+        # Price alerts
+        if current_price >= self.alerts['price_high']:
+            self._add_alert(f"Price alert: BTC above {self.alerts['price_high']}")
+        elif current_price <= self.alerts['price_low']:
+            self._add_alert(f"Price alert: BTC below {self.alerts['price_low']}")
+        
+        # Liquidation alerts
+        for pos in self.config['open_positions']:
+            if pos['liquidation_price'] > 0 and current_price <= pos['liquidation_price'] * 1.05:  # 5% buffer
+                self._add_alert(f"Liquidation warning: {pos['symbol']} position at {pos['liquidation_price']}")
+        
+        # Risk alerts
+        if self.config['account_risk_level'] == 'HIGH':
+            self._add_alert("High account risk level detected")
+    
+    def _add_alert(self, message):
+        """Add an alert to the alerts list"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.config['alerts'].append(f"[{timestamp}] {message}")
+        
+        # Keep only the last 10 alerts
+        if len(self.config['alerts']) > 10:
+            self.config['alerts'] = self.config['alerts'][-10:]
 
     def _execute_trading_strategy(self):
         current_price = self.config['current_price']
@@ -845,6 +1129,30 @@ class TradingDashboard:
             for pos in self.config['open_positions']:
                 pos['current_price'] = self.config['current_price']
                 pos['pnl'] = (pos['current_price'] - pos['entry_price']) * pos['size']
+
+    def _generate_signals(self, data: pd.DataFrame) -> tuple:
+        if data.empty or len(data) < self.rsi_period:
+            self.logger.warning("Insufficient data for signals")
+            return False, False
+        try:
+            df = data.copy()
+            df['ema_short'] = talib.EMA(df['close'].values, timeperiod=self.ema_short_period)
+            df['ema_long'] = talib.EMA(df['close'].values, timeperiod=self.ema_long_period)
+            df['rsi'] = talib.RSI(df['close'].values, timeperiod=self.rsi_period)
+            latest = df.iloc[-1]
+            buy_signal = (
+                latest['ema_short'] > latest['ema_long'] and 
+                latest['rsi'] < self.rsi_oversold
+            )
+            sell_signal = (
+                latest['ema_short'] < latest['ema_long'] and 
+                latest['rsi'] > self.rsi_overbought
+            )
+            self.logger.info(f"Signal Check: EMA9={latest['ema_short']:.2f}, EMA21={latest['ema_long']:.2f}, RSI={latest['rsi']:.2f}, Buy={buy_signal}, Sell={sell_signal}")
+            return buy_signal, sell_signal
+        except Exception as e:
+            self.logger.error(f"Error generating signals: {e}")
+            return False, False
 
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)

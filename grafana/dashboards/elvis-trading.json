@@ -1,0 +1,365 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "BTC/USDT Price Trend",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_current_price",
+          "legendFormat": "Price",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "usd",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "Portfolio Value",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_portfolio_value",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "usd",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 10000}
+            ]
+          }
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+    },
+    {
+      "title": "Trades per Minute",
+      "type": "barchart",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(elvis_trade_count_total[5m])",
+          "legendFormat": "{{side}}",
+          "refId": "A"
+        }
+      ],
+      "options": {"stacking": "normal"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "title": "Open Positions",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_open_positions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8}
+    },
+    {
+      "title": "EMA (9 & 21)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_ema_short",
+          "legendFormat": "EMA 9",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_ema_long",
+          "legendFormat": "EMA 21",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "usd"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+    },
+    {
+      "title": "RSI",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_rsi",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 30},
+              {"color": "green", "value": 70}
+            ]
+          }
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 16}
+    },
+    {
+      "title": "MACD",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_macd",
+          "legendFormat": "MACD",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_macd_signal",
+          "legendFormat": "Signal",
+          "refId": "B"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+    },
+    {
+      "title": "Bollinger Bands",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_bb_upper",
+          "legendFormat": "Upper",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_bb_lower",
+          "legendFormat": "Lower",
+          "refId": "B"
+        },
+        {
+          "expr": "elvis_sma",
+          "legendFormat": "SMA 20",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "usd"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32}
+    },
+    {
+      "title": "Funding Rate",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_funding_rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": -0.1,
+          "max": 0.1
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 32}
+    },
+    {
+      "title": "System Usage",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_cpu_usage",
+          "legendFormat": "CPU",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_memory_usage",
+          "legendFormat": "Memory",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 80}
+            ]
+          }
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 32}
+    },
+    {
+      "title": "Order Book Depth",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_order_book_bids",
+          "legendFormat": "Bids",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_order_book_asks",
+          "legendFormat": "Asks",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40}
+    },
+    {
+      "title": "Order Book Volume",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_order_book_bid_volume",
+          "legendFormat": "Bid Volume",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_order_book_ask_volume",
+          "legendFormat": "Ask Volume",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "btc"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40}
+    },
+    {
+      "title": "Order Book Spread",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_order_book_spread",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "usd"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 48}
+    },
+    {
+      "title": "Pending Orders",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_pending_orders",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 48}
+    },
+    {
+      "title": "Pending Buy Orders",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_pending_orders_buy",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {"mode": "thresholds", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}}
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 48}
+    },
+    {
+      "title": "Pending Sell Orders",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "elvis_pending_orders_sell",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {"mode": "thresholds", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}]}}
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 56}
+    }
+  ],
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["elvis", "trading"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "ELVIS Trading Dashboard",
+  "uid": "elvis-trading",
+  "version": 1
+} 

@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s  # How often to scrape metrics
+  evaluation_interval: 15s  # How often to evaluate rules
+
+scrape_configs:
+  - job_name: 'elvis'
+    static_configs:
+      - targets: ['localhost:8000']  # ELVIS will expose metrics here
