@@ -261,64 +261,68 @@ class AgentDiscretePPO(AgentPPO):
         super().__init__(net_dim, state_dim, action_dim, gpu_id, args)
 
 
-# FIXME: this class is incomplete
 class AgentSharePPO(AgentPPO):
-    def __init__(self):
-        AgentPPO.__init__(self)
-        self.obj_c = (-np.log(0.5)) ** 0.5  # for reliable_lambda
+    """
+    Shared-parameter Proximal Policy Optimization (PPO) agent using SharePPO architecture.
 
-    def init(
-        self,
-        net_dim=256,
-        state_dim=8,
-        action_dim=2,
-        reward_scale=1.0,
-        gamma=0.99,
-        learning_rate=1e-4,
-        if_per_or_gae=False,
-        env_num=1,
-        gpu_id=0,
-    ):
-        self.device = torch.device(
-            f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
-        )
-        if if_per_or_gae:
+    Args:
+        net_dim (int): Network width.
+        state_dim (int): State dimension.
+        action_dim (int): Action dimension.
+        gpu_id (int): GPU device ID.
+        args (object): Arguments with learning_rate, etc.
+
+    Example:
+        agent = AgentSharePPO(net_dim=256, state_dim=8, action_dim=2, gpu_id=0, args=args)
+        # ... training loop ...
+    """
+
+    def __init__(self, net_dim, state_dim, action_dim, gpu_id=0, args=None):
+        self.obj_c = (-np.log(0.5)) ** 0.5  # for reliable_lambda
+        self.device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+        self.lambda_a_value = getattr(args, "lambda_a_value", 1.0)
+        self.if_use_cri_target = getattr(args, "if_use_cri_target", False)
+        self.ratio_clip = getattr(args, "ratio_clip", 0.25)
+        self.lambda_entropy = getattr(args, "lambda_entropy", 0.02)
+        self.batch_size = getattr(args, "batch_size", 64)
+        self.repeat_times = getattr(args, "repeat_times", 1)
+        self.soft_update_tau = getattr(args, "soft_update_tau", 5e-3)
+
+        if getattr(args, "if_use_gae", False):
             self.get_reward_sum = self.get_reward_sum_gae
         else:
             self.get_reward_sum = self.get_reward_sum_raw
 
         self.act = self.cri = SharePPO(state_dim, action_dim, net_dim).to(self.device)
-
+        self.cri_target = deepcopy(self.cri)
         self.cri_optim = torch.optim.Adam(
             [
-                {"params": self.act.enc_s.parameters(), "lr": learning_rate * 0.9},
-                {
-                    "params": self.act.dec_a.parameters(),
-                },
-                {
-                    "params": self.act.a_std_log,
-                },
-                {
-                    "params": self.act.dec_q1.parameters(),
-                },
-                {
-                    "params": self.act.dec_q2.parameters(),
-                },
+                {"params": self.act.enc_s.parameters(), "lr": args.learning_rate * 0.9},
+                {"params": self.act.dec_a.parameters()},
+                {"params": self.act.a_std_log},
+                {"params": self.act.dec_q1.parameters()},
+                {"params": self.act.dec_q2.parameters()},
             ],
-            lr=learning_rate,
+            lr=args.learning_rate,
         )
         self.criterion = torch.nn.SmoothL1Loss()
 
-    def update_net(self, buffer, batch_size, repeat_times, soft_update_tau):
+    def update_net(self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None):
+        """
+        Update the shared-parameter PPO networks.
+        """
+        batch_size = batch_size or self.batch_size
+        repeat_times = repeat_times or self.repeat_times
+        soft_update_tau = soft_update_tau or self.soft_update_tau
+
         with torch.no_grad():
             buf_len = buffer[0].shape[0]
             buf_state, buf_action, buf_noise, buf_reward, buf_mask = [
                 ten.to(self.device) for ten in buffer
             ]
-            # (ten_state, ten_action, ten_noise, ten_reward, ten_mask) = buffer
 
-            """get buf_r_sum, buf_logprob"""
-            bs = 2**10  # set a smaller 'BatchSize' when out of GPU memory.
+            # get buf_r_sum, buf_logprob
+            bs = 2**10
             buf_value = [
                 self.cri_target(buf_state[i : i + bs]) for i in range(0, buf_len, bs)
             ]
@@ -327,12 +331,11 @@ class AgentSharePPO(AgentPPO):
 
             buf_r_sum, buf_adv_v = self.get_reward_sum(
                 buf_len, buf_reward, buf_mask, buf_value
-            )  # detach()
-            buf_adv_v = (buf_adv_v - buf_adv_v.mean()) * (
-                self.lambda_a_value / torch.std(buf_adv_v) + 1e-5
             )
-            # buf_adv_v: buffer data of adv_v value
-            del buf_noise, buffer[:]
+            buf_adv_v = (buf_adv_v - buf_adv_v.mean()) * (
+                self.lambda_a_value / (torch.std(buf_adv_v) + 1e-5)
+            )
+            del buf_noise
 
         obj_critic = obj_actor = None
         for _ in range(int(buf_len / batch_size * repeat_times)):
@@ -342,28 +345,25 @@ class AgentSharePPO(AgentPPO):
 
             state = buf_state[indices]
             r_sum = buf_r_sum[indices]
-            adv_v = buf_adv_v[indices]  # advantage value
+            adv_v = buf_adv_v[indices]
             action = buf_action[indices]
             logprob = buf_logprob[indices]
 
-            """PPO: Surrogate objective of Trust Region"""
+            # PPO: Surrogate objective of Trust Region
             new_logprob, obj_entropy = self.act.get_logprob_entropy(state, action)
-            # it is obj_actor  # todo net.py sharePPO
             ratio = (new_logprob - logprob.detach()).exp()
             surrogate1 = adv_v * ratio
             surrogate2 = adv_v * ratio.clamp(1 - self.ratio_clip, 1 + self.ratio_clip)
             obj_surrogate = -torch.min(surrogate1, surrogate2).mean()
             obj_actor = obj_surrogate + obj_entropy * self.lambda_entropy
 
-            value = self.cri(state).squeeze(
-                1
-            )  # critic network predicts the reward_sum (Q value) of state
+            value = self.cri(state).squeeze(1)
             obj_critic = self.criterion(value, r_sum) / (r_sum.std() + 1e-6)
 
             obj_united = obj_critic + obj_actor
-            self.optim_update(self.cri_optim, obj_united)
+            self.optimizer_update(self.cri_optim, obj_united)
             if self.if_use_cri_target:
                 self.soft_update(self.cri_target, self.cri, soft_update_tau)
 
         a_std_log = getattr(self.act, "a_std_log", torch.zeros(1)).mean()
-        return obj_critic.item(), obj_actor.item(), a_std_log.item()  # logging_tuple
+        return obj_critic.item(), obj_actor.item(), a_std_log.item()

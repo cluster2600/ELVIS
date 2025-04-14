@@ -474,6 +474,107 @@ Prioritize fixing the critical issues:
 
 ## [Unreleased]
 
+## need help
+
+**Date:** 2025-04-14
+
+**Summary:** Full reprogramming of ELVIS bot to match README.md specification.
+
+### Key Requirements from README.md
+
+- Modular architecture: strategies, ML models, risk, data, monitoring, notification
+- Real and simulated trading modes (testnet, paper, live)
+- Strategy execution: ML, RL, technical, ensemble, regime detection
+- Advanced risk management: Kelly, drawdown, circuit breakers, portfolio
+- Data processing: on-chain, order book, funding, technicals
+- Strategy validation: Monte Carlo, walk-forward, stats, stress
+- Monitoring: Prometheus, Grafana, dashboards, alerts
+- Config-driven, extensible, robust error handling
+
+### Plan
+
+1. Architect a new main event loop and modular structure:
+   - Config loading
+   - Data pipeline (real or mock)
+   - Strategy selection and execution
+   - Risk management and position sizing
+   - Trade execution (real or simulated)
+   - Monitoring and logging (Prometheus, Grafana)
+   - Notification/alert system
+   - CLI and dashboard support
+
+2. Refactor or reimplement main.py and dashboard to:
+   - Orchestrate all modules as per the architecture
+   - Ensure all features in README.md are covered
+   - Provide robust error handling and logging
+   - Support both simulation and real trading
+
+3. Incrementally implement and test each module:
+   - Data fetching and processing
+   - Strategy execution and switching
+   - Risk management enforcement
+   - Trade execution and simulation
+   - Monitoring and alerting
+
+**Request:** Confirm this plan and specify any priorities or constraints before proceeding with the full reimplementation.
+
+## need help
+
+**Date:** 2025-04-14
+
+**Summary:** Analysis of all Python files in the ELVIS project and proposals for new or improved features.
+
+### Explicit Gaps & TODOs
+1. **Incomplete DRL Agents:**
+   - `AgentShareSAC` and `AgentSharePPO` in `drl_agents/agents/AgentSAC.py` and `AgentPPO.py` are marked as incomplete. Completing these would enable advanced multi-agent or parameter-sharing DRL.
+2. **Unresolved Technical TODO:**
+   - In `function_PBO.py`, histogram plotting is disabled due to errors with large S values. Fixing this would improve robustness for large-scale PBO analysis.
+
+### Opportunities for New or Improved Features
+
+#### 1. Model Layer
+- **Model Explainability:** Integrate SHAP/LIME for all major models (RandomForest, NeuralNetwork, Transformer, Ensemble) to provide feature importance and local explanations.
+- **Automated Hyperparameter Optimization:** Add support for Optuna or similar libraries for model tuning.
+- **Online/Incremental Learning:** Enable models to update with new data in real time.
+
+#### 2. Strategies
+- **Options/Derivatives Strategies:** Implement options trading and volatility/hedging strategies as outlined in `docs/future_improvements.md`.
+- **Meta-Strategy/Regime Switching:** Add a meta-strategy that selects or weights strategies based on detected market regime.
+- **Advanced Position Sizing:** Expand on Kelly Criterion and add dynamic risk allocation based on market regime and portfolio context.
+
+#### 3. DRL Agents
+- **Complete and Document Incomplete Agents:** Finalize `AgentShareSAC` and `AgentSharePPO`. Add usage examples and tests.
+- **Multi-Agent/Collaborative DRL:** Develop multi-agent systems for collaborative or competitive trading.
+- **Custom Reward Functions:** Allow user-defined reward shaping for DRL agents.
+
+#### 4. Dashboard & User Experience
+- **Web-Based Dashboard:** Build a real-time web dashboard (e.g., with Dash or Streamlit) for monitoring, configuration, and analytics.
+- **Strategy Backtesting Interface:** Add a user-friendly interface for running and visualizing backtests.
+- **Enhanced Notification System:** Integrate more channels (email, Slack) and add alerting for risk events.
+
+#### 5. Risk Management
+- **Portfolio-Level Risk Management:** Implement cross-asset risk controls and correlation-based position limits.
+- **Drawdown Protection:** Add circuit breakers and volatility-based position scaling.
+- **Audit Logging:** Enhance logging for all risk events and trading actions.
+
+#### 6. Data & Infrastructure
+- **Alternative Data Sources:** Integrate on-chain, order book, and funding rate data for crypto.
+- **Distributed/Cloud Deployment:** Containerize with Docker, add CI/CD, and support cloud storage for historical data.
+- **Data Quality Pipelines:** Improve outlier/missing data handling and add validation pipelines.
+
+#### 7. Testing & Validation
+- **Walk-Forward Analysis:** Enhance walk-forward and regime-based parameter optimization.
+- **Statistical Validation:** Add White's Reality Check and more bootstrap/statistical tests.
+
+### Questions for User/Experts
+1. Which of these new features or improvements should be prioritized?
+2. Are there specific pain points in the current workflow or missing features not listed here?
+3. Is there a preferred direction for dashboard/UI development (web, CLI, hybrid)?
+4. Should DRL agent development focus on single-agent performance or multi-agent collaboration?
+5. Are there regulatory or security requirements that should guide infrastructure upgrades?
+
+---
+
 ## [23/02/2025] - Eureka
 - Successfully executed the `random_forest.py` script.
 - Installed necessary dependencies: `transformers`, `openpyxl`, `tensorflow_decision_forests`, and `accelerate`.

@@ -228,34 +228,27 @@ class AgentModSAC(
         return self.obj_c, -obj_actor.item(), alpha.item()
 
 
-# FIXME: this class is incomplete
-class AgentShareSAC(AgentSAC):  # Integrated Soft Actor-Critic
-    def __init__(self):
-        AgentSAC.__init__(self)
+class AgentShareSAC(AgentSAC):
+    """
+    Integrated Soft Actor-Critic agent with shared parameters for actor and critic (ShareSPG).
+    This implementation enables parameter sharing and efficient multi-agent or distributed RL.
+
+    Args:
+        net_dim (int): Network width.
+        state_dim (int): State dimension.
+        action_dim (int): Action dimension.
+        gpu_id (int): GPU device ID.
+        args (object): Arguments with learning_rate, etc.
+
+    Example:
+        agent = AgentShareSAC(net_dim=256, state_dim=8, action_dim=2, gpu_id=0, args=args)
+        # ... training loop ...
+    """
+
+    def __init__(self, net_dim, state_dim, action_dim, gpu_id=0, args=None):
         self.obj_critic = (-np.log(0.5)) ** 0.5  # for reliable_lambda
-        self.cri_optim = None
-
-        self.target_entropy = None
-        self.alpha_log = None
-
-    def init(
-        self,
-        net_dim=256,
-        state_dim=8,
-        action_dim=2,
-        reward_scale=1.0,
-        gamma=0.99,
-        learning_rate=1e-4,
-        if_per_or_gae=False,
-        env_num=1,
-        gpu_id=0,
-    ):
-        """
-        Explict call ``self.init()`` to overwrite the ``self.object`` in ``__init__()`` for multiprocessing.
-        """
-        self.device = torch.device(
-            f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
-        )
+        self.if_use_act_target = True
+        self.device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
         self.alpha_log = torch.tensor(
             (-np.log(action_dim) * np.e,),
             dtype=torch.float32,
@@ -265,42 +258,46 @@ class AgentShareSAC(AgentSAC):  # Integrated Soft Actor-Critic
         self.target_entropy = np.log(action_dim)
         self.act = self.cri = ShareSPG(net_dim, state_dim, action_dim).to(self.device)
         self.act_target = self.cri_target = deepcopy(self.act)
-
         self.cri_optim = torch.optim.Adam(
             [
-                {"params": self.act.enc_s.parameters(), "lr": learning_rate * 1.5},
-                {
-                    "params": self.act.enc_a.parameters(),
-                },
-                {"params": self.act.net.parameters(), "lr": learning_rate * 1.5},
-                {
-                    "params": self.act.dec_a.parameters(),
-                },
-                {
-                    "params": self.act.dec_d.parameters(),
-                },
-                {
-                    "params": self.act.dec_q1.parameters(),
-                },
-                {
-                    "params": self.act.dec_q2.parameters(),
-                },
+                {"params": self.act.enc_s.parameters(), "lr": args.learning_rate * 1.5},
+                {"params": self.act.enc_a.parameters()},
+                {"params": self.act.net.parameters(), "lr": args.learning_rate * 1.5},
+                {"params": self.act.dec_a.parameters()},
+                {"params": self.act.dec_d.parameters()},
+                {"params": self.act.dec_q1.parameters()},
+                {"params": self.act.dec_q2.parameters()},
                 {"params": (self.alpha_log,)},
             ],
-            lr=learning_rate,
+            lr=args.learning_rate,
         )
+        self.criterion = torch.nn.SmoothL1Loss(reduction="mean")
+        self.batch_size = getattr(args, "batch_size", 64)
+        self.repeat_times = getattr(args, "repeat_times", 1)
+        self.soft_update_tau = getattr(args, "soft_update_tau", 5e-3)
 
-        if if_per_or_gae:  # if_use_per
-            self.criterion = torch.nn.SmoothL1Loss(reduction="none")
-            self.get_obj_critic = self.get_obj_critic_per
-        else:
-            self.criterion = torch.nn.SmoothL1Loss(reduction="mean")
-            self.get_obj_critic = self.get_obj_critic_raw
+    def get_obj_critic(self, buffer, batch_size, alpha):
+        """
+        Compute critic loss for shared-parameter SAC.
+        """
+        with torch.no_grad():
+            reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
+            next_a, next_log_prob = self.act_target.get_action_logprob(next_s)
+            next_q1, next_q2 = self.act_target.get_q1_q2(next_s, next_a)
+            next_q = torch.min(next_q1, next_q2)
+            q_label = reward + mask * (next_q + next_log_prob * alpha)
+        q1, q2 = self.act.get_q1_q2(state, action)
+        obj_critic = (self.criterion(q1, q_label) + self.criterion(q2, q_label)) / 2
+        return obj_critic, state
 
-    def update_net(
-        self, buffer, batch_size, repeat_times, soft_update_tau
-    ) -> tuple:  # 1111
+    def update_net(self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None):
+        """
+        Update the shared-parameter SAC networks.
+        """
         buffer.update_now_len()
+        batch_size = batch_size or self.batch_size
+        repeat_times = repeat_times or self.repeat_times
+        soft_update_tau = soft_update_tau or self.soft_update_tau
 
         obj_actor = None
         update_a = 0
@@ -308,41 +305,35 @@ class AgentShareSAC(AgentSAC):  # Integrated Soft Actor-Critic
         for update_c in range(1, int(buffer.now_len / batch_size * repeat_times)):
             alpha = self.alpha_log.exp()
 
-            """objective of critic"""
+            # Critic update
             obj_critic, state = self.get_obj_critic(buffer, batch_size, alpha)
-            self.obj_critic = (
-                0.995 * self.obj_critic + 0.0025 * obj_critic.item()
-            )  # for reliable_lambda
-            reliable_lambda = np.exp(-self.obj_critic**2)  # for reliable_lambda
+            self.obj_critic = 0.995 * self.obj_critic + 0.0025 * obj_critic.item()
+            reliable_lambda = np.exp(-self.obj_critic**2)
 
-            """objective of alpha (temperature parameter automatic adjustment)"""
-            a_noise_pg, logprob = self.act.get_action_logprob(state)  # policy gradient
+            # Alpha (temperature) update
+            a_noise_pg, logprob = self.act.get_action_logprob(state)
             obj_alpha = (
                 self.alpha_log
                 * (logprob - self.target_entropy).detach()
                 * reliable_lambda
             ).mean()
+            self.optimizer_update(self.cri_optim, obj_alpha)
             with torch.no_grad():
                 self.alpha_log[:] = self.alpha_log.clamp(-16, 2).detach()
 
-            """objective of actor using reliable_lambda and TTUR (Two Time-scales Update Rule)"""
+            # Actor update with TTUR
             if_update_a = update_a / update_c < 1 / (2 - reliable_lambda)
-            if if_update_a:  # auto TTUR
+            if if_update_a:
                 update_a += 1
-
-                q_value_pg = torch.min(
-                    *self.act_target.get_q1_q2(state, a_noise_pg)
-                ).mean()  # twin critics
-                obj_actor = -(
-                    q_value_pg + logprob * alpha.detach()
-                ).mean()  # policy gradient
-
+                q1_pg, q2_pg = self.act_target.get_q1_q2(state, a_noise_pg)
+                q_value_pg = torch.min(q1_pg, q2_pg).mean()
+                obj_actor = -(q_value_pg + logprob * alpha.detach()).mean()
                 obj_united = obj_critic + obj_alpha + obj_actor * reliable_lambda
             else:
                 obj_united = obj_critic + obj_alpha
 
-            self.optim_update(self.cri_optim, obj_united)
+            self.optimizer_update(self.cri_optim, obj_united)
             if self.if_use_act_target:
                 self.soft_update(self.act_target, self.act, soft_update_tau)
 
-        return self.obj_critic, obj_actor.item(), alpha.item()
+        return self.obj_critic, (obj_actor.item() if obj_actor is not None else 0.0), alpha.item()

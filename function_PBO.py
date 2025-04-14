@@ -414,27 +414,38 @@ def plot_pbo(pbo_result, name_exp, hist=False):
     plot1_perfdeg.legend(loc="best")
 
     # Plot 2
-    # TODO hist is turned off at the moment. Error occurs when S is set to
-    # a relatively large number, such as 16.
-    plot2_logitsfreq = sns.distplot(
-        pbo_result.logits,
-        rug=True,
-        # bins=10,  # default might be more useful
-        rug_kws={"color": "r", "alpha": 0.5},
-        kde_kws={"color": "k", "lw": 2.0, "label": "KDE"},
-        hist=hist,
-        hist_kws={
-            "histtype": "step",
-            "linewidth": 2.0,
-            "alpha": 0.7,
-            "color": "g",
-        },
-    )
-    plot2_logitsfreq.axvline(0, c="r", ls="--")
-    #plot2_logitsfreq.set_title("Frequency Dist. of Rank Logits, PBO = " + str(0.8) + '%')
-    plot2_logitsfreq.set_title("Frequency Dist. of Rank Logits, PBO = " + str(round(pbo_result[0] * 100, 2)) + '%')
-    plot2_logitsfreq.set_xlabel("Logits")
-    plot2_logitsfreq.set_ylabel("Frequency")
+    # Robust histogram/KDE plot for logits, even for large S
+    try:
+        logits = np.asarray(pbo_result.logits)
+        logits = logits[np.isfinite(logits)]  # Remove inf/nan
+        if logits.ndim > 1:
+            logits = logits.flatten()
+        if len(logits) > 10000:
+            # Downsample for very large S to avoid plotting issues
+            logits = np.random.choice(logits, size=10000, replace=False)
+        bins = min(50, max(10, len(logits) // 100))  # Adaptive bin count
+
+        plot2_logitsfreq = sns.distplot(
+            logits,
+            rug=True,
+            bins=bins,
+            rug_kws={"color": "r", "alpha": 0.5},
+            kde_kws={"color": "k", "lw": 2.0, "label": "KDE"},
+            hist=hist,
+            hist_kws={
+                "histtype": "step",
+                "linewidth": 2.0,
+                "alpha": 0.7,
+                "color": "g",
+            },
+        )
+        plot2_logitsfreq.axvline(0, c="r", ls="--")
+        plot2_logitsfreq.set_title("Frequency Dist. of Rank Logits, PBO = " + str(round(pbo_result[0] * 100, 2)) + '%')
+        plot2_logitsfreq.set_xlabel("Logits")
+        plot2_logitsfreq.set_ylabel("Frequency")
+    except Exception as e:
+        print(f"[plot_pbo] Warning: Could not plot logits histogram/KDE due to: {e}")
+        print(f"Logits shape: {getattr(logits, 'shape', None)}; dtype: {getattr(logits, 'dtype', None)}; hist={hist}")
 
 
     # Plot 3

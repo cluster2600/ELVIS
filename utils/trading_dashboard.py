@@ -296,10 +296,9 @@ class TradingDashboard:
         )
         
         # Initialize performance monitor
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor(logger=self.logger)
         
-        # Initialize metrics
-        self._initialize_metrics()
+        # (Removed call to self._initialize_metrics() - method does not exist)
         
         self.logger.info(f"TradingDashboard initialized in {mode} mode")
         self.logger.info(f"Using strategy: {strategy.__class__.__name__}")

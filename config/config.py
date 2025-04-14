@@ -31,13 +31,19 @@ TRADING_CONFIG = {
     'COOLDOWN': 3600.0,
     'SLEEP_INTERVAL': 300.0,
     'MAX_TRADES_PER_DAY': 10,
+    'MAX_DAILY_TRADES': 10,  # For backward compatibility with main.py
     'MIN_CAPITAL_USD': 1000.0,
     'DATA_LIMIT': 200,
     'PRODUCTION_MODE': False,  # Keep False for testnet
     'DEFAULT_MODE': 'paper',
     'CREATE_MOCK_POSITION': True,
     'MOCK_TRADES_COUNT': 50,
-    'MOCK_POSITIONS_COUNT': 5
+    'MOCK_POSITIONS_COUNT': 5,
+    'MAX_POSITION_SIZE': 0.1,
+    'MAX_DAILY_TRADES': 10,
+    'MAX_DAILY_LOSS': -500.0,
+    'MAX_DRAWDOWN': 0.2,
+    'RISK_PER_TRADE': 0.01,
 }
 
 def validate_config():
