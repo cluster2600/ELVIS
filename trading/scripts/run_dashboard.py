@@ -177,7 +177,11 @@ class TradingDashboard:
         self.config['cpu_usage'] = psutil.cpu_percent()
         self.config['memory_usage'] = psutil.virtual_memory().percent
         
-        self.logger.info(f"Updated dashboard - Mode: {'Production' if self.config['PRODUCTION_MODE'] else 'Testnet'}, Portfolio: ${total_balance:.2f}, Price: ${current_price:.2f}")
+        # Add check for zero price and log error
+        if current_price <= 0:
+            self.logger.error("Invalid current price fetched; skipping update.")
+        else:
+            self.logger.info(f"Updated dashboard - Mode: {'Production' if self.config['PRODUCTION_MODE'] else 'Testnet'}, Portfolio: ${total_balance:.2f}, Price: ${current_price:.2f}")
         self.logger.info(f"Open positions: {len(open_positions)}")
         for pos in open_positions:
             self.logger.info(f"Position: {pos['symbol']} - Size: {pos['size']}, PnL: ${pos['pnl']:.2f} ({pos['pnl_percentage']:.2f}%)")
@@ -207,9 +211,11 @@ class TradingDashboard:
                 latest['rsi'] > self.rsi_overbought
             )
             
+            # Enhanced logging for signal generation
             self.logger.info(f"Signal Check: EMA9={latest['ema_short']:.2f}, EMA21={latest['ema_long']:.2f}, RSI={latest['rsi']:.2f}, Volatility={latest['volatility']:.4f if not pd.isna(latest['volatility']) else 'NaN'}, Buy={buy_signal}, Sell={sell_signal}")
-            return buy_signal, sell_signal
-            
+            if df.empty:
+                self.logger.warning("Data frame is empty; signals not generated.")
+                return buy_signal, sell_signal
         except Exception as e:
             self.logger.error(f"Error generating signals: {e}")
             return False, False

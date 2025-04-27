@@ -49,30 +49,47 @@ class EmaRsiStrategy(BaseStrategy):
         Returns:
             Tuple[bool, bool]: A tuple of (buy_signal, sell_signal).
         """
-        if data.empty:
-            self.logger.warning("Empty data provided to generate_signals")
+        if data.empty or len(data) < max(self.ema_long_period, self.rsi_period, 20):
+            self.logger.warning("Insufficient data provided to generate_signals")
             return False, False
         
         try:
             # Make a copy of the data to avoid SettingWithCopyWarning
             df = data.copy()
             
-            # Calculate indicators if they don't exist
+            # Calculate indicators if they don't exist, with checks for sufficient data
             if 'ema_short' not in df.columns:
-                df.loc[:, 'ema_short'] = talib.EMA(df['close'].values, timeperiod=self.ema_short_period)
+                if len(df) >= self.ema_short_period:
+                    df.loc[:, 'ema_short'] = talib.EMA(df['close'].values, timeperiod=self.ema_short_period)
+                else:
+                    df.loc[:, 'ema_short'] = df['close']
             
             if 'ema_long' not in df.columns:
-                df.loc[:, 'ema_long'] = talib.EMA(df['close'].values, timeperiod=self.ema_long_period)
+                if len(df) >= self.ema_long_period:
+                    df.loc[:, 'ema_long'] = talib.EMA(df['close'].values, timeperiod=self.ema_long_period)
+                else:
+                    df.loc[:, 'ema_long'] = df['close']
             
             if 'rsi' not in df.columns:
-                df.loc[:, 'rsi'] = talib.RSI(df['close'].values, timeperiod=self.rsi_period)
+                if len(df) >= self.rsi_period:
+                    df.loc[:, 'rsi'] = talib.RSI(df['close'].values, timeperiod=self.rsi_period)
+                else:
+                    df.loc[:, 'rsi'] = 50.0  # Neutral RSI if insufficient data
             
             if 'volatility' not in df.columns:
                 # Calculate volatility as the standard deviation of returns
-                df.loc[:, 'volatility'] = df['close'].pct_change().rolling(20).std() * np.sqrt(252)
+                if len(df) >= 20:
+                    df.loc[:, 'volatility'] = df['close'].pct_change().rolling(20).std() * np.sqrt(252)
+                else:
+                    df.loc[:, 'volatility'] = 0.0
             
             # Get the latest data point
             latest = df.iloc[-1]
+            
+            # Check if indicators have valid values
+            if pd.isna(latest['ema_short']) or pd.isna(latest['ema_long']) or pd.isna(latest['rsi']) or pd.isna(latest['volatility']):
+                self.logger.warning("Indicator calculation resulted in NaN values")
+                return False, False
             
             # Generate buy signal
             # EMA short > EMA long (bullish trend), RSI < oversold threshold, volatility > threshold

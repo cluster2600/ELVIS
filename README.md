@@ -102,6 +102,8 @@ The system uses YAML configuration files for different components:
 - `trading/config/risk_config.yaml`: Risk management parameters
 - `trading/config/data_config.yaml`: Data processing settings
 - `trading/config/validation_config.yaml`: Strategy validation parameters
+- `/opt/homebrew/etc/grafana/provisioning/datasources/datasources.yml`: System location for Prometheus data source configuration
+- `/opt/homebrew/var/lib/grafana/*.json`: System location for Grafana dashboard files
 - `grafana/provisioning/datasources/datasources.yml`: Prometheus data source configuration
 - `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provisioning
 
@@ -136,19 +138,38 @@ The validation script supports:
 
 ### Monitoring with Grafana
 
-ELVIS includes a comprehensive Grafana dashboard for real-time monitoring:
+ELVIS includes a comprehensive Grafana dashboard for real-time monitoring.
+
+**Important:**
+- Prometheus server runs on port 9090 by default (`http://localhost:9090`).
+- The ELVIS app (main.py) must be running and must expose its metrics on port 8000 (`start_http_server(8000)`).
+- Prometheus must be configured to scrape ELVIS metrics from `http://localhost:8000/metrics` (see `/opt/homebrew/etc/prometheus.yml`).
+- Grafana's Prometheus datasource must point to `http://localhost:8000` to visualize ELVIS metrics.
+
+**Troubleshooting:**
+- If you see "No data" in Grafana, ensure main.py is running and that nothing else is using port 8000.
+- You can check if the metrics endpoint is available by running: `curl http://localhost:8000/metrics`
+- If you get "Couldn't connect to server", main.py is not running or is crashing. Check the logs for errors.
+- Prometheus will only collect metrics if the ELVIS app is running and exposing metrics on port 8000.
+
+#### Steps:
 
 1. Start Prometheus:
 ```bash
-prometheus --config.file=prometheus.yml
+prometheus --config.file=/opt/homebrew/etc/prometheus.yml
 ```
 
-2. Start Grafana:
+2. Start the ELVIS app (must be running for metrics to be available):
 ```bash
-grafana-server
+python main.py --mode paper --log-level DEBUG
 ```
 
-3. Access the dashboard at `http://localhost:3000` (default Grafana port)
+3. Start Grafana:
+```bash
+grafana-server --config /opt/homebrew/etc/grafana/grafana.ini
+```
+
+4. Access the dashboard at `http://localhost:3000` (default Grafana port).
 
 The dashboard includes:
 - Real-time BTC/USDT price tracking

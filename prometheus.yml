@@ -1,10 +1,12 @@
 global:
-  scrape_interval: 15s  # How often to scrape metrics
-  evaluation_interval: 15s  # How often to evaluate rules
+  scrape_interval: 15s
 
 scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
   - job_name: 'elvis'
     static_configs:
-      - targets: ['localhost:8000']  # ELVIS will expose metrics here
-    metrics_path: '/metrics'  # Standard Prometheus metrics endpoint
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
     scheme: 'http'

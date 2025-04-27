@@ -3,5 +3,5 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://127.0.0.1:8000
+    url: http://localhost:8000
     basicAuth: false

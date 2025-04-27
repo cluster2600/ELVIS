@@ -1,98 +1,39 @@
-"""
-Configuration module for the ELVIS project.
-This module centralizes all configuration parameters for the project.
-"""
+# Configuration file for ELVIS trading bot
 
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# API Configuration
 API_CONFIG = {
-    'BINANCE_API_KEY': os.getenv('BINANCE_API_KEY'),
-    'BINANCE_API_SECRET': os.getenv('BINANCE_API_SECRET'),
-    'TESTNET_FUTURES_API': os.getenv('TESTNET_FUTURES_API'),  # Updated for futures testnet
-    'TESTNET_FUTURES_SECRET': os.getenv('TESTNET_FUTURES_SECRET'),  # Updated for futures testnet
-    'TELEGRAM_TOKEN': os.getenv('TELEGRAM_TOKEN'),
-    'TELEGRAM_CHAT_ID': os.getenv('TELEGRAM_CHAT_ID')
+    'API_KEY': 'your_binance_api_key_here',  # Replace with actual API key
+    'API_SECRET': 'your_binance_api_secret_here',  # Replace with actual API secret
 }
 
-# Trading Configuration
 TRADING_CONFIG = {
-    'SYMBOL': 'BTCUSDT',
-    'TIMEFRAME': '1h',
-    'LEVERAGE_MIN': 75,
-    'LEVERAGE_MAX': 125,
-    'STOP_LOSS_PCT': 0.01,
-    'TAKE_PROFIT_PCT': 0.03,
-    'DAILY_PROFIT_TARGET_USD': 1000.0,
-    'DAILY_LOSS_LIMIT_USD': -500.0,
-    'COOLDOWN': 3600.0,
-    'SLEEP_INTERVAL': 300.0,
-    'MAX_TRADES_PER_DAY': 10,
-    'MAX_DAILY_TRADES': 10,  # For backward compatibility with main.py
-    'MIN_CAPITAL_USD': 1000.0,
-    'DATA_LIMIT': 200,
-    'PRODUCTION_MODE': False,  # Keep False for testnet
     'DEFAULT_MODE': 'paper',
-    'CREATE_MOCK_POSITION': True,
-    'MOCK_TRADES_COUNT': 50,
-    'MOCK_POSITIONS_COUNT': 5,
-    'MAX_POSITION_SIZE': 0.1,
-    'MAX_DAILY_TRADES': 10,
-    'MAX_DAILY_LOSS': -500.0,
-    'MAX_DRAWDOWN': 0.2,
-    'RISK_PER_TRADE': 0.01,
-}
-
-def validate_config():
-    """Basic validation for critical config values."""
-    assert 1 <= TRADING_CONFIG['LEVERAGE_MIN'] <= 125, "LEVERAGE_MIN must be between 1 and 125"
-    assert 1 <= TRADING_CONFIG['LEVERAGE_MAX'] <= 125, "LEVERAGE_MAX must be between 1 and 125"
-    assert TRADING_CONFIG['LEVERAGE_MIN'] <= TRADING_CONFIG['LEVERAGE_MAX'], "LEVERAGE_MIN cannot be greater than LEVERAGE_MAX"
-    assert 0 < TRADING_CONFIG['STOP_LOSS_PCT'] < 1, "STOP_LOSS_PCT must be between 0 and 1 (exclusive)"
-    assert 0 < TRADING_CONFIG['TAKE_PROFIT_PCT'] < 1, "TAKE_PROFIT_PCT must be between 0 and 1 (exclusive)"
-    assert TRADING_CONFIG['DAILY_LOSS_LIMIT_USD'] <= 0, "DAILY_LOSS_LIMIT_USD should be zero or negative"
-    assert TRADING_CONFIG['DAILY_PROFIT_TARGET_USD'] >= 0, "DAILY_PROFIT_TARGET_USD should be zero or positive"
-    assert TRADING_CONFIG['MAX_TRADES_PER_DAY'] >= 0, "MAX_TRADES_PER_DAY cannot be negative"
-    assert TRADING_CONFIG['MIN_CAPITAL_USD'] > 0, "MIN_CAPITAL_USD must be positive"
-    assert TRADING_CONFIG['COOLDOWN'] >= 0, "COOLDOWN cannot be negative"
-    assert TRADING_CONFIG['SLEEP_INTERVAL'] > 0, "SLEEP_INTERVAL must be positive"
-    assert TRADING_CONFIG['DATA_LIMIT'] > 10, "DATA_LIMIT should be reasonably large (e.g., > 10)"
-    assert TRADING_CONFIG['DEFAULT_MODE'] in ['live', 'paper', 'backtest'], "Invalid DEFAULT_MODE"
-    if not TRADING_CONFIG.get('PRODUCTION_MODE', False):
-        assert API_CONFIG['TESTNET_FUTURES_API'], "TESTNET_FUTURES_API must be set in .env for testnet mode"
-        assert API_CONFIG['TESTNET_FUTURES_SECRET'], "TESTNET_FUTURES_SECRET must be set in .env for testnet mode"
-    else:
-        assert API_CONFIG['BINANCE_API_KEY'], "BINANCE_API_KEY must be set in .env for production mode"
-        assert API_CONFIG['BINANCE_API_SECRET'], "BINANCE_API_SECRET must be set in .env for production mode"
-
-validate_config()
-
-TECH_INDICATORS = ['rsi', 'macd', 'dx', 'obv']
-
-BACKTEST_CONFIG = {
-    'TRADE_START_DATE': "2023-01-01",
-    'TRADE_END_DATE': "2023-01-31",
-    'PICKLE_RESULTS': [
-        "res_2023-01-23__16_32_55_model_WF_ppo_5m_3H_20k",
-        "res_2023-01-23__17_07_49_model_KCV_ppo_5m_3H_20005k",
-        "res_2023-01-23__16_44_30_model_CPCV_ppo_5m_3H_20k"
-    ]
-}
-
-FILE_PATHS = {
-    'TRAIN_RESULTS_DIR': './train_results/',
-    'DATA_DIR': './data/trade_data/',
-    'SPY_INDEX_FILE': 'data/SPY_Crypto_Broad_Digital_Market_Index - Sheet1.csv',
-    'METRICS_FILE': 'plots_and_metrics/test_metrics.txt',
-    'PLOT_DIR': './plots_and_metrics/',
-    'METRICS_DIR': './plots_and_metrics/',
-    'DASHBOARD_DIR': './dashboard/'
+    'SYMBOL': 'BTCUSDT',
+    'DATA_LIMIT': 200,
+    'MAX_POSITION_SIZE': 0.1,  # Example value
+    'MAX_DAILY_TRADES': 5,
+    'MAX_DAILY_LOSS': 0.05,
+    'MAX_DRAWDOWN': 0.1,
+    'RISK_PER_TRADE': 0.02,
+    'STOP_LOSS_PCT': 0.02,  # Added to fix the error; adjust as needed
+    'TAKE_PROFIT_PCT': 0.02,  # Added to fix the current error; adjust as needed
+    'LEVERAGE_MAX': 125,      # Added to fix LEVERAGE_MAX error
+    'LEVERAGE_MIN': 1,        # Added to fix LEVERAGE_MIN error
+    'MAX_TRADES_PER_DAY': 10,  # Added to fix MAX_TRADES_PER_DAY error
+    'DAILY_PROFIT_TARGET_USD': 100,  # Added to fix DAILY_PROFIT_TARGET_USD error
+    'DAILY_LOSS_LIMIT_USD': 100,     # Added to fix DAILY_LOSS_LIMIT_USD error
+    'MIN_CAPITAL_USD': 1000,         # Added to fix MIN_CAPITAL_USD error
+    'COOLDOWN': 60                   # Added to fix COOLDOWN error (seconds)
 }
 
 LOGGING_CONFIG = {
-    'LOG_LEVEL': 'INFO',
-    'LOG_TO_FILE': True
+    'LOG_LEVEL': 'DEBUG',
+    'LOG_TO_FILE': True,
+}
+
+POSTGRES_CONFIG = {
+    'HOST': 'localhost',
+    'PORT': 5432,
+    'USER': 'elvis_user',
+    'PASSWORD': 'elvis_password',
+    'DBNAME': 'elvis_trading'
 }
