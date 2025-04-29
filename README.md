@@ -3,9 +3,11 @@
 ![ELVIS Logo](images/elvis.png)
 
 ## Overview
+
 ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for developing and deploying cryptocurrency trading bots on Binance Futures, specifically targeting BTC/USDT. It integrates various trading strategies, machine learning models (including Random Forest, Neural Networks, Transformers, and Reinforcement Learning), risk management techniques, and performance monitoring tools.
 
 ## Documentation
+
 - [Training Documentation](docs/training.md) - Comprehensive guide to training RL agents
 - [Random Forest Documentation](docs/random_forest.md) - Guide to the Random Forest model implementation
 - [CHANGELOG.md](CHANGELOG.md) - Version history and changes
@@ -16,15 +18,19 @@ ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for 
 This project is inspired by and builds upon several academic papers and research:
 
 - **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.
-- **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features** by Annelotte Bonenkamp (Bachelor Thesis, University of Amsterdam, June 2021)
+- **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features** by Annelotte Bonenkamp, Bachelor Econometrics, 12378593, June 2021.
 - **Attention Is All You Need** by Vaswani et al. (Transformer architecture)
 - **Proximal Policy Optimization Algorithms** by Schulman et al. (PPO implementation)
 - **A Comprehensive Guide to Machine Learning for Trading** by Marcos Lopez de Prado
 
-> **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**  
-> ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.  
-> This project is for educational purposes only and is not production-ready without extensive validation.  
-> Leveraged trading carries high risk—use simulation or Binance Testnet first.  
+> **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**
+>
+> ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.
+>
+> This project is for educational purposes only and is not production-ready without extensive validation.
+>
+> Leveraged trading carries high risk—use simulation or Binance Testnet first.
+>
 > To enable live trading (at your own risk), set `PRODUCTION_MODE: True` in `config/config.py`.
 
 ## Features
@@ -65,23 +71,27 @@ This project is inspired by and builds upon several academic papers and research
 ## Installation
 
 1. Clone the repository:
+
 ```bash
-git clone https://github.com/yourusername/elvis-trading.git
+git clone https://github.com/cluster2600/elvis-trading.git
 cd elvis-trading
 ```
 
 2. Create and activate a virtual environment:
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 3. Install the package in development mode:
+
 ```bash
 pip install -e .
 ```
 
 4. Set up monitoring (optional):
+
 ```bash
 # Install Prometheus
 brew install prometheus  # macOS
@@ -143,175 +153,107 @@ ELVIS includes a comprehensive Grafana dashboard for real-time monitoring.
 **Important:**
 - Prometheus server runs on port 9090 by default (`http://localhost:9090`).
 - The ELVIS app (main.py) must be running and must expose its metrics on port 8000 (`start_http_server(8000)`).
-- Prometheus must be configured to scrape ELVIS metrics from `http://localhost:8000/metrics` (see `/opt/homebrew/etc/prometheus.yml`).
+- Prometheus must be configured to scrape ELVIS metrics from `http://localhost:8000/metrics`.
 - Grafana's Prometheus datasource must point to `http://localhost:8000` to visualize ELVIS metrics.
-
-**Troubleshooting:**
-- If you see "No data" in Grafana, ensure main.py is running and that nothing else is using port 8000.
-- You can check if the metrics endpoint is available by running: `curl http://localhost:8000/metrics`
-- If you get "Couldn't connect to server", main.py is not running or is crashing. Check the logs for errors.
-- Prometheus will only collect metrics if the ELVIS app is running and exposing metrics on port 8000.
 
 #### Steps:
 
 1. Start Prometheus:
+
 ```bash
 prometheus --config.file=/opt/homebrew/etc/prometheus.yml
 ```
 
 2. Start the ELVIS app (must be running for metrics to be available):
+
 ```bash
 python main.py --mode paper --log-level DEBUG
 ```
 
 3. Start Grafana:
+
 ```bash
 grafana-server --config /opt/homebrew/etc/grafana/grafana.ini
 ```
 
 4. Access the dashboard at `http://localhost:3000` (default Grafana port).
 
-The dashboard includes:
-- Real-time BTC/USDT price tracking
-- Portfolio value and performance metrics
-- Technical indicators (EMA, RSI, MACD, Bollinger Bands)
-- Order book depth and volume analysis
-- System resource monitoring
-- Pending orders tracking
+## Architecture Diagram
 
-### Example Strategy
+### Component Interaction
 
-A simple moving average crossover strategy is provided in `examples/simple_strategy.py`:
+```mermaid
+graph TD
+    Main["main.py"]
+    BinanceExecutor["BinanceExecutor"]
+    EnsembleStrategy["EnsembleStrategy"]
+    TelegramNotifier["TelegramNotifier"]
+    ConsoleDashboard["ConsoleDashboard"]
+    PriceFetcher["PriceFetcher"]
+    RiskManager["AdvancedRiskManager"]
+    TradeHistoryAPI["Trade History API Server"]
 
-```python
-def strategy(data: pd.DataFrame, initial_capital: float = 100000, params: dict = None) -> dict:
-    # Calculate moving averages
-    data['short_ma'] = data['close'].rolling(window=params['short_window']).mean()
-    data['long_ma'] = data['close'].rolling(window=params['long_window']).mean()
-    
-    # Generate signals and calculate returns
-    ...
-    
-    return {
-        'returns': returns,
-        'sharpe_ratio': sharpe_ratio,
-        'max_drawdown': max_drawdown,
-        'win_rate': win_rate,
-        'profit_factor': profit_factor
-    }
+    Main --> BinanceExecutor
+    Main --> EnsembleStrategy
+    Main --> TelegramNotifier
+    Main --> ConsoleDashboard
+    Main --> PriceFetcher
+    Main --> RiskManager
+    Main --> TradeHistoryAPI
+
+    EnsembleStrategy --> BinanceExecutor
+    EnsembleStrategy --> PriceFetcher
+    EnsembleStrategy --> RiskManager
+    EnsembleStrategy --> TelegramNotifier
+
+    ConsoleDashboard --> EnsembleStrategy
+    ConsoleDashboard --> RiskManager
 ```
 
-## Project Structure and File Relationships
+### Class Structure
 
-### Core Components
+```mermaid
+classDiagram
+    class BaseStrategy {
+        <<abstract>>
+        +generate_signals()
+        +calculate_stop_loss()
+        +calculate_take_profit()
+    }
 
-#### Main Application Files
-- `main.py`: The main entry point of the application, orchestrating all components
-- `run_elvis.sh`: Shell script to run the main application
-- `elvis_testnet.sh`: Shell script to run the application in testnet mode
+    class EnsembleStrategy {
+        +generate_signals()
+        +calculate_stop_loss()
+        +calculate_take_profit()
+    }
 
-#### Core Module (`/core`)
-- `__init__.py`: Package initialization
-- `/metrics`: Performance and trading metrics calculations
-- `/models`: ML model implementations and management
-- `/data`: Data handling and processing
-- `/validation`: Input validation and data verification
+    BaseStrategy <|-- EnsembleStrategy
 
-#### Utils Module (`/utils`)
-- `console_dashboard.py`: Terminal-based UI for monitoring
-- `trading_dashboard.py`: Web-based trading interface
-- `message_queue.py`: Inter-process communication
-- `price_fetcher.py`: Real-time price data retrieval
-- `logging_utils.py`: Logging configuration and utilities
-- `notification_utils.py`: Alert and notification system
+    class BinanceExecutor {
+        +initialize()
+        +get_balance()
+        +get_funding_rate()
+        +get_order_book()
+    }
 
-#### Services Module (`/services`)
-- `/telegram`: Telegram bot integration
-- `/ml_engine`: Machine learning model management
-- `/risk_management`: Risk assessment and management
-- `/data_pipeline`: Data processing and ETL
-- `/strategy_engine`: Trading strategy implementation
+    class TelegramNotifier {
+        +send_message()
+    }
 
-#### Monitoring Module (`/grafana`)
-- `/provisioning/datasources`: Prometheus data source configuration
-- `/provisioning/dashboards`: Grafana dashboard provisioning
-- `/dashboards`: JSON dashboard definitions
+    class ConsoleDashboard {
+        +run()
+        +_draw_frame()
+    }
 
-### Testing and Development
-- `test_elvis.py`: Main test suite
-- `test_console_dashboard.py`: Dashboard testing
-- `test_binance_api.py`: Binance API integration testing
-- `test_symbols.py`: Symbol validation testing
-- `test_env.py`: Environment configuration testing
+    class PriceFetcher {
+        +get_price()
+        +get_order_book()
+    }
 
-### Model Training and Management
-- `ensemble_models.py`: ML model ensemble management
-- `create_coreml_model.py`: CoreML model conversion
-- `training.py`: Model training orchestration
-- `function_train_test.py`: Training/testing utilities
-- `function_CPCV.py`: Cross-validation utilities
-- `function_PBO.py`: Portfolio optimization
-- `function_finance_metrics.py`: Financial metrics calculation
-
-### Configuration and Setup
-- `setup.py`: Package installation configuration
-- `requirements.txt`: Python dependencies
-- `.env`: Environment variables
-- `setup_secure_config.sh`: Security configuration
-
-### Documentation
-- `/docs`: Additional documentation
-
-### File Relationships
-1. **Core Application Flow**:
-   - `main.py` → `core/` → `services/` → `utils/`
-   - Main orchestrates core components, which use services and utilities
-
-2. **Trading Dashboard Flow**:
-   - `utils/trading_dashboard.py` → `utils/price_fetcher.py` → `services/strategy_engine/`
-   - Dashboard displays data from price fetcher and strategy engine
-
-3. **ML Pipeline Flow**:
-   - `services/ml_engine/` → `core/models/` → `ensemble_models.py`
-   - ML engine uses core models and ensemble management
-
-4. **Risk Management Flow**:
-   - `services/risk_management/` → `utils/price_fetcher.py` → `function_finance_metrics.py`
-   - Risk management uses price data and financial metrics
-
-5. **Notification System Flow**:
-   - `utils/notification_utils.py` → `services/telegram/`
-   - Notifications are sent through Telegram service
-
-6. **Monitoring Flow**:
-   - `main.py` → Prometheus metrics → Grafana dashboards
-   - Real-time metrics are collected and visualized
-
-### Unconnected Components
-1. **Standalone Testing Files**:
-   - `test_symbols.py`
-   - `test_binance_api.py`
-   - `test_env.py`
-   These are independent test files not integrated into the main application flow.
-
-2. **Legacy Files**:
-   - `your_bot_script.py.bak`
-   - `1. Resume summary section`
-   These files appear to be backups or documentation not actively used.
-
-3. **Data Files**:
-   - `export_trades.xlsx`
-   - `test_results.json`
-   These are output files generated by the system but not part of the codebase.
-
-### Dependencies
-- Python 3.8+
-- Required packages listed in `requirements.txt`
-- Binance API access
-- Telegram Bot Token (for notifications)
-- CoreML (for model deployment)
-- Prometheus (for metrics collection)
-- Grafana (for visualization)
+    class AdvancedRiskManager {
+        +manage_risk()
+    }
+```
 
 ## Contributing
 
@@ -330,3 +272,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Thanks to all contributors
 - Inspired by various trading systems and research papers
 - Built with ❤️ for the crypto trading community
+
+Special thanks to Annelotte Bonenkamp for her work:
+
+**Bachelor Econometrics**  
+**High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features**  
+**Annelotte Bonenkamp** (12378593)  
+**June 2021**  
