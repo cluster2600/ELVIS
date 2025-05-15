@@ -43,6 +43,7 @@ class Arguments:
         )  # agent is on-policy or off-policy
         self.if_use_old_traj = False  # save old data to splice and get a complete trajectory (for vector env)
         if self.if_off_policy:  # off-policy
+            self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
             self.max_memo = 2**21  # capacity of replay buffer
             self.target_step = (
                 2**10
@@ -55,6 +56,7 @@ class Arguments:
                 False  # use PER (Prioritized Experience Replay) for sparse reward
             )
         else:  # on-policy
+            self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
             self.max_memo = 2**12  # capacity of replay buffer
             self.target_step = (
                 self.max_memo
@@ -64,6 +66,8 @@ class Arguments:
             )  # num of transitions sampled from replay buffer.
             self.repeat_times = 2**4  # collect target_step, then update network
             self.if_use_gae = False  # use PER: GAE (Generalized Advantage Estimation) for sparse reward
+        self.if_pretrain = False  # Toggle for pretraining stage
+        self.if_finetune = False  # Toggle for finetuning stage
 
         """Arguments for training"""
         self.gamma = 0.99  # discount factor of future rewards

@@ -285,3 +285,24 @@ class ModelTrainer:
         except Exception as e:
             self.logger.error(f"Error training transformer: {e}")
             raise
+
+    def train_rl_agents(self, env_config: Dict, agent_config: Dict):
+        """
+        Train reinforcement learning agents using the MultiAgentTradingSystem.
+
+        Args:
+            env_config (Dict): Environment configuration parameters.
+            agent_config (Dict): Agent configuration parameters.
+
+        Returns:
+            MultiAgentTradingSystem: Trained RL agents.
+        """
+        self.logger.info("Starting training of RL agents")
+        rl_agents = MultiAgentTradingSystem(env_config, agent_config.get('n_agents', 1))
+        rl_agents.train(
+            total_timesteps=agent_config.get('total_timesteps', 10000),
+            eval_freq=agent_config.get('eval_freq', 1000),
+            n_eval_episodes=agent_config.get('n_eval_episodes', 10)
+        )
+        self.logger.info("Completed training of RL agents")
+        return rl_agents
