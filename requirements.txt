@@ -26,7 +26,7 @@ rich>=13.7.0
 
 # Machine Learning
 shap>=0.42.1
-tensorflow-macos==2.16.2
+tensorflow-macos>=2.16.2
 tensorflow-metal==1.2.0
 tensorflow-probability # Keep unpinned for now unless conflict arises
 tensorflow-hub # Keep unpinned for now unless conflict arises
@@ -75,6 +75,8 @@ openai>=0.27.0
 joblib>=1.2.0
 optuna>=3.6.0
 multiprocess>=0.70.14
+xgboost>=1.7.6
+lightgbm>=3.3.5
 
 # Logging and notification
 colorlog>=6.8.0

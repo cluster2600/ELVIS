@@ -1,0 +1,79 @@
+{
+    "id": null,
+    "uid": "elvis-fixed-panels",
+    "title": "ELVIS Dashboard - Fixed Panels",
+    "timezone": "browser",
+    "schemaVersion": 41,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+        {
+            "type": "barchart",
+            "title": "Volume Profile",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/volume_profile",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].price",
+                            "name": "Price"
+                        },
+                        {
+                            "jsonPath": "$[*].volume",
+                            "name": "Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            }
+        },
+        {
+            "type": "table",
+            "title": "Market Depth (Bids & Asks)",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/market_depth",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.bids[*].price",
+                            "name": "Bid Price"
+                        },
+                        {
+                            "jsonPath": "$.bids[*].volume",
+                            "name": "Bid Volume"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].price",
+                            "name": "Ask Price"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].volume",
+                            "name": "Ask Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            }
+        }
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    }
+}

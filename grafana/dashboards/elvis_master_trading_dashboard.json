@@ -1,0 +1,272 @@
+{
+    "id": null,
+    "uid": "elvis-master-dashboard",
+    "title": "ELVIS Master Trading Dashboard",
+    "timezone": "browser",
+    "schemaVersion": 41,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "BTC Price & Indicators",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_current_price",
+                    "refId": "A"
+                },
+                {
+                    "expr": "elvis_sma",
+                    "refId": "B"
+                },
+                {
+                    "expr": "elvis_ema_short",
+                    "refId": "C"
+                },
+                {
+                    "expr": "elvis_ema_long",
+                    "refId": "D"
+                },
+                {
+                    "expr": "elvis_rsi",
+                    "refId": "E"
+                },
+                {
+                    "expr": "elvis_macd",
+                    "refId": "F"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Portfolio Value",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_portfolio_value",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Unrealized PnL",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_unrealized_pnl",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            }
+        },
+        {
+            "type": "barchart",
+            "title": "Volume Profile",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/volume_profile",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].price",
+                            "name": "Price"
+                        },
+                        {
+                            "jsonPath": "$[*].volume",
+                            "name": "Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 12
+            }
+        },
+        {
+            "type": "table",
+            "title": "Market Depth",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/market_depth",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.bids[*].price",
+                            "name": "Bid Price"
+                        },
+                        {
+                            "jsonPath": "$.bids[*].volume",
+                            "name": "Bid Volume"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].price",
+                            "name": "Ask Price"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].volume",
+                            "name": "Ask Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 12,
+                "y": 12
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Total Fees",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/fees",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.total_fees"
+                        }
+                    ]
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 0,
+                "y": 18
+            }
+        },
+        {
+            "type": "table",
+            "title": "Trade History",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/trades",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].timestamp",
+                            "name": "Timestamp"
+                        },
+                        {
+                            "jsonPath": "$[*].symbol",
+                            "name": "Symbol"
+                        },
+                        {
+                            "jsonPath": "$[*].side",
+                            "name": "Side"
+                        },
+                        {
+                            "jsonPath": "$[*].price",
+                            "name": "Price"
+                        },
+                        {
+                            "jsonPath": "$[*].quantity",
+                            "name": "Quantity"
+                        },
+                        {
+                            "jsonPath": "$[*].pnl",
+                            "name": "PnL"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 22
+            }
+        },
+        {
+            "type": "table",
+            "title": "Open Positions",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/open_positions",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].symbol",
+                            "name": "Symbol"
+                        },
+                        {
+                            "jsonPath": "$[*].entry_price",
+                            "name": "Entry Price"
+                        },
+                        {
+                            "jsonPath": "$[*].quantity",
+                            "name": "Quantity"
+                        },
+                        {
+                            "jsonPath": "$[*].leverage",
+                            "name": "Leverage"
+                        },
+                        {
+                            "jsonPath": "$[*].entry_time",
+                            "name": "Entry Time"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 24,
+                "x": 0,
+                "y": 30
+            }
+        }
+    ],
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    }
+}

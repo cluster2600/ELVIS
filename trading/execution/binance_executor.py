@@ -10,7 +10,11 @@ class BinanceExecutor:
 
     def initialize(self):
         try:
-            self.client = Client(api_key=API_CONFIG['API_KEY'], api_secret=API_CONFIG['API_SECRET'])  # Use API keys from config
+            api_key = API_CONFIG.get('API_KEY')
+            api_secret = API_CONFIG.get('API_SECRET')
+            if not api_key or not api_secret:
+                raise KeyError("API_KEY or API_SECRET missing in API_CONFIG")
+            self.client = Client(api_key=api_key, api_secret=api_secret)  # Use API keys from config
             self.logger.info("BinanceExecutor initialized successfully with API keys.")
         except BinanceAPIException as e:
             self.logger.error(f"Error initializing Binance client: {e}")

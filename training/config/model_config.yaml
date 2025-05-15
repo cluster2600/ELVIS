@@ -1,0 +1,53 @@
+# Model training configuration for ELVIS trading system
+
+feature_config:
+  features:
+    - name: "price"
+      type: "float"
+    - name: "volume"
+      type: "float"
+    - name: "open_interest"
+      type: "float"
+  normalization: "minmax"
+  window_size: 50
+
+quality_config:
+  min_data_quality: 0.8
+  max_missing_ratio: 0.1
+
+batch_size: 64
+checkpoint_frequency: 5
+
+transformer:
+  epochs: 20
+  learning_rate: 0.001
+  model_params:
+    d_model: 128
+    nhead: 8
+    num_encoder_layers: 4
+    num_decoder_layers: 4
+    dim_feedforward: 512
+    dropout: 0.1
+
+rl:
+  env:
+    max_steps: 1000
+    reward_type: "sharpe_ratio"
+    data: []
+  agent:
+    gamma: 0.99
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 500
+    learning_rate: 0.0005
+    batch_size: 64
+    target_update: 10
+
+logging:
+  level: "INFO"
+  log_to_file: true
+
+output:
+  model_dir: "models"
+  log_dir: "logs"
+  checkpoint_dir: "checkpoints"

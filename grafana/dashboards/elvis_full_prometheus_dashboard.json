@@ -1,0 +1,337 @@
+{
+    "id": null,
+    "uid": "elvis-prometheus-dashboard",
+    "title": "ELVIS Full Prometheus Dashboard",
+    "timezone": "browser",
+    "schemaVersion": 41,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "BTC Price & Moving Averages",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_current_price",
+                    "refId": "A"
+                },
+                {
+                    "expr": "elvis_sma",
+                    "refId": "B"
+                },
+                {
+                    "expr": "elvis_ema_short",
+                    "refId": "C"
+                },
+                {
+                    "expr": "elvis_ema_long",
+                    "refId": "D"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "RSI & MACD",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_rsi",
+                    "refId": "A"
+                },
+                {
+                    "expr": "elvis_macd",
+                    "refId": "B"
+                },
+                {
+                    "expr": "elvis_macd_signal",
+                    "refId": "C"
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 24,
+                "x": 0,
+                "y": 8
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Portfolio Value",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_portfolio_value",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Unrealized PnL",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_unrealized_pnl",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Pending Orders",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_pending_orders",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 18
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Pending Buy Orders",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_pending_orders_buy",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 8,
+                "y": 18
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Pending Sell Orders",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_pending_orders_sell",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 16,
+                "y": 18
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Order Book Bids",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_order_book_bids",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 22
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Order Book Asks",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_order_book_asks",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 8,
+                "y": 22
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Order Book Spread",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_order_book_spread",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 16,
+                "y": 22
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Funding Rate",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_funding_rate",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 0,
+                "y": 26
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Bid Volume",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_order_book_bid_volume",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 12,
+                "y": 26
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Ask Volume",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_order_book_ask_volume",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 18,
+                "y": 26
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Total Trades",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_trade_count_total",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 12,
+                "x": 0,
+                "y": 30
+            }
+        },
+        {
+            "type": "stat",
+            "title": "CPU Usage",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_cpu_usage",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 0,
+                "y": 34
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Memory Usage",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_memory_usage",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 6,
+                "y": 34
+            }
+        }
+    ],
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    }
+}

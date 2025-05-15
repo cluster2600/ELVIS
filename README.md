@@ -1,8 +1,7 @@
-# ELVIS: Enhanced Leveraged Virtual Investment System
-
-![ELVIS Logo](images/elvis.png)
+# ELVIS Trading Bot
 
 ## Overview
+<<<<<<< HEAD
 
 ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for developing and deploying cryptocurrency trading bots on Binance Futures, specifically targeting BTC/USDT. It integrates various trading strategies, machine learning models (including Random Forest, Neural Networks, Transformers, and Reinforcement Learning), risk management techniques, and performance monitoring tools.
 
@@ -12,11 +11,16 @@ ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for 
 - [Random Forest Documentation](docs/random_forest.md) - Guide to the Random Forest model implementation
 - [CHANGELOG.md](CHANGELOG.md) - Version history and changes
 - [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) - Planned enhancements
+=======
 
-## Sources
+The ELVIS Trading Bot is a comprehensive system designed for cryptocurrency trading using machine learning models. It includes data downloading, processing, model training, evaluation, and deployment components.
+>>>>>>> f211ff0 (version3)
 
-This project is inspired by and builds upon several academic papers and research:
+## Training Data Downloader
 
+The `training/data/data_downloader.py` script downloads OHLCV (Open, High, Low, Close, Volume) data from the public Binance API for the BTCUSDT trading pair. It saves the data locally as a CSV file (`price_data.csv`) for use in model training.
+
+<<<<<<< HEAD
 - **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.
 - **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features** by Annelotte Bonenkamp, Bachelor Econometrics, 12378593, June 2021.
 - **Attention Is All You Need** by Vaswani et al. (Transformer architecture)
@@ -78,12 +82,31 @@ cd elvis-trading
 ```
 
 2. Create and activate a virtual environment:
+=======
+### Usage
+
+Run the data downloader script to fetch the latest market data:
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python training/data/data_downloader.py
 ```
 
+This will create or update the `price_data.csv` file in the `training/data` directory.
+
+## Model Training
+
+The training pipeline is implemented in `training/train_models.py`. It loads configuration from `training/config/model_config.yaml`, prepares data, trains transformer and reinforcement learning models, evaluates them, and generates explanations.
+
+### Running Training
+
+Use the provided shell script to set up the environment and start training:
+>>>>>>> f211ff0 (version3)
+
+```bash
+bash run_training.sh
+```
+
+<<<<<<< HEAD
 3. Install the package in development mode:
 
 ```bash
@@ -279,3 +302,10 @@ Special thanks to Annelotte Bonenkamp for her work:
 **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features**  
 **Annelotte Bonenkamp** (12378593)  
 **June 2021**  
+=======
+This script creates a Python 3.10 virtual environment, installs dependencies, and runs the training pipeline.
+
+## Configuration
+
+Model training parameters are specified in `training/config/model_config.yaml`. Adjust this file to change model hyperparameters, data paths, and training settings.
+>>>>>>> f211ff0 (version3)
