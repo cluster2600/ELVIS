@@ -210,19 +210,60 @@ class TrainingPipeline:
             self.writer.close()
 
     def train_rl_agents(self):
-        self.logger.error("train_rl_agents method is not implemented in ModelTrainer")
-        raise NotImplementedError("train_rl_agents method is not implemented in ModelTrainer")
+        from trading.rl_agents import MultiAgentTradingSystem
+
+        rl_config = self.config.get('rl', {})
+        env_config = rl_config.get('env', {})
+        agent_config = rl_config.get('agent', {})
+
+        n_agents = agent_config.get('n_agents', 1)
+        total_timesteps = agent_config.get('total_timesteps', 10000)
+        eval_freq = agent_config.get('eval_freq', 1000)
+        n_eval_episodes = agent_config.get('n_eval_episodes', 10)
+
+        self.logger.info("Starting training of RL agents")
+        rl_agents = MultiAgentTradingSystem(env_config, n_agents)
+        rl_agents.train(total_timesteps=total_timesteps, eval_freq=eval_freq, n_eval_episodes=n_eval_episodes)
+        self.logger.info("Completed training of RL agents")
+
+        return rl_agents
 
     def evaluate_models(self, rl_agents):
+        from training.models.evaluator import Evaluator
+
         try:
-            transformer_metrics = self.model_trainer.evaluate_model(self.model_trainer.model, self.X, self.y)
-            rl_metrics = self.model_trainer.evaluate_model(rl_agents, self.X, self.y)
+            # Provide the required arguments based on the Evaluator class definition
+            evaluator = Evaluator(agent_id=0, eval_env=None, args=self.config)  # Replace with actual values if available
+            # Evaluate transformer model
+            ensemble_models = self.model_trainer.load_ensemble()
+            transformer_metrics = {}
+            for name, model in ensemble_models.items():
+                metrics = evaluator.evaluate(model, self.X, self.y)
+                transformer_metrics[name] = metrics
+
+            # Evaluate RL agents
+            rl_metrics = {}
+            if hasattr(rl_agents, 'evaluate'):
+                rl_metrics = rl_agents.evaluate(self.X, self.y)
+            else:
+                self.logger.warning("RL agents do not have an evaluate method; skipping RL evaluation.")
+
             self.logger.info("Transformer Model Metrics:")
-            for metric, value in transformer_metrics.items():
-                self.logger.info(f"{metric}: {value:.4f}")
+            for name, metrics in transformer_metrics.items():
+                self.logger.info(f"Model: {name}")
+                for metric, value in metrics.items():
+                    self.logger.info(f"  {metric}: {value:.4f}")
+
             self.logger.info("RL Agents Metrics:")
             for metric, value in rl_metrics.items():
                 self.logger.info(f"{metric}: {value:.4f}")
+
+            # Save evaluation results
+            evaluator.save_results(transformer_metrics, filename='transformer_evaluation.json')
+            evaluator.save_results(rl_metrics, filename='rl_agents_evaluation.json')
+
+            return transformer_metrics, rl_metrics
+
         except Exception as e:
             self.logger.error(f"Error evaluating models: {str(e)}")
             raise

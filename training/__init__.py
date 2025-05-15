@@ -1,1 +1,1 @@
-# This file makes the training directory a Python package.
+# This file makes the training directory a Python package
