@@ -1,188 +1,190 @@
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-import ydf
+import os
 import requests
 import coremltools as ct
-import os
-from typing import Optional, List, Dict, Any
+import ydf
+import logging
+from typing import Dict, Any
 from trading.strategies.base_strategy import BaseStrategy
 
-# Removed imports of missing ensemble models
-# from trading.models.ensemble_models import StackingEnsemble, WeightedEnsemble, NeuralEnsemble
-
 class EnsembleStrategy(BaseStrategy):
-    def __init__(self, logger, ydf_model_path="/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
-                 coreml_model_path="/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage",
-                 mlx_url=None):
+    """
+    EnsembleStrategy combines predictions from multiple models:
+    - YDF Random Forest model
+    - CoreML Neural Network model
+    - (optional) MLX Large Language Model for additional decision support
+    
+    This strategy averages model outputs to determine a consensus BUY, SELL, or HOLD signal.
+    """
+
+    def __init__(self, logger: logging.Logger, 
+                 ydf_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
+                 coreml_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage",
+                 mlx_url: str = None):
+        """
+        Initialize the ensemble strategy, loading models and setting parameters.
+
+        Args:
+            logger (logging.Logger): The logger for debugging/info output.
+            ydf_model_path (str): Path to the YDF Random Forest model.
+            coreml_model_path (str): Path to the CoreML Neural Network model.
+            mlx_url (str, optional): URL to MLX server for LLM support.
+        """
         super().__init__(logger)
         self.logger = logger
         self.REQUIRED_FEATURES = [
             "price", "Order_Amount", "sma", "Filled", "Total", "future_price", "atr",
-            "vol_adjusted_price", "volume_ma", "macd", "signal_line", "lower_bb", "sma_bb",
-            "upper_bb", "news_sentiment", "social_feature", "adx", "rsi", "order_book_depth", "volume"
+            "vol_adjusted_price", "volume_ma", "macd", "signal_line", "lower_bb",
+            "sma_bb", "upper_bb", "news_sentiment", "social_feature", "adx", "rsi",
+            "order_book_depth", "volume"
         ]
         self.CLASSES = ["BUY", "HOLD", "SELL"]
-        self.mlx_url = mlx_url if mlx_url else os.getenv('MLX_URL', '')
+
+        self.mlx_url = mlx_url or os.getenv('MLX_URL', '')
         self.mlx_available = False
 
-        # Initialize legacy models only
-        self.logger.debug(f"Current working directory: {os.getcwd()}")
-        self.logger.debug(f"Attempting to load YDF model from: {ydf_model_path}")
+        # Load models
         self.ydf_model = self._load_ydf_model(ydf_model_path)
         self.nn_model = self._load_coreml_model(coreml_model_path)
         self._check_mlx_connectivity()
 
-    def _load_ydf_model(self, model_path):
+    def _load_ydf_model(self, model_path: str):
+        """Load the YDF model from disk."""
         try:
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"YDF model file not found at {model_path}")
-            ydf_model = ydf.from_tensorflow_decision_forests(model_path)
+            model = ydf.from_tensorflow_decision_forests(model_path)
             self.logger.info(f"YDF model loaded from {model_path}")
-            return ydf_model
+            return model
         except Exception as e:
             self.logger.error(f"Failed to load YDF model: {e}")
             return None
 
-    def _load_coreml_model(self, model_path):
+    def _load_coreml_model(self, model_path: str):
+        """Load the CoreML model from disk."""
         try:
             if not os.path.exists(model_path):
-                raise FileNotFoundError(f"Core ML model file not found at {model_path}")
-            nn_model = ct.models.MLModel(model_path)
-            self.logger.info(f"Core ML model loaded from {model_path}")
-            return nn_model
+                raise FileNotFoundError(f"CoreML model file not found at {model_path}")
+            model = ct.models.MLModel(model_path)
+            self.logger.info(f"CoreML model loaded from {model_path}")
+            return model
         except Exception as e:
-            self.logger.error(f"Failed to load Core ML model: {e}")
-            raise
+            self.logger.error(f"Failed to load CoreML model: {e}")
+            return None
 
     def _check_mlx_connectivity(self):
+        """Check if MLX server is available."""
         if not self.mlx_url:
-            self.mlx_available = False
-            self.logger.info("MLX URL not provided, skipping MLX connectivity check.")
             return
         try:
-            response = requests.get(f"{self.mlx_url.split('/v1/')[0]}/v1/models", timeout=5)
-            response.raise_for_status()
+            resp = requests.get(f"{self.mlx_url.split('/v1/')[0]}/v1/models", timeout=5)
+            resp.raise_for_status()
             self.mlx_available = True
-            self.logger.info(f"MLX model connected at {self.mlx_url}")
+            self.logger.info("MLX server available.")
         except Exception as e:
-            self.mlx_available = False
-            self.logger.warning(f"Failed to connect to MLX server: {e}. Proceeding without MLX model.")
+            self.logger.warning(f"MLX server not available: {e}")
 
-    def _ensure_required_features(self, features: dict) -> dict:
-        return {key: features.get(key, 0.0) for key in self.REQUIRED_FEATURES}
-
-    def _mlx_generate(self, prompt: str, max_tokens: int = 10) -> str:
+    def _mlx_generate(self, prompt: str) -> str:
+        """Generate a decision using MLX server."""
         if not self.mlx_available:
-            self.logger.debug("MLX model unavailable, defaulting to HOLD")
             return "HOLD"
         try:
             headers = {"Content-Type": "application/json"}
-            data = {
+            payload = {
                 "model": "llama-3.2-3b-instruct",
                 "prompt": prompt,
-                "max_tokens": max_tokens,
-                "temperature": 0.7,
-                "top_p": 0.9
+                "max_tokens": 10
             }
-            response = requests.post(self.mlx_url, headers=headers, json=data, timeout=10)
-            response.raise_for_status()
-            return response.json()["choices"][0]["text"].strip()
+            resp = requests.post(self.mlx_url, headers=headers, json=payload, timeout=10)
+            resp.raise_for_status()
+            decision = resp.json()["choices"][0]["text"].strip().upper()
+            return decision
         except Exception as e:
-            self.logger.warning(f"MLX generation failed: {e}")
+            self.logger.warning(f"MLX generation error: {e}")
             return "HOLD"
 
-    def _parse_mlx_decision(self, output: str) -> str:
-        output = output.upper()
-        for word in output.split():
+    def _parse_mlx_decision(self, text: str) -> str:
+        """Parse the MLX model text output."""
+        for word in text.split():
             if word in self.CLASSES:
                 return word
         return "HOLD"
 
-    def generate_signals(self, data):
-        if isinstance(data, pd.DataFrame) and not data.empty:
-            features = data.iloc[-1].to_dict()
-            features['price'] = features.get('close', 0.0)
-        else:
-            features = data if isinstance(data, dict) else {}
-
-        features = self._ensure_required_features(features)
-        feature_array = np.array([[v for v in features.values()]])
-
-        legacy_predictions = self._get_legacy_predictions(features)
-
-        # Only use legacy models since ensemble models are not implemented
-        all_predictions = [
-            legacy_predictions.get('ydf'),
-            legacy_predictions.get('nn')
-        ]
-
-        if self.mlx_available:
-            all_predictions.append(legacy_predictions.get('mlx'))
-
-        all_predictions = [pred for pred in all_predictions if pred is not None]
-
-        if not all_predictions:
-            self.logger.warning("No predictions available, defaulting to HOLD")
-            return {"signal": "HOLD", "confidence": 0.0}
-
-        avg_probs = np.mean(all_predictions, axis=0)
-        decision_idx = np.argmax(avg_probs)
-        decision = self.CLASSES[decision_idx]
-        confidence = float(avg_probs[decision_idx])
-
-        self.logger.debug(f"Legacy ensemble predictions: {legacy_predictions}")
-        self.logger.info(f"Final ensemble decision: {decision}, Confidence: {confidence:.4f}")
-
-        return {"signal": decision, "confidence": confidence}
-
-    def _get_legacy_predictions(self, features) -> Dict[str, np.ndarray]:
-        predictions = {}
+    def _get_model_predictions(self, features: dict) -> Dict[str, np.ndarray]:
+        """Predict using YDF, CoreML, and optionally MLX."""
+        preds = {}
 
         try:
             ydf_input = pd.DataFrame([features])
             ydf_pred = self.ydf_model.predict(ydf_input)
-            if isinstance(ydf_pred, dict) and "probabilities" in ydf_pred:
-                predictions['ydf'] = np.array([ydf_pred["probabilities"][cls] for cls in self.CLASSES])
-            elif isinstance(ydf_pred, np.ndarray) and ydf_pred.shape[-1] == len(self.CLASSES):
-                predictions['ydf'] = ydf_pred[0]
-            else:
-                predictions['ydf'] = np.array([0.0, 1.0, 0.0])
+            preds['ydf'] = np.array(list(ydf_pred['probabilities'].values()))
         except Exception as e:
             self.logger.warning(f"YDF prediction failed: {e}")
-            predictions['ydf'] = np.array([0.0, 1.0, 0.0])
+            preds['ydf'] = np.array([0.0, 1.0, 0.0])
 
         try:
             nn_input = {'features': np.array([[features[col] for col in self.REQUIRED_FEATURES]], dtype=np.float32)}
             nn_pred = self.nn_model.predict(nn_input)
-            probs_dict = nn_pred.get('classLabel_probs', nn_pred.get('classProbability', {}))
-            predictions['nn'] = np.array([probs_dict.get(cls, 0.0) for cls in self.CLASSES])
-            if predictions['nn'].sum() == 0:
-                predictions['nn'] = np.array([0.0, 1.0, 0.0])
+            probs = nn_pred.get('classLabel_probs') or nn_pred.get('classProbability', {})
+            preds['nn'] = np.array([probs.get(cls, 0.0) for cls in self.CLASSES])
         except Exception as e:
-            self.logger.warning(f"Core ML prediction failed: {e}")
-            predictions['nn'] = np.array([0.0, 1.0, 0.0])
+            self.logger.warning(f"CoreML prediction failed: {e}")
+            preds['nn'] = np.array([0.0, 1.0, 0.0])
 
         if self.mlx_available:
-            prompt = f"Market features: {', '.join(f'{k}: {v}' for k, v in features.items())}. Recommend: BUY, SELL, or HOLD."
-            mlx_output = self._mlx_generate(prompt)
-            mlx_decision = self._parse_mlx_decision(mlx_output)
-            predictions['mlx'] = np.array([1.0 if cls == mlx_decision else 0.0 for cls in self.CLASSES])
+            try:
+                mlx_decision = self._parse_mlx_decision(
+                    self._mlx_generate(
+                        f"Predict market move for features: {features} -> BUY, SELL, or HOLD."
+                    )
+                )
+                preds['mlx'] = np.array([1.0 if c == mlx_decision else 0.0 for c in self.CLASSES])
+            except Exception as e:
+                self.logger.warning(f"MLX prediction error: {e}")
 
-        return predictions
+        return preds
+
+    def generate_signals(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Generate a trading signal based on ensemble voting.
+
+        Args:
+            data (pd.DataFrame): The latest market data.
+
+        Returns:
+            Dict[str, Any]: {'signal': 'BUY'/'SELL'/'HOLD', 'confidence': float}
+        """
+        if data.empty:
+            return {"signal": "HOLD", "confidence": 0.0}
+
+        features = data.iloc[-1].to_dict()
+        features = {k: features.get(k, 0.0) for k in self.REQUIRED_FEATURES}
+
+        preds = self._get_model_predictions(features)
+
+        pred_array = np.mean([p for p in preds.values() if p is not None], axis=0)
+        best_idx = np.argmax(pred_array)
+
+        decision = self.CLASSES[best_idx]
+        confidence = float(pred_array[best_idx])
+
+        self.logger.info(f"Ensemble decision: {decision} ({confidence:.4f})")
+
+        return {"signal": decision, "confidence": confidence}
 
     def calculate_position_size(self, portfolio_value: float, price: float, volatility: float) -> float:
-        risk_per_trade = portfolio_value * 0.01
-        position_size = risk_per_trade / (price * volatility)
-        self.logger.debug(f"Calculated position size: {position_size} based on portfolio: {portfolio_value}, price: {price}, volatility: {volatility}")
-        return position_size
+        """
+        Basic risk-based position sizing: 1% of portfolio at risk.
 
-    def calculate_stop_loss(self, data: pd.DataFrame, entry_price: float) -> Optional[float]:
-        stop_loss = entry_price * (1 - 0.01)
-        self.logger.debug(f"Default stop loss calculated: {stop_loss} for entry price: {entry_price}")
-        return stop_loss
+        Args:
+            portfolio_value (float): Total portfolio value.
+            price (float): Current asset price.
+            volatility (float): Estimated volatility (for size adjustment).
 
-    def calculate_take_profit(self, data: pd.DataFrame, entry_price: float) -> Optional[float]:
-        take_profit = entry_price * (1 + 0.03)
-        self.logger.debug(f"Default take profit calculated: {take_profit} for entry price: {entry_price}")
-        return take_profit
+        Returns:
+            float: Size of the position.
+        """
+        risk_amount = portfolio_value * 0.01
+        position_size = risk_amount / (price * volatility)
+        return max(position_size, 0.001)  # minimum threshold

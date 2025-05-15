@@ -1,0 +1,985 @@
+{
+  "checkpoints": [
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 15,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 20,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 25,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 30,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 35,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 40,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 45,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 50,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 55,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 60,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 65,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 70,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 75,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 80,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 85,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 90,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 95,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135156.pt",
+      "timestamp": "20250502_135156",
+      "epoch": 100,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 15,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 20,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 25,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 30,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 35,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 40,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 45,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 50,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 55,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 60,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 65,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 70,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 75,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 80,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 85,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 90,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 95,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135234.pt",
+      "timestamp": "20250502_135234",
+      "epoch": 100,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135429.pt",
+      "timestamp": "20250502_135429",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_135429.pt",
+      "timestamp": "20250502_135429",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_135429.pt",
+      "timestamp": "20250502_135429",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_140911.pt",
+      "timestamp": "20250502_140911",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_140911.pt",
+      "timestamp": "20250502_140911",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_140911.pt",
+      "timestamp": "20250502_140911",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_141801.pt",
+      "timestamp": "20250502_141801",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_141801.pt",
+      "timestamp": "20250502_141801",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_141801.pt",
+      "timestamp": "20250502_141801",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143022.pt",
+      "timestamp": "20250502_143022",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143022.pt",
+      "timestamp": "20250502_143022",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143022.pt",
+      "timestamp": "20250502_143022",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143045.pt",
+      "timestamp": "20250502_143045",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143045.pt",
+      "timestamp": "20250502_143045",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143045.pt",
+      "timestamp": "20250502_143045",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143146.pt",
+      "timestamp": "20250502_143146",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143146.pt",
+      "timestamp": "20250502_143146",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143146.pt",
+      "timestamp": "20250502_143146",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143226.pt",
+      "timestamp": "20250502_143226",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143226.pt",
+      "timestamp": "20250502_143226",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143226.pt",
+      "timestamp": "20250502_143226",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143316.pt",
+      "timestamp": "20250502_143316",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143316.pt",
+      "timestamp": "20250502_143316",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143316.pt",
+      "timestamp": "20250502_143316",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143406.pt",
+      "timestamp": "20250502_143406",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_143406.pt",
+      "timestamp": "20250502_143406",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_143406.pt",
+      "timestamp": "20250502_143406",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_152906.pt",
+      "timestamp": "20250502_152906",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_152907.pt",
+      "timestamp": "20250502_152907",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_152907.pt",
+      "timestamp": "20250502_152907",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_154318.pt",
+      "timestamp": "20250502_154318",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_154318.pt",
+      "timestamp": "20250502_154318",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_154318.pt",
+      "timestamp": "20250502_154318",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_223351.pt",
+      "timestamp": "20250502_223351",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250502_223351.pt",
+      "timestamp": "20250502_223351",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250502_223351.pt",
+      "timestamp": "20250502_223351",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250505_120639.pt",
+      "timestamp": "20250505_120639",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250505_120639.pt",
+      "timestamp": "20250505_120639",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250505_120639.pt",
+      "timestamp": "20250505_120639",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_170953.pt",
+      "timestamp": "20250506_170953",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_170953.pt",
+      "timestamp": "20250506_170953",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_170953.pt",
+      "timestamp": "20250506_170953",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171117.pt",
+      "timestamp": "20250506_171117",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171117.pt",
+      "timestamp": "20250506_171117",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_171117.pt",
+      "timestamp": "20250506_171117",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171211.pt",
+      "timestamp": "20250506_171211",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171211.pt",
+      "timestamp": "20250506_171211",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_171211.pt",
+      "timestamp": "20250506_171211",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171336.pt",
+      "timestamp": "20250506_171336",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171336.pt",
+      "timestamp": "20250506_171336",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_171336.pt",
+      "timestamp": "20250506_171336",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171609.pt",
+      "timestamp": "20250506_171609",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171609.pt",
+      "timestamp": "20250506_171609",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_171609.pt",
+      "timestamp": "20250506_171609",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171701.pt",
+      "timestamp": "20250506_171701",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_171701.pt",
+      "timestamp": "20250506_171701",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_171701.pt",
+      "timestamp": "20250506_171701",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172158.pt",
+      "timestamp": "20250506_172158",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172158.pt",
+      "timestamp": "20250506_172158",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_172158.pt",
+      "timestamp": "20250506_172158",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172306.pt",
+      "timestamp": "20250506_172306",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172307.pt",
+      "timestamp": "20250506_172307",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_172307.pt",
+      "timestamp": "20250506_172307",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172442.pt",
+      "timestamp": "20250506_172442",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_172442.pt",
+      "timestamp": "20250506_172442",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_172442.pt",
+      "timestamp": "20250506_172442",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175655.pt",
+      "timestamp": "20250506_175655",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175655.pt",
+      "timestamp": "20250506_175655",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_175655.pt",
+      "timestamp": "20250506_175655",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175829.pt",
+      "timestamp": "20250506_175829",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175829.pt",
+      "timestamp": "20250506_175829",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_175829.pt",
+      "timestamp": "20250506_175829",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175857.pt",
+      "timestamp": "20250506_175857",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_175857.pt",
+      "timestamp": "20250506_175857",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_175857.pt",
+      "timestamp": "20250506_175857",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181103.pt",
+      "timestamp": "20250506_181103",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181103.pt",
+      "timestamp": "20250506_181103",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_181103.pt",
+      "timestamp": "20250506_181103",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181256.pt",
+      "timestamp": "20250506_181256",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181256.pt",
+      "timestamp": "20250506_181256",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_181256.pt",
+      "timestamp": "20250506_181256",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181537.pt",
+      "timestamp": "20250506_181537",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181537.pt",
+      "timestamp": "20250506_181537",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_181537.pt",
+      "timestamp": "20250506_181537",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181740.pt",
+      "timestamp": "20250506_181740",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181740.pt",
+      "timestamp": "20250506_181740",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_181740.pt",
+      "timestamp": "20250506_181740",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181844.pt",
+      "timestamp": "20250506_181844",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250506_181844.pt",
+      "timestamp": "20250506_181844",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250506_181844.pt",
+      "timestamp": "20250506_181844",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250507_104121.pt",
+      "timestamp": "20250507_104121",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250507_104121.pt",
+      "timestamp": "20250507_104121",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250507_104121.pt",
+      "timestamp": "20250507_104121",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250507_110558.pt",
+      "timestamp": "20250507_110558",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250507_110558.pt",
+      "timestamp": "20250507_110558",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250507_110558.pt",
+      "timestamp": "20250507_110558",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250515_084150.pt",
+      "timestamp": "20250515_084150",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250515_084150.pt",
+      "timestamp": "20250515_084150",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/final_checkpoint_20250515_084150.pt",
+      "timestamp": "20250515_084150",
+      "epoch": 10,
+      "is_final": true,
+      "is_best": false
+    }
+  ],
+  "latest_checkpoint": {
+    "path": "models/checkpoints/final_checkpoint_20250515_084150.pt",
+    "timestamp": "20250515_084150",
+    "epoch": 10,
+    "is_final": true,
+    "is_best": false
+  },
+  "best_checkpoint": null
+}

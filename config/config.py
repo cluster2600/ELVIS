@@ -1,8 +1,10 @@
 # Configuration file for ELVIS trading bot
 
+import os
+
 API_CONFIG = {
-    'API_KEY': 'your_binance_api_key_here',  # Replace with actual API key
-    'API_SECRET': 'your_binance_api_secret_here',  # Replace with actual API secret
+    'API_KEY': os.getenv('BINANCE_API_KEY', 'your_binance_api_key_here'),
+    'API_SECRET': os.getenv('BINANCE_API_SECRET', 'your_binance_api_secret_here'),
 }
 
 TRADING_CONFIG = {

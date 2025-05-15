@@ -1,0 +1,307 @@
+{
+    "id": null,
+    "uid": "elvis-advanced-trading-v2",
+    "title": "ELVIS Advanced Trading Dashboard v2",
+    "tags": [
+        "elvis",
+        "trading",
+        "advanced"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 41,
+    "version": 2,
+    "refresh": "30s",
+    "templating": {
+        "list": [
+            {
+                "name": "timeframe",
+                "type": "custom",
+                "label": "Timeframe",
+                "query": "1m,5m,15m,1h,4h,1d",
+                "current": {
+                    "text": "1h",
+                    "value": "1h"
+                },
+                "includeAll": false,
+                "multi": false
+            }
+        ]
+    },
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "BTC/USDT Price with Indicators",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "elvis_current_price",
+                    "refId": "A"
+                },
+                {
+                    "expr": "elvis_rsi",
+                    "refId": "B"
+                },
+                {
+                    "expr": "elvis_macd",
+                    "refId": "C"
+                },
+                {
+                    "expr": "elvis_bollinger_upper",
+                    "refId": "D"
+                },
+                {
+                    "expr": "elvis_bollinger_lower",
+                    "refId": "E"
+                }
+            ],
+            "gridPos": {
+                "h": 10,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            }
+        },
+        {
+            "type": "barchart",
+            "title": "Volume Profile",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/volume_profile",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].price",
+                            "name": "Price"
+                        },
+                        {
+                            "jsonPath": "$[*].volume",
+                            "name": "Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 10
+            }
+        },
+        {
+            "type": "table",
+            "title": "Market Depth (Bids & Asks)",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/market_depth",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.bids[*].price",
+                            "name": "Bid Price"
+                        },
+                        {
+                            "jsonPath": "$.bids[*].volume",
+                            "name": "Bid Volume"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].price",
+                            "name": "Ask Price"
+                        },
+                        {
+                            "jsonPath": "$.asks[*].volume",
+                            "name": "Ask Volume"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Realized PnL",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/pnl_breakdown",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.realized"
+                        }
+                    ]
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 0,
+                "y": 24
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Unrealized PnL",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/pnl_breakdown",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$.unrealized"
+                        }
+                    ]
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currency(USD)"
+                }
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 6,
+                "y": 24
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Rolling Sharpe Ratio",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/rolling_stats",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].timestamp",
+                            "name": "Time"
+                        },
+                        {
+                            "jsonPath": "$[*].sharpe",
+                            "name": "Sharpe"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 28
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Rolling Drawdown",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/rolling_stats",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].timestamp",
+                            "name": "Time"
+                        },
+                        {
+                            "jsonPath": "$[*].drawdown",
+                            "name": "Drawdown"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 12,
+                "y": 28
+            }
+        },
+        {
+            "type": "barchart",
+            "title": "Trade Distribution",
+            "datasource": "elvis-json-datasource",
+            "targets": [
+                {
+                    "method": "GET",
+                    "urlPath": "/trade_distribution",
+                    "refId": "A",
+                    "fields": [
+                        {
+                            "jsonPath": "$[*].range",
+                            "name": "Range"
+                        },
+                        {
+                            "jsonPath": "$[*].count",
+                            "name": "Count"
+                        }
+                    ]
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 24,
+                "x": 0,
+                "y": 34
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "CPU Usage",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "node_cpu_seconds_total",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 0,
+                "y": 40
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Memory Usage",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "node_memory_MemAvailable_bytes",
+                    "refId": "A"
+                }
+            ],
+            "gridPos": {
+                "h": 6,
+                "w": 12,
+                "x": 12,
+                "y": 40
+            }
+        }
+    ],
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    }
+}

@@ -1,0 +1,394 @@
+{
+  "id": null,
+  "uid": "elvis-all-metrics-trading",
+  "title": "ELVIS All Metrics Trading Dashboard",
+  "tags": ["elvis", "trading", "advanced"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "timeframe",
+        "type": "custom",
+        "label": "Timeframe",
+        "query": "1m,5m,15m,1h,4h,1d",
+        "current": {
+          "text": "1h",
+          "value": "1h"
+        },
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "BTC/USDT Price & Indicators",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_current_price", "refId": "A" },
+        { "expr": "elvis_sma", "refId": "B" },
+        { "expr": "elvis_ema_short", "refId": "C" },
+        { "expr": "elvis_ema_long", "refId": "D" },
+        { "expr": "elvis_rsi", "refId": "E" },
+        { "expr": "elvis_macd", "refId": "F" },
+        { "expr": "elvis_macd_signal", "refId": "G" },
+        { "expr": "elvis_bollinger_upper", "refId": "H", "legendFormat": "Bollinger Upper" },
+        { "expr": "elvis_bollinger_lower", "refId": "I", "legendFormat": "Bollinger Lower" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency(USD)"
+        }
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Portfolio Value",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_portfolio_value", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency(USD)"
+        }
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 10 }
+    },
+    {
+      "type": "stat",
+      "title": "Realized PnL",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/pnl_breakdown",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$.realized" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency(USD)"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 }
+    },
+    {
+      "type": "stat",
+      "title": "Unrealized PnL",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_unrealized_pnl", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency(USD)"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 }
+    },
+    {
+      "type": "stat",
+      "title": "Order Book Stats",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_order_book_bids", "refId": "A", "legendFormat": "Bids" },
+        { "expr": "elvis_order_book_asks", "refId": "B", "legendFormat": "Asks" },
+        { "expr": "elvis_order_book_spread", "refId": "C", "legendFormat": "Spread" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            { "type": "value", "options": { "C": { "unit": "currency(USD)" } } }
+          ]
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 14 }
+    },
+    {
+      "type": "stat",
+      "title": "Order Book Volume",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_order_book_bid_volume", "refId": "A", "legendFormat": "Bid Volume" },
+        { "expr": "elvis_order_book_ask_volume", "refId": "B", "legendFormat": "Ask Volume" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 14 }
+    },
+    {
+      "type": "stat",
+      "title": "Pending Orders",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_pending_orders", "refId": "A", "legendFormat": "Total" },
+        { "expr": "elvis_pending_orders_buy", "refId": "B", "legendFormat": "Buy" },
+        { "expr": "elvis_pending_orders_sell", "refId": "C", "legendFormat": "Sell" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 14 }
+    },
+    {
+      "type": "stat",
+      "title": "Funding Rate",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_funding_rate", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 18 }
+    },
+    {
+      "type": "stat",
+      "title": "Trade Counts",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_trade_count_total", "refId": "A", "legendFormat": "Total Trades" },
+        { "expr": "elvis_trade_count_created", "refId": "B", "legendFormat": "Created Trades" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 18 }
+    },
+    {
+      "type": "barchart",
+      "title": "Volume Profile",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/volume_profile",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].price", "name": "Price" },
+            { "jsonPath": "$[*].volume", "name": "Volume" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 }
+    },
+    {
+      "type": "table",
+      "title": "Market Depth (Bids & Asks)",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/market_depth",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$.bids[*].price", "name": "Bid Price" },
+            { "jsonPath": "$.bids[*].volume", "name": "Bid Volume" },
+            { "jsonPath": "$.asks[*].price", "name": "Ask Price" },
+            { "jsonPath": "$.asks[*].volume", "name": "Ask Volume" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 }
+    },
+    {
+      "type": "table",
+      "title": "Trade History",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/trades",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].timestamp", "name": "Timestamp" },
+            { "jsonPath": "$[*].symbol", "name": "Symbol" },
+            { "jsonPath": "$[*].side", "name": "Side" },
+            { "jsonPath": "$[*].price", "name": "Price" },
+            { "jsonPath": "$[*].quantity", "name": "Quantity" },
+            { "jsonPath": "$[*].pnl", "name": "PnL" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 }
+    },
+    {
+      "type": "table",
+      "title": "Open Positions",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/open_positions",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].symbol", "name": "Symbol" },
+            { "jsonPath": "$[*].entry_price", "name": "Entry Price" },
+            { "jsonPath": "$[*].quantity", "name": "Quantity" },
+            { "jsonPath": "$[*].leverage", "name": "Leverage" },
+            { "jsonPath": "$[*].entry_time", "name": "Entry Time" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 36 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rolling Sharpe Ratio",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/rolling_stats",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].timestamp", "name": "Time" },
+            { "jsonPath": "$[*].sharpe", "name": "Sharpe" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 42 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rolling Drawdown",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/rolling_stats",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].timestamp", "name": "Time" },
+            { "jsonPath": "$[*].drawdown", "name": "Drawdown" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 42 }
+    },
+    {
+      "type": "barchart",
+      "title": "Trade Distribution",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/trade_distribution",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$[*].range", "name": "Range" },
+            { "jsonPath": "$[*].count", "name": "Count" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 48 }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU Usage",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "node_cpu_seconds_total", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 54 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory Usage",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "elvis_memory_usage", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 54 }
+    },
+    {
+      "type": "stat",
+      "title": "Total Fees",
+      "datasource": "elvis-json-datasource",
+      "targets": [
+        {
+          "method": "GET",
+          "urlPath": "/fees",
+          "refId": "A",
+          "fields": [
+            { "jsonPath": "$.total_fees" }
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currency(USD)"
+        }
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 60 }
+    }
+  ],
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  }
+}

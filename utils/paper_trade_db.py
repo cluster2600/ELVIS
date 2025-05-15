@@ -3,130 +3,111 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Load .env from parent folder
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 def get_conn():
-    try:
-        conn = psycopg2.connect(
-            host=os.environ.get('DB_HOST', 'localhost'),
-            port=os.environ.get('DB_PORT', 5432),
-            user=os.environ.get('DB_USER', 'postgres'),
-            password=os.environ.get('DB_PASSWORD', ''),
-            dbname=os.environ.get('DB_NAME', 'trading_bot')
-        )
-        return conn
-    except psycopg2.Error as e:
-        print(f"[ERROR] Database connection failed: {e}")
-        raise
+    return psycopg2.connect(
+        host=os.environ.get('DB_HOST', 'localhost'),
+        port=os.environ.get('DB_PORT', 5432),
+        user=os.environ.get('DB_USER', 'postgres'),
+        password=os.environ.get('DB_PASSWORD', ''),
+        dbname=os.environ.get('DB_NAME', 'trading_bot')
+    )
 
 def init_db():
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                c.execute("""
-                    CREATE TABLE IF NOT EXISTS trades (
-                        id SERIAL PRIMARY KEY,
-                        timestamp TIMESTAMP,
-                        symbol TEXT,
-                        side TEXT,
-                        price REAL,
-                        quantity REAL,
-                        pnl REAL,
-                        fee REAL
-                    )
-                """)
-                c.execute("""
-                    CREATE TABLE IF NOT EXISTS open_positions (
-                        id SERIAL PRIMARY KEY,
-                        symbol TEXT,
-                        entry_price REAL,
-                        quantity REAL,
-                        leverage REAL,
-                        entry_time TIMESTAMP
-                    )
-                """)
-            conn.commit()
-            print("Tables initialized successfully.")
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error initializing database: {e}")
-
-def record_trade(symbol, side, price, quantity, pnl=0.0, fee=None, entry_time=None, leverage=1.0):
-    try:
-        if fee is None:
-            fee_rate = 0.00075 if os.environ.get('PAY_FEES_WITH_BNB', 'false').lower() == 'true' else 0.001
-            trading_fee = price * quantity * fee_rate
-
-            funding_rate = float(os.environ.get('DEFAULT_FUNDING_RATE', 0.0001))
-            if entry_time:
-                holding_seconds = (datetime.utcnow() - entry_time).total_seconds()
-                holding_hours = holding_seconds / 3600
-                position_value = price * quantity
-                leverage_fee = position_value * funding_rate * (holding_hours / 8) * leverage
-            else:
-                leverage_fee = 0.0
-
-            fee = trading_fee + leverage_fee
-
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                c.execute(
-                    "INSERT INTO trades (timestamp, symbol, side, price, quantity, pnl, fee) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                    (datetime.utcnow(), symbol, side, price, quantity, pnl, fee)
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    symbol TEXT,
+                    side TEXT,
+                    price REAL,
+                    quantity REAL,
+                    pnl REAL,
+                    fee REAL
                 )
-            conn.commit()
-            print(f"Trade recorded: {symbol} {side} {quantity} @ {price} | Trading Fee: {trading_fee:.4f} | Leverage Fee: {leverage_fee:.4f}")
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error recording trade: {e}")
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS open_positions (
+                    id SERIAL PRIMARY KEY,
+                    symbol TEXT,
+                    entry_price REAL,
+                    quantity REAL,
+                    leverage REAL,
+                    entry_time TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS liquidations (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    symbol TEXT,
+                    entry_price REAL,
+                    liquidation_price REAL,
+                    quantity REAL,
+                    leverage REAL,
+                    liquidation_fee REAL
+                )
+            """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS margin_history (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP DEFAULT NOW(),
+                    balance REAL,
+                    used_margin REAL,
+                    open_positions INT
+                )
+            """)
+        conn.commit()
+
+def record_trade(symbol, side, price, quantity, pnl=0.0, fee=0.0, timestamp=None):
+    if timestamp is None:
+        timestamp = datetime.now()
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO trades (timestamp, symbol, side, price, quantity, pnl, fee)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (timestamp, symbol, side, price, quantity, pnl, fee))
+        conn.commit()
 
 def add_open_position(symbol, entry_price, quantity, leverage=1.0):
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                c.execute(
-                    "INSERT INTO open_positions (symbol, entry_price, quantity, leverage, entry_time) VALUES (%s, %s, %s, %s, %s)",
-                    (symbol, entry_price, quantity, leverage, datetime.utcnow())
-                )
-            conn.commit()
-            print(f"Open position added: {symbol} {quantity} @ {entry_price}")
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error adding open position: {e}")
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO open_positions (symbol, entry_price, quantity, leverage)
+                VALUES (%s, %s, %s, %s)
+            """, (symbol, entry_price, quantity, leverage))
+        conn.commit()
 
 def close_open_position(symbol):
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                c.execute("DELETE FROM open_positions WHERE symbol = %s", (symbol,))
-            conn.commit()
-            print(f"Closed positions for symbol: {symbol}")
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error closing position: {e}")
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("DELETE FROM open_positions WHERE symbol = %s", (symbol,))
+        conn.commit()
 
 def get_open_positions():
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                c.execute("SELECT symbol, entry_price, quantity, leverage, entry_time FROM open_positions")
-                positions = c.fetchall()
-            return positions
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error fetching open positions: {e}")
-        return []
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT symbol, entry_price, quantity, leverage, entry_time FROM open_positions")
+            return c.fetchall()
 
 def get_all_trades(limit=100):
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
                 c.execute("""
-                    SELECT timestamp, symbol, side, price, quantity, pnl, fee
+                    SELECT id, symbol, side, price, quantity, pnl, fee, timestamp
                     FROM trades
                     ORDER BY timestamp DESC
                     LIMIT %s
                 """, (limit,))
                 trades = c.fetchall()
-            return trades[::-1]
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error fetching trades: {e}")
+        return trades[::-1]
+    except Exception as e:
+        print(f"[ERROR] Fetching trades failed: {e}")
         return []
 
 def get_trade_count():
@@ -135,38 +116,122 @@ def get_trade_count():
             with conn.cursor() as c:
                 c.execute("SELECT COUNT(*) FROM trades")
                 count = c.fetchone()[0]
-            return count
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error counting trades: {e}")
+                return count
+    except Exception as e:
+        print(f"[ERROR] Fetching trade count failed: {e}")
         return 0
 
 def get_total_fees():
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute("SELECT COALESCE(SUM(fee), 0) FROM trades")
-                total_fees = c.fetchone()[0]
-            return total_fees
-    except psycopg2.Error as e:
-        print(f"[ERROR] Error fetching total fees: {e}")
-        return 0
+                c.execute("SELECT SUM(fee) FROM trades")
+                total = c.fetchone()[0]
+                return total if total is not None else 0.0
+    except Exception as e:
+        print(f"[ERROR] Fetching total fees failed: {e}")
+        return 0.0
 
-def check_liquidations(current_price_data):
-    margin_threshold = float(os.environ.get('LIQUIDATION_MARGIN', 0.9))
-    positions = get_open_positions()
-    for p in positions:
-        symbol = p[0]
-        entry_price = p[1]
-        quantity = p[2]
-        leverage = p[3]
-        entry_time = p[4]
+def get_pnl_breakdown():
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT symbol, SUM(pnl) as total_pnl, COUNT(*) as trade_count
+                    FROM trades
+                    GROUP BY symbol
+                """)
+                breakdown = c.fetchall()
+                return {row[0]: {'total_pnl': row[1], 'trade_count': row[2]} for row in breakdown}
+    except Exception as e:
+        print(f"[ERROR] Fetching PnL breakdown failed: {e}")
+        return {}
 
-        current_price = current_price_data.get(symbol, entry_price)
-        pnl = (current_price - entry_price) * quantity * leverage
-        if pnl <= -abs(entry_price * quantity * margin_threshold):
-            print(f"[LIQUIDATION] {symbol} position liquidated.")
-            record_trade(symbol, "LIQUIDATION", current_price, quantity, pnl, entry_time=entry_time, leverage=leverage)
-            close_open_position(symbol)
+def get_rolling_stats(window=24):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT timestamp, pnl, fee
+                    FROM trades
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                """, (window,))
+                stats = c.fetchall()
+                rolling_pnl = sum(row[1] for row in stats)
+                rolling_fees = sum(row[2] for row in stats)
+                return {'rolling_pnl': rolling_pnl, 'rolling_fees': rolling_fees, 'window': window}
+    except Exception as e:
+        print(f"[ERROR] Fetching rolling stats failed: {e}")
+        return {'rolling_pnl': 0.0, 'rolling_fees': 0.0, 'window': window}
 
-def init():
-    init_db()
+def get_trade_distribution():
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT side, COUNT(*) as count
+                    FROM trades
+                    GROUP BY side
+                """)
+                distribution = c.fetchall()
+                return {row[0]: row[1] for row in distribution}
+    except Exception as e:
+        print(f"[ERROR] Fetching trade distribution failed: {e}")
+        return {}
+
+def record_liquidation(symbol, entry_price, liquidation_price, quantity, leverage, fee):
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO liquidations (symbol, entry_price, liquidation_price, quantity, leverage, liquidation_fee)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (symbol, entry_price, liquidation_price, quantity, leverage, fee))
+        conn.commit()
+
+def record_margin_snapshot(balance, used_margin, open_positions):
+    with get_conn() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO margin_history (balance, used_margin, open_positions)
+                VALUES (%s, %s, %s)
+            """, (balance, used_margin, open_positions))
+        conn.commit()
+
+def get_volume_profile():
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT price, SUM(quantity) as total_quantity
+                    FROM trades
+                    GROUP BY price
+                    ORDER BY price ASC
+                """)
+                results = c.fetchall()
+                return [{'price': row[0], 'volume': row[1]} for row in results]
+    except Exception as e:
+        print(f"[ERROR] Fetching volume profile failed: {e}")
+        return []
+
+def get_market_depth():
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("""
+                    SELECT price, SUM(quantity) as total_quantity, side
+                    FROM trades
+                    GROUP BY price, side
+                    ORDER BY price ASC
+                """)
+                results = c.fetchall()
+                depth = {'bids': [], 'asks': []}
+                for price, quantity, side in results:
+                    if side.lower() == 'buy':
+                        depth['bids'].append({'price': price, 'quantity': quantity})
+                    else:
+                        depth['asks'].append({'price': price, 'quantity': quantity})
+                return depth
+    except Exception as e:
+        print(f"[ERROR] Fetching market depth failed: {e}")
+        return {'bids': [], 'asks': []}
