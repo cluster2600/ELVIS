@@ -43,3 +43,12 @@ model_rf.ydf/
 your_bot_script.py.bak
 .env
 *.pkl
+*.pkl
+*.pt
+*.npy
+*.tfevents*
+__pycache__/
+*.log
+.DS_Store
+.env
+venv/
