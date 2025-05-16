@@ -1,0 +1,40 @@
+Metadata-Version: 2.1
+Name: tensorflow-serving-api
+Version: 2.16.1
+Summary: TensorFlow Serving Python API.
+Home-page: http://tensorflow.org/serving
+Author: Google Inc.
+Author-email: tensorflow-serving-dev@googlegroups.com
+License: Apache 2.0
+Keywords: tensorflow serving machine learning api libraries
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Education
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Topic :: Scientific/Engineering
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: Software Development
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.9
+Requires-Dist: grpcio (<2.0,>=1.24.3)
+Requires-Dist: protobuf (!=4.21.0,!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5,<5.0.0dev,>=3.20.3)
+Requires-Dist: tensorflow (<3,>=2.16.1)
+
+TensorFlow Serving is a flexible, high-performance serving system for machine
+learning models, designed for production environments.TensorFlow Serving makes
+it easy to deploy new algorithms and experiments, while keeping the same server
+architecture and APIs. TensorFlow Serving provides out-of-the-box integration
+with TensorFlow models, but can be easily extended to serve other types of
+models and data.
+
+This package contains the TensorFlow Serving Python APIs.
+
+

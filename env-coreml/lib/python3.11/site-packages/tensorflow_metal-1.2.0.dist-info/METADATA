@@ -1,0 +1,35 @@
+Metadata-Version: 2.1
+Name: tensorflow-metal
+Version: 1.2.0
+Summary: TensorFlow acceleration for Mac GPUs.
+Home-page: https://developer.apple.com/metal/tensorflow-plugin/
+Download-URL: 
+Author: 
+Author-email: 
+License: MIT License. Copyright © 2020-2021 Apple Inc. All rights reserved.
+Keywords: tensorflow metal plugin
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: wheel~=0.35
+Requires-Dist: six>=1.15.0
+
+Accelerate training of machine learning models with TensorFlow right on your Mac.
+Install the base tensorflow and the tensorflow-metal PluggableDevice to accelerate training with Metal on Mac GPUs.
+
+You can learn more about TensorFlow PluggableDevices [here](https://github.com/tensorflow/tensorflow/releases/tag/v2.5.0).
+
+
+|tensorflow  |tensorflow-metal|MacOs| features | 
+|---------|-----|-----|-----|
+|v2.5 |v0.1.2|12.0+|Pluggable device        |
+|v2.6 |v0.2.0|12.0+|Variable seq. length RNN|
+|v2.7 |v0.3.0|12.0+|Custom op support       |
+|v2.8 |v0.4.0|12.0+|RNN perf. improvements  |
+|v2.9 |v0.5.0|12.1+|Distributed training    |
+|v2.10|v0.6.0|12.1+||
+|v2.11|v0.7.0|12.1+||
+|v2.12|v0.8.0|12.1+||
+|v2.13|v1.0.0|12.1+|FP16 and BF16 support|
+|v2.14-v2.18|v1.1.0|12.1+||
+|v2.18|v1.1.0|12.1+|Fixes compatibility with 2.18+ TF versions|
+
