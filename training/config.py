@@ -43,7 +43,12 @@ class Arguments:
         )  # agent is on-policy or off-policy
         self.if_use_old_traj = False  # save old data to splice and get a complete trajectory (for vector env)
         if self.if_off_policy:  # off-policy
+            # Set device to MPS if available for Apple Silicon optimization, otherwise fallback to CPU
             self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+            if torch.backends.mps.is_available():
+                print("MPS device is available and will be used.")
+            else:
+                print("MPS not available, falling back to CPU. Ensure PyTorch is installed with MPS support for better performance on Apple Silicon.")
             self.max_memo = 2**21  # capacity of replay buffer
             self.target_step = (
                 2**10
@@ -56,7 +61,12 @@ class Arguments:
                 False  # use PER (Prioritized Experience Replay) for sparse reward
             )
         else:  # on-policy
+            # Set device to MPS if available for Apple Silicon optimization, otherwise fallback to CPU
             self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+            if torch.backends.mps.is_available():
+                print("MPS device is available and will be used.")
+            else:
+                print("MPS not available, falling back to CPU. Ensure PyTorch is installed with MPS support for better performance on Apple Silicon.")
             self.max_memo = 2**12  # capacity of replay buffer
             self.target_step = (
                 self.max_memo

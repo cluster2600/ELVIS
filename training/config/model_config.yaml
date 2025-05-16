@@ -2,11 +2,11 @@
 
 feature_config:
   features:
-    - name: "price"
+    - name: "feature1"
       type: "float"
-    - name: "volume"
+    - name: "feature2"
       type: "float"
-    - name: "open_interest"
+    - name: "feature3"
       type: "float"
   normalization: "minmax"
   window_size: 50
@@ -34,6 +34,8 @@ rl:
     max_steps: 1000
     reward_type: "sharpe_ratio"
     data: []
+    multi_agent: true  # Enable multi-agent support
+    n_agents: 2  # Number of agents, e.g., 2 for market maker and taker
   agent:
     gamma: 0.99
     epsilon_start: 1.0
@@ -42,6 +44,11 @@ rl:
     learning_rate: 0.0005
     batch_size: 64
     target_update: 10
+    agents:  # Configuration for specific agents
+      - type: "market_maker"
+        role: "maker"
+      - type: "taker"
+        role: "taker"
 
 logging:
   level: "INFO"

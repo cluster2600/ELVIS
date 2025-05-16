@@ -1,14 +1,3 @@
-"""
-ModelTrainer: Core module for training and evaluating models in the ELVIS trading system.
-
-Handles:
-- Data preparation
-- Ensemble model training & evaluation
-- Transformer & RL model training
-- Model explanations via SHAP/LIME
-- Hyperparameter optimization with Optuna
-"""
-
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Union
@@ -19,12 +8,6 @@ from torch.utils.data import DataLoader, TensorDataset
 import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 import optuna
-
-try:
-    from optuna.integration import TFKerasPruningCallback
-except ModuleNotFoundError:
-    TFKerasPruningCallback = None
-
 import joblib
 import logging
 import os
@@ -34,7 +17,6 @@ from .transformer_models import FinancialTransformer
 from .rl_agents import MultiAgentTradingSystem
 from .explainable_ai import SHAPExplainer, LIMEExplainer
 from .ensemble_models import StackingEnsemble, WeightedEnsemble, NeuralEnsemble
-
 
 class ModelTrainer:
     """
@@ -75,6 +57,9 @@ class ModelTrainer:
         # Placeholder to store model state
         self.model_state = None
 
+        # Add model attribute to hold main model instance
+        self.model = None
+
     def prepare_data(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract features and target arrays from DataFrame for training.
@@ -85,24 +70,56 @@ class ModelTrainer:
         Returns:
             Tuple[np.ndarray, np.ndarray]: (features array, target array)
         """
-        features = self.config.get('features', [])
+        # Extract feature names from feature_config
+        feature_config = self.config.get('feature_config', {})
+        features = [f['name'] for f in feature_config.get('features', [])]
         target = self.config.get('target', 'price')
+        # Validate that features and target exist in data columns
+        missing_features = [f for f in features if f not in data.columns]
+        if missing_features:
+            raise ValueError(f"Missing features in data: {missing_features}")
+        if target not in data.columns:
+            raise ValueError(f"Target column '{target}' not found in data")
         return data[features].values, data[target].values
 
     def train_epoch(self, train_loader, epoch: int) -> dict:
         """
-        Placeholder method for training an epoch—extend this with actual logic.
+        Basic example of training a simple PyTorch model for one epoch.
 
         Args:
             train_loader: PyTorch DataLoader for training data.
             epoch (int): Epoch number.
 
         Returns:
-            dict: Example training metrics.
+            dict: Training metrics including loss.
         """
-        self.logger.info(f"[EPOCH {epoch + 1}] Training placeholder (no-op)")
-        self.model_state = {'epoch': epoch}
-        return {'loss': 0.01 * (epoch + 1)}
+        self.logger.info(f"[EPOCH {epoch + 1}] Training started")
+        # Define a simple model if not already defined
+        if self.model is None:
+            input_dim = train_loader.dataset.tensors[0].shape[1]
+            self.model = torch.nn.Sequential(
+                torch.nn.Linear(input_dim, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64, 1)
+            ).to(self.device)
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+            self.criterion = torch.nn.MSELoss()
+
+        self.model.train()
+        total_loss = 0.0
+        for batch_X, batch_y in train_loader:
+            batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device).unsqueeze(1)
+            self.optimizer.zero_grad()
+            outputs = self.model(batch_X)
+            loss = self.criterion(outputs, batch_y)
+            loss.backward()
+            self.optimizer.step()
+            total_loss += loss.item() * batch_X.size(0)
+
+        avg_loss = total_loss / len(train_loader.dataset)
+        self.model_state = {'epoch': epoch, 'model_state_dict': self.model.state_dict()}
+        self.logger.info(f"[EPOCH {epoch + 1}] Training completed with loss: {avg_loss:.4f}")
+        return {'loss': avg_loss}
 
     def validate(self, val_loader) -> dict:
         """
@@ -117,7 +134,7 @@ class ModelTrainer:
         self.logger.info("[VALIDATION] Validation placeholder (no-op)")
         return {'val_loss': 0.01}
 
-    def state_dict(self):
+    def state_dict(self) -> dict:
         """
         Get current model state dictionary (useful for checkpointing).
 
@@ -224,85 +241,39 @@ class ModelTrainer:
                 loaded_models[name] = joblib.load(model_path)
         return loaded_models
 
-    def explain_ensemble(self, models: Dict[str, Union[StackingEnsemble, WeightedEnsemble, NeuralEnsemble]], X: np.ndarray, feature_names: List[str]) -> Dict[str, Dict]:
+    def explain_model(self, model, X, feature_names):
         """
-        Generate model explanations via SHAP or LIME depending on model type.
+        Generate explanations for the given model using SHAP or LIME.
 
         Args:
-            models (dict): Trained models.
+            model: The model to explain.
             X (np.ndarray): Feature matrix.
             feature_names (list): List of feature names.
 
         Returns:
-            dict: Explanations per model.
-        """
-        explanations = {}
-        for name, model in models.items():
-            explainer = SHAPExplainer(model.models[0], feature_names, X[:100]) if isinstance(model, NeuralEnsemble) else LIMEExplainer(model.models[0], feature_names, X)
-            explanations[name] = explainer.explain(X)
-        return explanations
-
-    def train_transformer(self, train_loader: DataLoader, val_loader: DataLoader, model_config: Dict) -> FinancialTransformer:
-        """
-        Train a FinancialTransformer model.
-
-        Args:
-            train_loader (DataLoader): Training data.
-            val_loader (DataLoader): Validation data.
-            model_config (dict): Hyperparameters.
-
-        Returns:
-            FinancialTransformer: Trained transformer.
+            dict: Explanation results.
         """
         try:
-            model = FinancialTransformer(**model_config).to(self.device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=model_config['learning_rate'])
-            criterion = torch.nn.MSELoss()
+            # Import explainers
+            from .explainable_ai import SHAPExplainer, LIMEExplainer
 
-            best_val_loss = float('inf')
-            for epoch in range(model_config['epochs']):
-                model.train()
-                total_train_loss = 0
-                for batch_X, batch_y in train_loader:
-                    batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
-                    optimizer.zero_grad()
-                    loss = criterion(model(batch_X), batch_y)
-                    loss.backward()
-                    optimizer.step()
-                    total_train_loss += loss.item()
+            # Ensure model and data are on the same device if model is a torch.nn.Module
+            if isinstance(model, torch.nn.Module):
+                model_device = next(model.parameters()).device
+                if isinstance(X, torch.Tensor):
+                    X = X.to(model_device)
+                else:
+                    # Convert numpy array to torch tensor on model device
+                    X = torch.tensor(X, device=model_device, dtype=torch.float32)
 
-                model.eval()
-                total_val_loss = sum(criterion(model(batch_X.to(self.device)), batch_y.to(self.device)).item() for batch_X, batch_y in val_loader)
+            # Choose explainer based on model type
+            if hasattr(model, 'predict_proba') or hasattr(model, 'predict'):
+                explainer = LIMEExplainer(model, feature_names, X)
+            else:
+                explainer = SHAPExplainer(model, feature_names, X[:100])
 
-                if total_val_loss < best_val_loss:
-                    best_val_loss = total_val_loss
-                    torch.save(model.state_dict(), os.path.join(self.model_dir, 'best_transformer.pth'))
-
-                self.logger.info(f"[TRANSFORMER][Epoch {epoch + 1}/{model_config['epochs']}] Train Loss: {total_train_loss / len(train_loader):.4f}, Val Loss: {total_val_loss / len(val_loader):.4f}")
-
-            return model
-
+            explanation = explainer.explain(X)
+            return explanation
         except Exception as e:
-            self.logger.error(f"Error training transformer: {e}")
-            raise
-
-    def train_rl_agents(self, env_config: Dict, agent_config: Dict):
-        """
-        Train reinforcement learning agents using the MultiAgentTradingSystem.
-
-        Args:
-            env_config (Dict): Environment configuration parameters.
-            agent_config (Dict): Agent configuration parameters.
-
-        Returns:
-            MultiAgentTradingSystem: Trained RL agents.
-        """
-        self.logger.info("Starting training of RL agents")
-        rl_agents = MultiAgentTradingSystem(env_config, agent_config.get('n_agents', 1))
-        rl_agents.train(
-            total_timesteps=agent_config.get('total_timesteps', 10000),
-            eval_freq=agent_config.get('eval_freq', 1000),
-            n_eval_episodes=agent_config.get('n_eval_episodes', 10)
-        )
-        self.logger.info("Completed training of RL agents")
-        return rl_agents
+            self.logger.error(f"Error in explain_model: {e}")
+            return {}
