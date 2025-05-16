@@ -1,0 +1,1 @@
+https://github.com/openai/gpt-3/archive/master.zip	2263608	e8290ff0e57be5b81a29a9ae4670a4e8dfcde8142caaf96012e7c70813cb3a30	gpt-3-master.zip

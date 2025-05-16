@@ -1,0 +1,275 @@
+Metadata-Version: 2.2
+Name: tensorflow-datasets
+Version: 4.9.8
+Summary: tensorflow/datasets is a library of datasets ready to use with TensorFlow.
+Home-page: https://github.com/tensorflow/datasets
+Download-URL: https://github.com/tensorflow/datasets/tags
+Author: Google Inc.
+Author-email: packages@tensorflow.org
+License: Apache 2.0
+Keywords: tensorflow machine learning datasets
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.10
+License-File: LICENSE
+License-File: AUTHORS
+Requires-Dist: absl-py
+Requires-Dist: array_record>=0.5.0; platform_system == "Linux"
+Requires-Dist: dm-tree
+Requires-Dist: etils[edc,enp,epath,epy,etree]>=1.6.0; python_version < "3.11"
+Requires-Dist: etils[edc,enp,epath,epy,etree]>=1.9.1; python_version >= "3.11"
+Requires-Dist: immutabledict
+Requires-Dist: numpy
+Requires-Dist: promise
+Requires-Dist: protobuf>=3.20
+Requires-Dist: psutil
+Requires-Dist: pyarrow
+Requires-Dist: requests>=2.19.0
+Requires-Dist: simple_parsing
+Requires-Dist: tensorflow-metadata
+Requires-Dist: termcolor
+Requires-Dist: toml
+Requires-Dist: tqdm
+Requires-Dist: wrapt
+Requires-Dist: importlib_resources; python_version < "3.9"
+Provides-Extra: matplotlib
+Requires-Dist: matplotlib; extra == "matplotlib"
+Provides-Extra: tensorflow
+Requires-Dist: tensorflow>=2.1; extra == "tensorflow"
+Provides-Extra: tf-nightly
+Requires-Dist: tf-nightly; extra == "tf-nightly"
+Provides-Extra: tensorflow-data-validation
+Requires-Dist: tensorflow-data-validation; extra == "tensorflow-data-validation"
+Provides-Extra: tests-all
+Requires-Dist: dill; extra == "tests-all"
+Requires-Dist: jax[cpu]==0.4.28; extra == "tests-all"
+Requires-Dist: jupyter; extra == "tests-all"
+Requires-Dist: pytest; extra == "tests-all"
+Requires-Dist: pytest-shard; extra == "tests-all"
+Requires-Dist: pytest-xdist; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: conllu; extra == "tests-all"
+Requires-Dist: mlcroissant>=1.0.9; extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: pyyaml; extra == "tests-all"
+Requires-Dist: tensorflow-io[tensorflow]; python_version < "3.12" and extra == "tests-all"
+Requires-Dist: scipy; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: gcsfs; extra == "tests-all"
+Requires-Dist: zarr<3.0.0; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: gcld3; extra == "tests-all"
+Requires-Dist: langdetect; extra == "tests-all"
+Requires-Dist: nltk==3.8.1; extra == "tests-all"
+Requires-Dist: tldextract; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: matplotlib; extra == "tests-all"
+Requires-Dist: Pillow; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: scipy; extra == "tests-all"
+Requires-Dist: scikit-image; extra == "tests-all"
+Requires-Dist: tifffile; extra == "tests-all"
+Requires-Dist: imagecodecs; extra == "tests-all"
+Requires-Dist: pretty_midi; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: opencv-python; extra == "tests-all"
+Requires-Dist: scikit-image; extra == "tests-all"
+Requires-Dist: scipy; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: networkx; extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: h5py; extra == "tests-all"
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "tests-all"
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: pydub; extra == "tests-all"
+Requires-Dist: scipy; extra == "tests-all"
+Requires-Dist: scipy; extra == "tests-all"
+Requires-Dist: pandas; extra == "tests-all"
+Requires-Dist: Pillow; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: apache-beam; extra == "tests-all"
+Requires-Dist: mwparserfromhell; extra == "tests-all"
+Requires-Dist: mwxml; extra == "tests-all"
+Requires-Dist: bs4; extra == "tests-all"
+Requires-Dist: lxml; extra == "tests-all"
+Requires-Dist: pycocotools; extra == "tests-all"
+Provides-Extra: dev
+Requires-Dist: dill; extra == "dev"
+Requires-Dist: jax[cpu]==0.4.28; extra == "dev"
+Requires-Dist: jupyter; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-shard; extra == "dev"
+Requires-Dist: pytest-xdist; extra == "dev"
+Requires-Dist: apache-beam; extra == "dev"
+Requires-Dist: conllu; extra == "dev"
+Requires-Dist: mlcroissant>=1.0.9; extra == "dev"
+Requires-Dist: pandas; extra == "dev"
+Requires-Dist: pydub; extra == "dev"
+Requires-Dist: pyyaml; extra == "dev"
+Requires-Dist: tensorflow-io[tensorflow]; python_version < "3.12" and extra == "dev"
+Requires-Dist: pylint>=2.6.0; extra == "dev"
+Requires-Dist: yapf; extra == "dev"
+Provides-Extra: huggingface
+Requires-Dist: dill; extra == "huggingface"
+Requires-Dist: jax[cpu]==0.4.28; extra == "huggingface"
+Requires-Dist: jupyter; extra == "huggingface"
+Requires-Dist: pytest; extra == "huggingface"
+Requires-Dist: pytest-shard; extra == "huggingface"
+Requires-Dist: pytest-xdist; extra == "huggingface"
+Requires-Dist: conllu; extra == "huggingface"
+Requires-Dist: mlcroissant>=1.0.9; extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: pyyaml; extra == "huggingface"
+Requires-Dist: tensorflow-io[tensorflow]; python_version < "3.12" and extra == "huggingface"
+Requires-Dist: scipy; extra == "huggingface"
+Requires-Dist: gcsfs; extra == "huggingface"
+Requires-Dist: zarr<3.0.0; extra == "huggingface"
+Requires-Dist: gcld3; extra == "huggingface"
+Requires-Dist: langdetect; extra == "huggingface"
+Requires-Dist: nltk==3.8.1; extra == "huggingface"
+Requires-Dist: tldextract; extra == "huggingface"
+Requires-Dist: matplotlib; extra == "huggingface"
+Requires-Dist: Pillow; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: scipy; extra == "huggingface"
+Requires-Dist: scikit-image; extra == "huggingface"
+Requires-Dist: tifffile; extra == "huggingface"
+Requires-Dist: imagecodecs; extra == "huggingface"
+Requires-Dist: pretty_midi; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: opencv-python; extra == "huggingface"
+Requires-Dist: scikit-image; extra == "huggingface"
+Requires-Dist: scipy; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: networkx; extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: h5py; extra == "huggingface"
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "huggingface"
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: pydub; extra == "huggingface"
+Requires-Dist: scipy; extra == "huggingface"
+Requires-Dist: scipy; extra == "huggingface"
+Requires-Dist: pandas; extra == "huggingface"
+Requires-Dist: Pillow; extra == "huggingface"
+Requires-Dist: mwparserfromhell; extra == "huggingface"
+Requires-Dist: mwxml; extra == "huggingface"
+Requires-Dist: bs4; extra == "huggingface"
+Requires-Dist: lxml; extra == "huggingface"
+Requires-Dist: pycocotools; extra == "huggingface"
+Requires-Dist: datasets; extra == "huggingface"
+Provides-Extra: aflw2k3d
+Requires-Dist: scipy; extra == "aflw2k3d"
+Provides-Extra: beir
+Requires-Dist: apache-beam; extra == "beir"
+Provides-Extra: ble-wind-field
+Requires-Dist: gcsfs; extra == "ble-wind-field"
+Requires-Dist: zarr<3.0.0; extra == "ble-wind-field"
+Provides-Extra: c4
+Requires-Dist: apache-beam; extra == "c4"
+Requires-Dist: gcld3; extra == "c4"
+Requires-Dist: langdetect; extra == "c4"
+Requires-Dist: nltk==3.8.1; extra == "c4"
+Requires-Dist: tldextract; extra == "c4"
+Provides-Extra: c4-wsrs
+Requires-Dist: apache-beam; extra == "c4-wsrs"
+Provides-Extra: cats-vs-dogs
+Requires-Dist: matplotlib; extra == "cats-vs-dogs"
+Provides-Extra: colorectal-histology
+Requires-Dist: Pillow; extra == "colorectal-histology"
+Provides-Extra: common-voice
+Requires-Dist: pydub; extra == "common-voice"
+Provides-Extra: duke-ultrasound
+Requires-Dist: scipy; extra == "duke-ultrasound"
+Provides-Extra: eurosat
+Requires-Dist: scikit-image; extra == "eurosat"
+Requires-Dist: tifffile; extra == "eurosat"
+Requires-Dist: imagecodecs; extra == "eurosat"
+Provides-Extra: groove
+Requires-Dist: pretty_midi; extra == "groove"
+Requires-Dist: pydub; extra == "groove"
+Provides-Extra: gtzan
+Requires-Dist: pydub; extra == "gtzan"
+Provides-Extra: imagenet2012-corrupted
+Requires-Dist: opencv-python; extra == "imagenet2012-corrupted"
+Requires-Dist: scikit-image; extra == "imagenet2012-corrupted"
+Requires-Dist: scipy; extra == "imagenet2012-corrupted"
+Provides-Extra: librispeech
+Requires-Dist: pydub; extra == "librispeech"
+Provides-Extra: lsun
+Requires-Dist: tensorflow-io[tensorflow]; extra == "lsun"
+Provides-Extra: nsynth
+Requires-Dist: crepe>=0.0.11; extra == "nsynth"
+Requires-Dist: librosa; extra == "nsynth"
+Requires-Dist: scikit-learn==0.20.3; extra == "nsynth"
+Provides-Extra: ogbg-molpcba
+Requires-Dist: pandas; extra == "ogbg-molpcba"
+Requires-Dist: networkx; extra == "ogbg-molpcba"
+Provides-Extra: pet-finder
+Requires-Dist: pandas; extra == "pet-finder"
+Provides-Extra: qm9
+Requires-Dist: pandas; extra == "qm9"
+Provides-Extra: robonet
+Requires-Dist: h5py; extra == "robonet"
+Provides-Extra: locomotion
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "locomotion"
+Provides-Extra: robosuite-panda-pick-place-can
+Requires-Dist: envlogger; (python_version < "3.11" and sys_platform == "linux") and extra == "robosuite-panda-pick-place-can"
+Provides-Extra: smartwatch-gestures
+Requires-Dist: pandas; extra == "smartwatch-gestures"
+Provides-Extra: speech-commands
+Requires-Dist: pydub; extra == "speech-commands"
+Provides-Extra: svhn
+Requires-Dist: scipy; extra == "svhn"
+Provides-Extra: the300w-lp
+Requires-Dist: scipy; extra == "the300w-lp"
+Provides-Extra: wake-vision
+Requires-Dist: pandas; extra == "wake-vision"
+Provides-Extra: wider-face
+Requires-Dist: Pillow; extra == "wider-face"
+Provides-Extra: wiki-dialog
+Requires-Dist: apache-beam; extra == "wiki-dialog"
+Provides-Extra: wikipedia
+Requires-Dist: apache-beam; extra == "wikipedia"
+Requires-Dist: mwparserfromhell; extra == "wikipedia"
+Requires-Dist: mwxml; extra == "wikipedia"
+Provides-Extra: wsc273
+Requires-Dist: bs4; extra == "wsc273"
+Requires-Dist: lxml; extra == "wsc273"
+Provides-Extra: youtube-vis
+Requires-Dist: pycocotools; extra == "youtube-vis"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: download-url
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+tensorflow/datasets is a library of public datasets ready to use with
+TensorFlow. Each dataset definition contains the logic necessary to download and
+prepare the dataset, as well as to read it into a model using the
+`tf.data.Dataset` API.
+
+Usage outside of TensorFlow is also supported.
+
+See the README on GitHub for further documentation.

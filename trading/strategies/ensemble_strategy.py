@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import requests
 import coremltools as ct
-import ydf
+# import ydf
 import logging
 from typing import Dict, Any
 from trading.strategies.base_strategy import BaseStrategy
@@ -45,21 +45,22 @@ class EnsembleStrategy(BaseStrategy):
         self.mlx_available = False
 
         # Load models
-        self.ydf_model = self._load_ydf_model(ydf_model_path)
+        # self.ydf_model = self._load_ydf_model(ydf_model_path)
+        self.ydf_model = None
         self.nn_model = self._load_coreml_model(coreml_model_path)
         self._check_mlx_connectivity()
 
-    def _load_ydf_model(self, model_path: str):
-        """Load the YDF model from disk."""
-        try:
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"YDF model file not found at {model_path}")
-            model = ydf.from_tensorflow_decision_forests(model_path)
-            self.logger.info(f"YDF model loaded from {model_path}")
-            return model
-        except Exception as e:
-            self.logger.error(f"Failed to load YDF model: {e}")
-            return None
+    # def _load_ydf_model(self, model_path: str):
+    #     """Load the YDF model from disk."""
+    #     try:
+    #         if not os.path.exists(model_path):
+    #             raise FileNotFoundError(f"YDF model file not found at {model_path}")
+    #         model = ydf.from_tensorflow_decision_forests(model_path)
+    #         self.logger.info(f"YDF model loaded from {model_path}")
+    #         return model
+    #     except Exception as e:
+    #         self.logger.error(f"Failed to load YDF model: {e}")
+    #         return None
 
     def _load_coreml_model(self, model_path: str):
         """Load the CoreML model from disk."""
@@ -113,14 +114,32 @@ class EnsembleStrategy(BaseStrategy):
 
     def _get_model_predictions(self, features: dict) -> Dict[str, np.ndarray]:
         """Predict using YDF, CoreML, and optionally MLX."""
+        import subprocess
+        import json
+
+        def predict_with_ydf(features: dict) -> dict:
+            ydf_env_path = "/path/to/env-ydf/bin/python"  # Update this path to your ydf environment python
+            ydf_script_path = "/Users/maxime/BTC_BOT/BTC_BOT/predict_with_ydf.py"
+            result = subprocess.run(
+                [ydf_env_path, ydf_script_path],
+                input=json.dumps(features).encode(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True
+            )
+            return json.loads(result.stdout)
+
         preds = {}
 
         try:
-            ydf_input = pd.DataFrame([features])
-            ydf_pred = self.ydf_model.predict(ydf_input)
-            preds['ydf'] = np.array(list(ydf_pred['probabilities'].values()))
+            output = predict_with_ydf(features)
+            if "probabilities" in output:
+                preds['ydf'] = np.array(output["probabilities"])
+            else:
+                self.logger.warning(f"YDF prediction error: {output.get('error', 'Unknown error')}")
+                preds['ydf'] = np.array([0.0, 1.0, 0.0])
         except Exception as e:
-            self.logger.warning(f"YDF prediction failed: {e}")
+            self.logger.warning(f"YDF prediction subprocess failed: {e}")
             preds['ydf'] = np.array([0.0, 1.0, 0.0])
 
         try:
