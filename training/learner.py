@@ -89,10 +89,12 @@ class PipeLearner:
 
     def run(self, args, comm_eva, comm_exp, learner_id):
         gpu_id = args.learner_gpus[learner_id]
-
-        agent = init_agent(args, gpu_id=gpu_id, env=None)
-        buffer, update_buffer = init_replay_buffer(args, gpu_id, agent=None, env=None)
-
+        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu" if gpu_id < 0 else f"cuda:{gpu_id}")
+        
+        agent = init_agent(args, gpu_id=gpu_id, env=None, device=device)  # Pass device if supported
+        agent.to(device)  # Ensure agent is on the correct device
+        buffer, update_buffer = init_replay_buffer(args, gpu_id, agent=None, env=None, device=device)  # Pass device if supported
+        buffer.to(device)  # Ensure buffer is on the correct device
         """start training"""
         cwd = args.cwd
         batch_size = args.batch_size
@@ -104,17 +106,19 @@ class PipeLearner:
         if_train = True
         while if_train:
             traj_lists = comm_exp.explore(agent)
+            for traj in traj_lists:
+                traj = [item.to(device) for item in traj]  # Move trajectory to device
             # if self.learner_num > 1:
             #     data = self.comm_data(traj_lists, learner_id, round_id=-1)
             #     traj_lists.extend(data)
             traj_list = sum(traj_lists, [])
 
-            steps, r_exp = update_buffer(traj_list)
+            steps, r_exp = update_buffer([item.to(device) for item in traj_list])  # Move traj_list to device
 
             torch.set_grad_enabled(True)
             logging_tuple = agent.update_net(
-                buffer, batch_size, repeat_times, soft_update_tau
-            )
+                buffer.to(device), batch_size, repeat_times, soft_update_tau
+            )  # Ensure buffer is on device
             torch.set_grad_enabled(False)
             if self.learner_num > 1:
                 self.comm_network_optim(agent, learner_id)
@@ -124,11 +128,11 @@ class PipeLearner:
                     agent, steps, r_exp, logging_tuple, cwd
                 )
 
-        agent.save_or_load_agent(cwd, if_save=True)
+    agent.save_or_load_agent(cwd, if_save=True)
 
-        if hasattr(buffer, "save_or_load_history"):
-            print(f"| LearnerPipe.run: ReplayBuffer saving in {cwd}")
-            buffer.save_or_load_history(cwd, if_save=True)
+    if hasattr(buffer, "save_or_load_history"):
+        print(f"| LearnerPipe.run: ReplayBuffer saving in {cwd}")
+        buffer.save_or_load_history(cwd, if_save=True)
 
     @staticmethod
     def get_comm_data(agent):

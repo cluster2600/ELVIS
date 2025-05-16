@@ -1,47 +1,55 @@
 #!/bin/bash
 
-# Arrêter l'exécution du script à la moindre erreur
+# Exit on any error
 set -e
 
-# Fonction de gestion des erreurs : affiche un message et désactive l'environnement virtuel si nécessaire
+# Function to prefix messages with a timestamp
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+}
+
+# Error handler
 function handle_error() {
-    echo "❌ An error occurred during the training process."
+    log "❌ [ERROR] An error occurred during the training process."
+    log "Cleaning up..."
     deactivate || true
     exit 1
 }
 
-# Déclenche la fonction handle_error en cas d'erreur
 trap 'handle_error' ERR
 
-# Vérifie que Python 3.10 est installé
+log "🔍 Checking if Python 3.10 is installed..."
 if ! command -v python3.10 &> /dev/null; then
-    echo "Python 3.10 is not installed. Please install Python 3.10 first."
+    log "❌ Python 3.10 is not installed. Please install it and rerun this script."
     exit 1
 fi
+log "✅ Python 3.10 is available."
 
-# Crée l'environnement virtuel s'il n'existe pas déjà
+# Virtual environment setup
 if [ ! -d "venv310" ]; then
-    echo "Creating virtual environment..."
+    log "📦 Creating virtual environment in ./venv310..."
     python3.10 -m venv venv310
+else
+    log "🌀 Virtual environment already exists."
 fi
 
-# Active l'environnement virtuel
-echo "Activating virtual environment..."
+log "🚀 Activating virtual environment..."
 source venv310/bin/activate
 
-# Installe les dépendances depuis le fichier requirements.txt
-echo "Installing required packages from requirements.txt..."
+log "🐍 Python version in use: $(python --version)"
+
+log "📚 Installing dependencies from requirements.txt..."
+pip install --upgrade pip
 pip install -r requirements.txt
 
-# Ajoute le répertoire courant au PYTHONPATH pour que les imports fonctionnent
 export PYTHONPATH=$(pwd):$PYTHONPATH
+log "🛠️ PYTHONPATH set to: $PYTHONPATH"
 
-# Start model training using module syntax to fix import errors
-echo "Starting model training..."
-python -m training.train_models
+log "🎯 Starting model training..."
+log "➡️ Command: python training/train_models.py --config training/config/model_config.yaml"
+python training/train_models.py --config training/config/model_config.yaml
 
-echo "✅ Model training completed."
+log "✅ Model training completed successfully."
 
-# Désactive l'environnement virtuel après l'entraînement
-echo "Deactivating virtual environment..."
+log "🧹 Deactivating virtual environment..."
 deactivate

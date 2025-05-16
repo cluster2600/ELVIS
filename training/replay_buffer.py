@@ -5,19 +5,20 @@ import numpy.random as rd
 import torch
 
 
-class ReplayBuffer:  # for off-policy
-    def __init__(self, max_len, state_dim, action_dim, gpu_id=0):
+class ReplayBuffer:  # for off-policy, extended for multi-agent
+    def __init__(self, max_len, state_dim, action_dim, agent_id, gpu_id=0):
         self.now_len = 0
         self.next_idx = 0
         self.prev_idx = 0
         self.if_full = False
         self.max_len = max_len
         self.action_dim = action_dim
+        self.agent_id = agent_id  # Add agent ID for multi-agent support
         self.device = torch.device(
             f"cuda:{gpu_id}" if (torch.cuda.is_available() and (gpu_id >= 0)) else "cpu"
         )
 
-        other_dim = 1 + 1 + self.action_dim  # reward_dim + mask_dim + action_dim
+        other_dim = 1 + 1 + self.action_dim + 1  # reward_dim + mask_dim + action_dim + agent_id_dim
         self.buf_other = torch.empty(
             (max_len, other_dim), dtype=torch.float32, device=self.device
         )
@@ -30,6 +31,32 @@ class ReplayBuffer:  # for off-policy
         self.buf_state = torch.empty(
             buf_state_size, dtype=torch.float32, device=self.device
         )
+
+    def extend_buffer(self, state, other, agent_id):  # Modified to include agent_id
+        size = len(other)
+        next_idx = self.next_idx + size
+
+        if next_idx > self.max_len:
+            self.buf_state[self.next_idx : self.max_len] = state[
+                : self.max_len - self.next_idx
+            ]
+            self.buf_other[self.next_idx : self.max_len, :-1] = other[
+                : self.max_len - self.next_idx
+            ]
+            self.buf_other[self.next_idx : self.max_len, -1] = agent_id  # Set agent ID
+            self.if_full = True
+
+            next_idx = next_idx - self.max_len
+            self.buf_state[0:next_idx] = state[-next_idx:]
+            self.buf_other[0:next_idx, :-1] = other[-next_idx:]
+            self.buf_other[0:next_idx, -1] = agent_id  # Set agent ID
+        else:
+            self.buf_state[self.next_idx : next_idx] = state
+            self.buf_other[self.next_idx : next_idx, :-1] = other
+            self.buf_other[self.next_idx : next_idx, -1] = agent_id  # Set agent ID
+        self.next_idx = next_idx
+
+    # Other methods like update_buffer, sample_batch, etc., may need adjustments, but for now, focus on the init and extend_buffer changes.
 
     def extend_buffer(self, state, other):  # CPU array to CPU array
         size = len(other)

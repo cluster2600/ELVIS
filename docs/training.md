@@ -1,220 +1,116 @@
-# ELVIS Training Documentation
+# ELVIS Trading System - Model Training Documentation
 
 ## Overview
 
-The training component of ELVIS (Enhanced Leveraged Virtual Investment System) is designed to train reinforcement learning agents for cryptocurrency trading. It implements various state-of-the-art reinforcement learning algorithms including PPO (Proximal Policy Optimization), SAC (Soft Actor-Critic), TD3 (Twin Delayed DDPG), DDPG (Deep Deterministic Policy Gradient), and A2C (Advantage Actor-Critic).
+This document provides an overview and detailed explanation of the model training pipeline for the ELVIS trading system. It covers the key components, data preparation, model training, evaluation, explanation, and configuration.
 
-## Training Architecture
+---
 
-The training system is built on the ElegantRL framework and consists of several key components:
+## Components
 
-1. **Environment**: A custom trading environment that simulates the cryptocurrency market
-2. **Agents**: Reinforcement learning algorithms implemented in the `drl_agents/agents/` directory
-3. **Training Pipeline**: Orchestrates the training process in the `train/` directory
-4. **Evaluation**: Assesses agent performance and saves models in the `train/evaluator.py` file
+### 1. Training Pipeline (`training/train_models.py`)
 
-## Training Process
+- **Purpose:** Orchestrates the entire training process including data loading, model training, evaluation, and explanation generation.
+- **Key Classes and Functions:**
+  - `TrainingPipeline`: Main class managing the training workflow.
+  - `parse_args()`: Parses CLI arguments for configuration, data paths, and options.
+  - `main()`: Entry point to run the training pipeline.
 
-The training process follows these steps:
+### 2. Model Trainer (`training/models/model_trainer.py`)
 
-1. **Environment Setup**: The trading environment is initialized with market data and parameters
-2. **Agent Initialization**: The selected RL agent is initialized with the specified hyperparameters
-3. **Exploration**: The agent explores the environment to collect experience
-4. **Learning**: The agent learns from the collected experience by updating its neural networks
-5. **Evaluation**: The agent's performance is evaluated periodically
-6. **Model Saving**: The best performing models are saved for deployment
+- **Purpose:** Handles model-specific logic including data preparation, training, validation, ensemble training, evaluation, and explanation.
+- **Key Features:**
+  - Supports PyTorch-based model training with a simple feedforward network example.
+  - Manages ensemble models: stacking, weighted, and neural ensembles.
+  - Provides model explanation capabilities using SHAP and LIME.
+  - Includes methods for saving and loading models.
 
-## Available Agents
+### 3. Evaluator (`training/models/evaluator.py`)
 
-ELVIS supports the following reinforcement learning agents:
+- **Purpose:** Monitors and evaluates agent performance during training.
+- **Features:**
+  - Records metrics such as rewards and steps.
+  - Saves models when performance improves.
+  - Plots learning curves.
+  - Handles error logging for robustness.
 
-### PPO (Proximal Policy Optimization)
-- **File**: `drl_agents/agents/AgentPPO.py`
-- **Description**: A policy gradient method that uses a clipped surrogate objective function
-- **Key Features**:
-  - Supports both continuous and discrete action spaces
-  - Implements GAE (Generalized Advantage Estimation) for sparse rewards
-  - Uses entropy regularization for exploration
+### 4. Data Processing
 
-### SAC (Soft Actor-Critic)
-- **File**: `drl_agents/agents/AgentSAC.py`
-- **Description**: An off-policy algorithm that maximizes expected return and entropy
-- **Key Features**:
-  - Automatically adjusts the temperature parameter
-  - Uses a stochastic policy for better exploration
-  - Implements twin critics to reduce overestimation bias
+- **Data Source:** OHLCV data downloaded from Binance API (`training/data/data_downloader.py`).
+- **Data Format:** Processed data stored in `data/processed/training_data.csv` with features like `feature1`, `feature2`, `feature3`, and target `price`.
+- **Data Processor:** Abstract base class defines interface for data processing (`core/data/processors/base_processor.py`).
 
-### TD3 (Twin Delayed DDPG)
-- **File**: `drl_agents/agents/AgentTD3.py`
-- **Description**: An improvement over DDPG with twin critics and delayed policy updates
-- **Key Features**:
-  - Uses twin critics to reduce overestimation bias
-  - Delays policy updates to improve stability
-  - Adds noise to target actions for regularization
+---
 
-### DDPG (Deep Deterministic Policy Gradient)
-- **File**: `drl_agents/agents/AgentDDPG.py`
-- **Description**: An actor-critic algorithm for continuous action spaces
-- **Key Features**:
-  - Uses a deterministic policy
-  - Implements experience replay for off-policy learning
-  - Uses target networks for stable learning
+## Configuration (`training/config/model_config.yaml`)
 
-### A2C (Advantage Actor-Critic)
-- **File**: `drl_agents/agents/AgentA2C.py`
-- **Description**: A synchronous version of A3C for on-policy learning
-- **Key Features**:
-  - Uses advantage estimation for reduced variance
-  - Supports both continuous and discrete action spaces
-  - Implements entropy regularization for exploration
+- **Feature Configuration:** Defines features used for training (`feature1`, `feature2`, `feature3`) and normalization method.
+- **Model Parameters:** Includes transformer model hyperparameters and RL agent settings.
+- **Training Parameters:** Batch size, checkpoint frequency, epochs, learning rates.
+- **Output Paths:** Directories for models, logs, and checkpoints.
 
-## Training Configuration
+---
 
-The training process is configured using the `Arguments` class in `train/config.py`. Key configuration parameters include:
+## Training Workflow
 
-- **Agent Selection**: Choose the RL algorithm to use
-- **Network Architecture**: Configure the neural network dimensions and layers
-- **Hyperparameters**: Set learning rates, batch sizes, and other algorithm-specific parameters
-- **Environment Settings**: Configure the trading environment parameters
-- **Training Schedule**: Set the number of steps, evaluation frequency, and early stopping criteria
+1. **Setup:**
+   - Signal handlers for graceful interruption.
+   - Logging initialization.
+   - Configuration loading.
+   - Distributed training setup (optional).
+   - Directory creation for outputs.
+   - Component initialization (data processor, model trainer, monitor, checkpoint manager, tensorboard writer).
 
-## Running Training
+2. **Data Loading and Preparation:**
+   - Load CSV or Parquet data.
+   - Extract features and target arrays based on configuration.
+   - Validate data shapes.
 
-To train a model, use the `run_training.sh` script:
+3. **Data Loaders:**
+   - Create PyTorch DataLoaders with time-series split for training and validation.
 
-```bash
-./run_training.sh
-```
+4. **Model Training:**
+   - Train model for configured epochs.
+   - Log training and validation metrics.
+   - Save checkpoints periodically.
+   - Monitor for early stopping.
 
-This script will:
-1. Activate the virtual environment
-2. Install required packages
-3. Run the model training pipeline
-4. Save trained models and optimized parameters
+5. **Reinforcement Learning Agents:**
+   - Train multi-agent RL system if configured.
 
-## Training Pipeline Components
+6. **Evaluation:**
+   - Evaluate ensemble models and RL agents.
+   - Save evaluation metrics.
 
-### Learner (`train/learner.py`)
-- Manages the learning process
-- Updates the agent's neural networks
-- Handles multi-GPU training
+7. **Explanation Generation:**
+   - Generate model explanations using SHAP or LIME for transformer models.
+   - Skip explanations for RL agents due to incompatibility.
+   - Save explanations as JSON files.
 
-### Evaluator (`train/evaluator.py`)
-- Evaluates the agent's performance
-- Saves the best models
-- Generates learning curves and performance metrics
+---
 
-### Replay Buffer (`train/replay_buffer.py`)
-- Stores and samples experiences for off-policy learning
-- Implements prioritized experience replay (PER)
-- Handles trajectory data for on-policy algorithms
+## Known Issues and Warnings
 
-### Worker (`train/worker.py`)
-- Collects experiences by running the agent in the environment
-- Used for parallel data collection in distributed training
+- TensorFlow warnings related to version compatibility in SHAP explainers.
+- RL agent explanation is currently unsupported and skipped.
+- Device mismatch warnings handled by ensuring model and data are on the same device.
 
-## Training Results
+---
 
-Training results are saved in the following formats:
+## Next Steps
 
-- **Model Checkpoints**: Saved as PyTorch state dictionaries
-- **Learning Curves**: Plots of performance metrics over time
-- **Evaluation Results**: Detailed performance metrics for each evaluation
-- **Configuration**: The hyperparameters used for training
+- Implement advanced model training logic replacing placeholder methods.
+- Enhance RL agent explanation support.
+- Improve data processing and feature engineering.
+- Address any remaining warnings and optimize performance.
 
-## Advanced Training Features
+---
 
-### Multi-GPU Training
-The training system supports distributed training across multiple GPUs:
+## References
 
-```python
-args.learner_gpus = [0, 1, 2, 3]  # Use GPUs 0, 1, 2, and 3
-```
-
-### Early Stopping
-Training can be configured to stop early when the agent reaches a target performance:
-
-```python
-args.target_return = 1000  # Stop when average return reaches 1000
-args.if_allow_break = True  # Allow early stopping
-```
-
-### Custom Environments
-You can create custom trading environments by implementing the Gym interface:
-
-```python
-class CustomTradingEnv(gym.Env):
-    def __init__(self):
-        # Initialize the environment
-        pass
-    
-    def reset(self):
-        # Reset the environment
-        pass
-    
-    def step(self, action):
-        # Execute the action and return the next state, reward, done, and info
-        pass
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Out of Memory Errors**
-   - Reduce batch size or network size
-   - Use gradient accumulation for larger effective batch sizes
-
-2. **Unstable Training**
-   - Adjust learning rates
-   - Increase the replay buffer size
-   - Use a more stable algorithm like PPO
-
-3. **Poor Performance**
-   - Check the reward function design
-   - Increase the network capacity
-   - Adjust the exploration parameters
-
-### Debugging Tips
-
-1. **Monitor Training Progress**
-   - Use the console dashboard to monitor training metrics
-   - Check the learning curves for signs of improvement
-
-2. **Validate Environment**
-   - Test the environment with random actions
-   - Verify that the state and action spaces are correctly defined
-
-3. **Profile Performance**
-   - Use PyTorch profilers to identify bottlenecks
-   - Optimize data loading and preprocessing
-
-## Future Improvements
-
-1. **Meta-Learning**
-   - Implement meta-learning to adapt to changing market conditions
-   - Use model-based RL for faster adaptation
-
-2. **Multi-Agent Training**
-   - Train multiple agents to compete or cooperate
-   - Implement market maker and taker agents
-
-3. **Transfer Learning**
-   - Pre-train on historical data
-   - Fine-tune on recent market conditions
-
-4. **Automated Hyperparameter Optimization**
-   - Implemented Bayesian optimization and population-based training in training/train_models.py for adaptive hyperparameters.
-
-5. **MPS Device Detection for Apple Silicon**
-   - Added support in training/config.py to detect and use MPS backend for optimized performance on Apple Silicon devices.
-
-6. **Two-Stage Training (Transfer Learning)**
-   - Added configuration toggles in training/config.py for pretraining and finetuning stages.
-   - Implemented logic in training/train_models.py to handle two-stage training based on these toggles.
-
-7. **Meta-Learning Integration**
-   - Integrated meta-learning algorithms in training/learner.py for rapid adaptation to new market dynamics.
-
-8. **Multi-Agent Training**
-   - Implemented multi-agent support in training/worker.py to simulate competitive or cooperative environments.
+- `training/train_models.py`
+- `training/models/model_trainer.py`
+- `training/models/evaluator.py`
+- `training/config/model_config.yaml`
+- `training/data/data_downloader.py`
+- `core/data/processors/base_processor.py`
