@@ -2,10 +2,18 @@
 
 import os
 
-API_CONFIG = {
-    'API_KEY': os.getenv('BINANCE_API_KEY', 'your_binance_api_key_here'),
-    'API_SECRET': os.getenv('BINANCE_API_SECRET', 'your_binance_api_secret_here'),
-}
+import os
+
+class APIConfig:
+    @property
+    def BINANCE_API_KEY(self):
+        return os.getenv('BINANCE_API_KEY', 'your_binance_api_key_here')
+
+    @property
+    def BINANCE_API_SECRET(self):
+        return os.getenv('BINANCE_API_SECRET', 'your_binance_api_secret_here')
+
+API_CONFIG = APIConfig()
 
 TRADING_CONFIG = {
     'DEFAULT_MODE': 'paper',

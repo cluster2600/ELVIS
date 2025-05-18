@@ -9,7 +9,20 @@ import psutil
 from utils.logging_utils import setup_logger
 
 class ConsoleDashboard:
+    """
+    ConsoleDashboard provides a curses-based terminal UI for displaying trading system metrics,
+    system resource usage, and recent trading activity. It is designed to be extensible for
+    future enhancements such as multi-timeframe views, technical indicators, and interactive features.
+    """
+
     def __init__(self, config=None, logger=None):
+        """
+        Initialize the ConsoleDashboard.
+
+        Args:
+            config (dict): Configuration dictionary containing dynamic data to display.
+            logger (logging.Logger): Logger instance for logging dashboard events and errors.
+        """
         self.config = config or {}
         self.logger = logger or logging.getLogger(__name__)
         self.animation_frame = 0
@@ -17,6 +30,10 @@ class ConsoleDashboard:
         self.running = False
 
     def _draw_frame(self):
+        """
+        Draw a single frame of the dashboard UI, including header, system info, and layout boxes.
+        Handles terminal resizing and ensures minimum size requirements.
+        """
         try:
             self.stdscr.clear()
             max_y, max_x = self.stdscr.getmaxyx()
@@ -34,6 +51,15 @@ class ConsoleDashboard:
             self.logger.error(f"Error drawing frame: {e}")
 
     def _draw_box(self, start_y: int, start_x: int, end_y: int, end_x: int):
+        """
+        Draw a rectangular box using ASCII characters.
+
+        Args:
+            start_y (int): Starting row.
+            start_x (int): Starting column.
+            end_y (int): Ending row.
+            end_x (int): Ending column.
+        """
         try:
             self.safe_addch(start_y, start_x, '+')
             self.safe_addch(start_y, end_x, '+')
@@ -49,6 +75,9 @@ class ConsoleDashboard:
             pass
 
     def _draw_header(self):
+        """
+        Draw the dashboard header with a stylized logo centered horizontally.
+        """
         try:
             max_y, max_x = self.stdscr.getmaxyx()
             logo = [
@@ -67,6 +96,15 @@ class ConsoleDashboard:
             pass
 
     def _draw_system_info(self, start_y: int, start_x: int, width: int):
+        """
+        Draw system and trading information including time, services, portfolio value,
+        open positions, last trade, CPU and memory usage.
+
+        Args:
+            start_y (int): Starting row for info display.
+            start_x (int): Starting column for info display.
+            width (int): Width available for display.
+        """
         try:
             y = start_y
             # Current Time
@@ -115,6 +153,10 @@ class ConsoleDashboard:
             pass
 
     def run(self):
+        """
+        Main loop to run the dashboard UI. Handles keyboard input and periodic redraws.
+        Press 'q' to quit the dashboard.
+        """
         try:
             curses.start_color()
             curses.use_default_colors()
@@ -139,6 +181,15 @@ class ConsoleDashboard:
                 curses.endwin()
 
     def safe_addstr(self, y: int, x: int, text: str, attr=None):
+        """
+        Safely add a string to the curses window, handling out-of-bounds errors.
+
+        Args:
+            y (int): Row position.
+            x (int): Column position.
+            text (str): Text to display.
+            attr: Optional curses attribute for styling.
+        """
         try:
             if y >= 0 and x >= 0 and y < self.stdscr.getmaxyx()[0] and x + len(text) < self.stdscr.getmaxyx()[1]:
                 if attr is not None:
@@ -149,6 +200,15 @@ class ConsoleDashboard:
             pass
 
     def safe_addch(self, y: int, x: int, ch: str, attr=None):
+        """
+        Safely add a character to the curses window, handling out-of-bounds errors.
+
+        Args:
+            y (int): Row position.
+            x (int): Column position.
+            ch (str): Character to display.
+            attr: Optional curses attribute for styling.
+        """
         try:
             if y >= 0 and x >= 0 and y < self.stdscr.getmaxyx()[0] and x < self.stdscr.getmaxyx()[1]:
                 if attr is not None:
@@ -161,6 +221,12 @@ class ConsoleDashboard:
 # Entry point
 
 def main(stdscr):
+    """
+    Entry point for running the ConsoleDashboard standalone.
+
+    Args:
+        stdscr: curses standard screen object.
+    """
     logger = setup_logger("ConsoleDashboard")
     config = {
         'services': ['trade_history_api.py', 'console_dashboard.py', 'main.py'],

@@ -1,8 +1,3 @@
-# Bot Architecture Mermaid Diagrams
-
-## Component Interaction Flowchart
-
-```mermaid
 graph TD
     Main["main.py"]
     BinanceExecutor["BinanceExecutor"]
@@ -29,8 +24,6 @@ graph TD
     ConsoleDashboard --> EnsembleStrategy
     ConsoleDashboard --> RiskManager
 ```
-
-## Class Diagram
 
 ```mermaid
 classDiagram
@@ -63,11 +56,6 @@ classDiagram
     class ConsoleDashboard {
         +run()
         +_draw_frame()
-    }
-
-    class PriceFetcher {
-        +get_price()
-        +get_order_book()
     }
 
     class AdvancedRiskManager {

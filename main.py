@@ -56,8 +56,8 @@ def main(mode: str, log_level: int):
     # Initialize Binance executor
     executor = BinanceExecutor(
         logger=logger,
-        api_key=API_CONFIG['BINANCE_API_KEY'],
-        api_secret=API_CONFIG['BINANCE_API_SECRET'],
+        api_key=API_CONFIG.BINANCE_API_KEY,
+        api_secret=API_CONFIG.BINANCE_API_SECRET,
         is_testnet=(mode == 'paper')
     )
     executor.initialize()

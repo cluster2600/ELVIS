@@ -1,7 +1,6 @@
 # ELVIS Trading Bot
 
 ## Overview
-<<<<<<< HEAD
 
 ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for developing and deploying cryptocurrency trading bots on Binance Futures, specifically targeting BTC/USDT. It integrates various trading strategies, machine learning models (including Random Forest, Neural Networks, Transformers, and Reinforcement Learning), risk management techniques, and performance monitoring tools.
 
@@ -11,78 +10,24 @@ ELVIS (Enhanced Leveraged Virtual Investment System) is a modular framework for 
 - [Random Forest Documentation](docs/random_forest.md) - Guide to the Random Forest model implementation
 - [CHANGELOG.md](CHANGELOG.md) - Version history and changes
 - [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) - Planned enhancements
-=======
 
-The ELVIS Trading Bot is a comprehensive system designed for cryptocurrency trading using machine learning models. It includes data downloading, processing, model training, evaluation, and deployment components.
->>>>>>> f211ff0 (version3)
+## Random Forest Model Updates
+
+The Random Forest model in `core/models/random_forest_model.py` has been enhanced with the following features:
+
+- Integration of Optuna for automated hyperparameter optimization.
+- Support for advanced feature engineering.
+- Improved evaluation metrics handling with default values for missing metrics.
+- Enhanced feature importance extraction supporting multiple importance types.
+- Robust error handling and detailed logging.
+- Updated training, prediction, evaluation, saving, and loading methods.
+
+These improvements increase model robustness, interpretability, and ease of tuning for better trading performance.
 
 ## Training Data Downloader
 
 The `training/data/data_downloader.py` script downloads OHLCV (Open, High, Low, Close, Volume) data from the public Binance API for the BTCUSDT trading pair. It saves the data locally as a CSV file (`price_data.csv`) for use in model training.
 
-<<<<<<< HEAD
-- **Deep Reinforcement Learning for Cryptocurrency Trading** by Berend Jelmer Dirk Gort et al.
-- **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features** by Annelotte Bonenkamp, Bachelor Econometrics, 12378593, June 2021.
-- **Attention Is All You Need** by Vaswani et al. (Transformer architecture)
-- **Proximal Policy Optimization Algorithms** by Schulman et al. (PPO implementation)
-- **A Comprehensive Guide to Machine Learning for Trading** by Marcos Lopez de Prado
-
-> **⚠ WARNING: NON-PRODUCTION MODE ONLY ⚠**
->
-> ELVIS is currently configured to run in non-production mode by default. Live trading is disabled for safety.
->
-> This project is for educational purposes only and is not production-ready without extensive validation.
->
-> Leveraged trading carries high risk—use simulation or Binance Testnet first.
->
-> To enable live trading (at your own risk), set `PRODUCTION_MODE: True` in `config/config.py`.
-
-## Features
-
-- **Machine Learning Models**
-  - Transformer-based time series forecasting
-  - Reinforcement learning agents
-  - Explainable AI components
-  - Automated feature engineering
-
-- **Risk Management**
-  - Advanced position sizing using Kelly Criterion
-  - Dynamic risk allocation based on market regimes
-  - Drawdown protection with circuit breakers
-  - Correlation analysis and portfolio optimization
-
-- **Data Processing**
-  - On-chain data integration
-  - Order book analysis
-  - Funding rate monitoring
-  - Technical indicator calculation
-  - Market regime detection
-
-- **Strategy Validation**
-  - Monte Carlo simulations
-  - Walk-forward analysis
-  - Statistical validation
-  - Stress testing
-  - Performance metrics
-
-- **Monitoring & Visualization**
-  - Real-time Prometheus metrics
-  - Grafana dashboards for trading analytics
-  - System resource monitoring
-  - Order book depth visualization
-  - Performance tracking and alerts
-
-## Installation
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/cluster2600/elvis-trading.git
-cd elvis-trading
-```
-
-2. Create and activate a virtual environment:
-=======
 ### Usage
 
 Run the data downloader script to fetch the latest market data:
@@ -100,13 +45,31 @@ The training pipeline is implemented in `training/train_models.py`. It loads con
 ### Running Training
 
 Use the provided shell script to set up the environment and start training:
->>>>>>> f211ff0 (version3)
 
 ```bash
 bash run_training.sh
 ```
 
-<<<<<<< HEAD
+## Configuration
+
+Model training parameters are specified in `training/config/model_config.yaml`. Adjust this file to change model hyperparameters, data paths, and training settings.
+
+## Installation
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/cluster2600/elvis-trading.git
+cd elvis-trading
+```
+
+2. Create and activate a virtual environment:
+
+```bash
+python3 -m venv env
+source env/bin/activate
+```
+
 3. Install the package in development mode:
 
 ```bash
@@ -126,19 +89,6 @@ brew install grafana  # macOS
 # or
 sudo apt-get install grafana  # Ubuntu/Debian
 ```
-
-## Configuration
-
-The system uses YAML configuration files for different components:
-
-- `trading/config/model_config.yaml`: Machine learning model settings
-- `trading/config/risk_config.yaml`: Risk management parameters
-- `trading/config/data_config.yaml`: Data processing settings
-- `trading/config/validation_config.yaml`: Strategy validation parameters
-- `/opt/homebrew/etc/grafana/provisioning/datasources/datasources.yml`: System location for Prometheus data source configuration
-- `/opt/homebrew/var/lib/grafana/*.json`: System location for Grafana dashboard files
-- `grafana/provisioning/datasources/datasources.yml`: Prometheus data source configuration
-- `grafana/provisioning/dashboards/dashboards.yml`: Grafana dashboard provisioning
 
 ## Usage
 
@@ -268,11 +218,6 @@ classDiagram
         +_draw_frame()
     }
 
-    class PriceFetcher {
-        +get_price()
-        +get_order_book()
-    }
-
     class AdvancedRiskManager {
         +manage_risk()
     }
@@ -301,11 +246,4 @@ Special thanks to Annelotte Bonenkamp for her work:
 **Bachelor Econometrics**  
 **High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features**  
 **Annelotte Bonenkamp** (12378593)  
-**June 2021**  
-=======
-This script creates a Python 3.10 virtual environment, installs dependencies, and runs the training pipeline.
-
-## Configuration
-
-Model training parameters are specified in `training/config/model_config.yaml`. Adjust this file to change model hyperparameters, data paths, and training settings.
->>>>>>> f211ff0 (version3)
+**June 2021**

@@ -1,336 +1,211 @@
 """
 Random Forest model for the ELVIS project.
-This module provides a concrete implementation of the BaseModel using Random Forest.
+Implements a Random Forest using TensorFlow Decision Forests,
+including training, evaluation, interpretability, and cross-validation with Optuna support.
 """
 
 import os
 import pandas as pd
 import numpy as np
 import logging
-import joblib
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional
 import tensorflow_decision_forests as tfdf
 import tensorflow as tf
+import optuna
+from sklearn.model_selection import KFold
+from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import time
 
 from core.models.base_model import BaseModel
-from config import FILE_PATHS
+import config
+
+# Define FILE_PATHS here if not defined in config
+if not hasattr(config, 'FILE_PATHS'):
+    FILE_PATHS = {
+        'TRAIN_RESULTS_DIR': 'data/models'
+    }
+else:
+    FILE_PATHS = config.FILE_PATHS
+
+# --------------------
+# Decorators
+# --------------------
+
+def log_time(func):
+    """Decorator to log execution time of methods."""
+    def wrapper(self, *args, **kwargs):
+        start = time.time()
+        self.logger.info(f"Starting '{func.__name__}'...")
+        result = func(self, *args, **kwargs)
+        duration = time.time() - start
+        self.logger.info(f"Finished '{func.__name__}' in {duration:.2f} seconds")
+        return result
+    return wrapper
+
+# --------------------
+# RandomForestModel
+# --------------------
 
 class RandomForestModel(BaseModel):
     """
-    Random Forest model for trading.
-    Uses TensorFlow Decision Forests for implementation.
+    Random Forest model for trading using TensorFlow Decision Forests.
+    Includes training, evaluation, interpretability, and CV with Optuna.
     """
-    
+
     def __init__(self, logger: logging.Logger, **kwargs):
-        """
-        Initialize the Random Forest model.
-        
-        Args:
-            logger (logging.Logger): The logger to use.
-            **kwargs: Additional keyword arguments.
-        """
         self.logger = logger
-        
-        # Model parameters
         self.num_trees = kwargs.get('num_trees', 100)
         self.max_depth = kwargs.get('max_depth', 20)
         self.min_examples = kwargs.get('min_examples', 5)
-        
-        # Model path
         self.model_path = kwargs.get('model_path', os.path.join(FILE_PATHS['TRAIN_RESULTS_DIR'], 'model_rf.ydf'))
-        
-        # Initialize model
         self.model = None
-    
-    def load_model(self) -> None:
-        """
-        Load the model from disk.
-        """
-        try:
-            self.logger.info(f"Loading Random Forest model from {self.model_path}")
-            
-            # Check if model exists
-            if not os.path.exists(self.model_path):
-                self.logger.warning(f"Model not found at {self.model_path}")
-                return
-            
-            # Load model
-            self.model = tfdf.keras.RandomForestModel.load(self.model_path)
-            
-            self.logger.info("Random Forest model loaded successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error loading Random Forest model: {e}")
-    
-    def save_model(self) -> None:
-        """
-        Save the model to disk.
-        """
-        try:
-            self.logger.info(f"Saving Random Forest model to {self.model_path}")
-            
-            # Check if model exists
-            if self.model is None:
-                self.logger.warning("No model to save")
-                return
-            
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-            
-            # Save model
-            self.model.save(self.model_path)
-            
-            self.logger.info("Random Forest model saved successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving Random Forest model: {e}")
-    
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series) -> None:
-        """
-        Train the model.
-        
-        Args:
-            X_train (pd.DataFrame): The training features.
-            y_train (pd.Series): The training labels.
-        """
-        try:
-            self.logger.info("Training Random Forest model")
 
-            # Combine features and labels into one DataFrame for TFDF
-            # Ensure y_train index aligns with X_train
-            label_name = 'target_label' # Define a label column name
-            train_df_combined = X_train.copy()
-            train_df_combined[label_name] = y_train
+    @log_time
+    def train(self, X_train: pd.DataFrame, y_train: pd.Series, trial: Optional[optuna.trial.Trial] = None) -> None:
+        if trial:
+            self.num_trees = trial.suggest_int('num_trees', 50, 300)
+            self.max_depth = trial.suggest_int('max_depth', 5, 30)
+            self.min_examples = trial.suggest_int('min_examples', 1, 20)
+            self.logger.info(f"Optuna trial: num_trees={self.num_trees}, max_depth={self.max_depth}, min_examples={self.min_examples}")
 
-            # Convert the combined DataFrame to a TensorFlow dataset
-            train_ds = tfdf.keras.pd_dataframe_to_tf_dataset(train_df_combined, label=label_name)
+        label = 'target_label'
+        df = X_train.copy()
+        df[label] = y_train
+        ds = tfdf.keras.pd_dataframe_to_tf_dataset(df, label=label)
 
-            # Create model
-            self.model = tfdf.keras.RandomForestModel(
-                num_trees=self.num_trees,
-                max_depth=self.max_depth,
-                min_examples=self.min_examples,
-                verbose=2
-            )
-            
-            # Train model
-            self.model.fit(train_ds)
-            
-            self.logger.info("Random Forest model trained successfully")
-            
-            # Save model
-            self.save_model()
-            
-        except Exception as e:
-            self.logger.error(f"Error training Random Forest model: {e}")
-    
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """
-        Make predictions with the model.
-        
-        Args:
-            X (pd.DataFrame): The features to predict on.
-            
-        Returns:
-            np.ndarray: The predictions.
-        """
-        try:
-            self.logger.info("Making predictions with Random Forest model")
-            
-            # Check if model exists
-            if self.model is None:
-                self.logger.warning("No model loaded. Loading model...")
-                self.load_model()
-                
-                if self.model is None:
-                    self.logger.error("Failed to load model")
-                    return np.zeros(len(X))
-            
-            # Convert to TensorFlow dataset
-            test_ds = tfdf.keras.pd_dataframe_to_tf_dataset(X, label=None)
-            
-            # Make predictions
-            predictions = self.model.predict(test_ds)
-            
-            # Convert to numpy array
-            predictions = predictions.numpy().flatten()
-            
-            self.logger.info(f"Made {len(predictions)} predictions")
-            
-            return predictions
-            
-        except Exception as e:
-            self.logger.error(f"Error making predictions with Random Forest model: {e}")
-            return np.zeros(len(X))
-    
+        self.model = tfdf.keras.RandomForestModel(
+            num_trees=self.num_trees,
+            max_depth=self.max_depth,
+            min_examples=self.min_examples,
+            verbose=2
+        )
+        self.model.fit(ds)
+        self.save()
+
+    @log_time
     def evaluate(self, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
-        """
-        Evaluate the model.
-        
-        Args:
-            X_test (pd.DataFrame): The test features.
-            y_test (pd.Series): The test labels.
-            
-        Returns:
-            Dict[str, float]: The evaluation metrics.
-        """
-        try:
-            self.logger.info("Evaluating Random Forest model")
-            
-            # Check if model exists
+        if self.model is None:
+            self.load_model()
             if self.model is None:
-                self.logger.warning("No model loaded. Loading model...")
-                self.load_model()
-                
-                if self.model is None:
-                    self.logger.error("Failed to load model")
-                    return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
-            
-            # Convert to TensorFlow dataset
-            test_ds = tfdf.keras.pd_dataframe_to_tf_dataset(X_test, label=y_test)
-            
-            # Evaluate model
-            evaluation = self.model.evaluate(test_ds, return_dict=True)
-            
-            # Extract metrics
-            metrics = {
-                'accuracy': evaluation['accuracy'],
-                'loss': evaluation['loss']
-            }
-            
-            self.logger.info(f"Evaluation metrics: {metrics}")
-            
-            return metrics
-            
-        except Exception as e:
-            self.logger.error(f"Error evaluating Random Forest model: {e}")
-            return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
-    
+                return {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'loss': 0.0}
+
+        df = X_test.copy()
+        df['target_label'] = y_test
+        ds = tfdf.keras.pd_dataframe_to_tf_dataset(df, label='target_label')
+        eval_res = self.model.evaluate(ds, return_dict=True)
+
+        return {
+            'accuracy': eval_res.get('accuracy', 0.0),
+            'loss': eval_res.get('loss', 0.0),
+            'precision': eval_res.get('precision_at_1', 0.0),
+            'recall': eval_res.get('recall_at_1', 0.0),
+            'f1': eval_res.get('f1_score', 0.0)
+        }
+
+    @log_time
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model is None:
+            self.load_model()
+            if self.model is None:
+                return np.zeros(len(X))
+
+        ds = tfdf.keras.pd_dataframe_to_tf_dataset(X, label=None)
+        return self.model.predict(ds).flatten()
+
+    @log_time
+    def cross_validate(self, X: pd.DataFrame, y: pd.Series, n_splits: int = 5, trial: Optional[optuna.trial.Trial] = None) -> Dict[str, float]:
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        scores = {k: [] for k in ['accuracy', 'precision', 'recall', 'f1', 'loss', 'roc_auc']}
+
+        for fold, (train_idx, test_idx) in enumerate(tqdm(kf.split(X), total=n_splits, desc="Cross-validation")):
+            self.logger.info(f"Fold {fold + 1}/{n_splits}")
+            X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+            self.train(X_train, y_train, trial=trial)
+            metrics = self.evaluate(X_test, y_test)
+            y_pred = self.predict(X_test)
+
+            for k in ['accuracy', 'precision', 'recall', 'f1', 'loss']:
+                scores[k].append(metrics.get(k, 0.0))
+
+            try:
+                if len(np.unique(y_test)) == 2:
+                    scores['roc_auc'].append(roc_auc_score(y_test, y_pred))
+                else:
+                    self.logger.warning("ROC AUC not supported for multiclass")
+                    scores['roc_auc'].append(0.0)
+            except Exception as e:
+                self.logger.warning(f"ROC AUC error: {e}")
+                scores['roc_auc'].append(0.0)
+
+        avg = {k: float(np.mean(v)) for k, v in scores.items()}
+        self.logger.info(f"CV Average: {avg}")
+
+        plt.figure(figsize=(10, 6))
+        for k, v in scores.items():
+            plt.plot(range(1, n_splits + 1), v, label=k)
+        plt.xlabel("Fold")
+        plt.ylabel("Score")
+        plt.title("Cross-validation Metrics per Fold")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+        return avg
+
+    @log_time
     def get_feature_importance(self) -> pd.DataFrame:
-        """
-        Get the feature importance.
-        
-        Returns:
-            pd.DataFrame: The feature importance.
-        """
-        try:
-            self.logger.info("Getting feature importance")
-            
-            # Check if model exists
+        if self.model is None:
+            self.load_model()
             if self.model is None:
-                self.logger.warning("No model loaded. Loading model...")
-                self.load_model()
-                
-                if self.model is None:
-                    self.logger.error("Failed to load model")
-                    return pd.DataFrame()
-            
-            # Get feature importance
-            importance = self.model.make_inspector().variable_importances()
-            
-            # Convert to DataFrame
-            if importance and len(importance) > 0 and 'MEAN_DECREASE_IN_ACCURACY' in importance:
-                importance_df = pd.DataFrame(
-                    importance['MEAN_DECREASE_IN_ACCURACY'],
-                    columns=['feature', 'importance']
-                )
-                importance_df = importance_df.sort_values('importance', ascending=False)
-                
-                self.logger.info(f"Feature importance: {importance_df}")
-                
-                return importance_df
-            else:
-                self.logger.warning("No feature importance available")
                 return pd.DataFrame()
-            
-        except Exception as e:
-            self.logger.error(f"Error getting feature importance: {e}")
-            return pd.DataFrame()
-    
-    def save(self, path: str) -> None:
-        """
-        Save model to disk.
-        
-        Args:
-            path: The path to save the model to.
-        """
-        try:
-            self.logger.info(f"Saving Random Forest model to {path}")
-            
-            # Check if model exists
-            if self.model is None:
-                self.logger.warning("No model to save")
-                return
-            
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            
-            # Save model
-            self.model.save(path)
-            
-            self.logger.info("Random Forest model saved successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving Random Forest model: {e}")
-    
+
+        inspector = self.model.make_inspector()
+        importance = inspector.variable_importances()
+
+        for key in ['MEAN_DECREASE_IN_ACCURACY', 'NUM_AS_ROOT', 'SUM_SCORE']:
+            if key in importance:
+                df = pd.DataFrame(importance[key], columns=['feature', 'importance'])
+                return df.sort_values('importance', ascending=False)
+
+        return pd.DataFrame()
+
+    def save(self, path: Optional[str] = None) -> None:
+        if self.model is None:
+            self.logger.warning("No model to save")
+            return
+        save_path = path if path else self.model_path
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        self.model.save(save_path)
+        self.logger.info(f"Model saved to {save_path}")
+
+    def load_model(self) -> None:
+        if not os.path.exists(self.model_path):
+            self.logger.warning(f"Model not found at {self.model_path}")
+            return
+        self.model = tf.keras.models.load_model(self.model_path)
+        self.logger.info(f"Model loaded from {self.model_path}")
+
     @classmethod
     def load(cls, path: str) -> 'RandomForestModel':
-        """
-        Load model from disk.
-        
-        Args:
-            path: The path to load the model from.
-            
-        Returns:
-            RandomForestModel: The loaded model.
-        """
-        try:
-            # Create logger
-            logger = logging.getLogger('RandomForestModel')
-            
-            # Create model instance
-            model_instance = cls(logger)
-            
-            # Set model path
-            model_instance.model_path = path
-            
-            # Load model
-            model_instance.model = tfdf.keras.RandomForestModel.load(path)
-            
-            logger.info("Random Forest model loaded successfully")
-            
-            return model_instance
-            
-        except Exception as e:
-            logger = logging.getLogger('RandomForestModel')
-            logger.error(f"Error loading Random Forest model: {e}")
-            return cls(logger)
-    
+        logger = logging.getLogger('RandomForestModel')
+        model_instance = cls(logger)
+        model_instance.model_path = path
+        model_instance.load_model()
+        return model_instance
+
     def get_params(self) -> Dict[str, Any]:
-        """
-        Get the model parameters.
-        
-        Returns:
-            Dict[str, Any]: The model parameters.
-        """
         return {
             'num_trees': self.num_trees,
             'max_depth': self.max_depth,
             'min_examples': self.min_examples
         }
-    
+
     def set_params(self, **params) -> None:
-        """
-        Set the model parameters.
-        
-        Args:
-            **params: The model parameters.
-        """
-        if 'num_trees' in params:
-            self.num_trees = params['num_trees']
-        
-        if 'max_depth' in params:
-            self.max_depth = params['max_depth']
-        
-        if 'min_examples' in params:
-            self.min_examples = params['min_examples']
+        self.num_trees = params.get('num_trees', self.num_trees)
+        self.max_depth = params.get('max_depth', self.max_depth)
+        self.min_examples = params.get('min_examples', self.min_examples)
