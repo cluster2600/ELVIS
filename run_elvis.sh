@@ -18,6 +18,15 @@ else
     exit 1
 fi
 
+# --- Validate critical env vars ---
+REQUIRED_VARS=("BINANCE_API_KEY" "BINANCE_API_SECRET")
+for var in "${REQUIRED_VARS[@]}"; do
+    if [[ -z "${!var}" ]]; then
+        echo "❌ Missing required environment variable: $var"
+        exit 1
+    fi
+done
+
 # --- env-coreml setup ---
 if [ ! -d "env-coreml" ]; then
     echo "📦 Creating env-coreml..."
@@ -54,7 +63,7 @@ else
 fi
 deactivate
 
-# --- Activate CoreML environment and run bot ---
+# --- Activate env-coreml ---
 echo "🚀 Activating env-coreml..."
 source env-coreml/bin/activate
 echo "[DEBUG] Python: $(which python)"
@@ -94,14 +103,12 @@ elif [ "$MODE" == "live" ]; then
     sleep 5
 fi
 
-# --- Launch the bot ---
+# --- Ensure logs dir ---
+mkdir -p logs
+
+# --- Launch ELVIS ---
 echo "🧠 Starting ELVIS..."
 python main.py \
     --mode "$MODE" \
-    --symbol "$SYMBOL" \
-    --timeframe "$TIMEFRAME" \
-    --leverage "$LEVERAGE" \
-    --strategy "$STRATEGY" \
     --log-level "$LOG_LEVEL" \
-    --dashboard "$DASHBOARD" \
-    --environment "$ENVIRONMENT"
+    >> logs/elvis_$(date +'%Y%m%d_%H%M%S').log 2>&1
