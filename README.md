@@ -4,7 +4,8 @@
 
 This project includes a trading application with machine learning models, feature pipelines, and visualization tools.
 
-![Architecture Diagram](./images/architecture_links.svg)
+<!-- Removed non-existent architecture_links.svg image reference -->
+
 
 ## Core Models
 
