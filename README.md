@@ -1,6 +1,10 @@
 # Project Overview
 
+![Project Image](images/project_overview.png)
+
 This project includes a trading application with machine learning models, feature pipelines, and visualization tools.
+
+![Architecture Diagram](images/architecture_links.svg)
 
 ## Core Models
 
