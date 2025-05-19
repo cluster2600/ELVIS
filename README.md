@@ -1,6 +1,6 @@
 # Project Overview
 
-![Project Image](./images/project_overview.png)
+![Project Image](./images/elvis.png)
 
 This project includes a trading application with machine learning models, feature pipelines, and visualization tools.
 
@@ -22,7 +22,7 @@ This project includes a trading application with machine learning models, featur
 ## Documentation
 
 - `docs/plots/`: Directory containing SHAP and cross-validation plots in PNG and SVG formats for model interpretability and evaluation.
-- `docs/architecture_links.mmd`: Mermaid diagram files documenting the architecture and data flow within the project.
+- `docs/bot_architecture_mermaid.md`: Mermaid diagram file documenting the bot architecture and data flow within the project.
 
 ## Change Log
 
