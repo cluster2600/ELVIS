@@ -1,6 +1,6 @@
 # Random Forest Model for Trading – ELVIS Project
 
-![Random Forest Overview](ELVIS/images/random_forest.png)
+![Random Forest Overview](../images/random_forest.png)
 
 ---
 
