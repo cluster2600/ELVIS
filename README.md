@@ -178,6 +178,15 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 - `utils/`
 - `docs/`
 
+### Documentation Files
+
+- [Architecture Links Part 1](docs/architecture_links_part1.mmd)
+- [Architecture Links](docs/architecture_links.mmd)
+- [Bot Architecture Mermaid](docs/bot_architecture_mermaid.md)
+- [Future Improvements](docs/future_improvements.md)
+- [Random Forest Model Documentation](docs/random_forest.md)
+- [Training Pipeline Documentation](docs/training.md)
+
 ---
 
 This README will be maintained and expanded as the project evolves to provide clear guidance and documentation for developers and stakeholders.
