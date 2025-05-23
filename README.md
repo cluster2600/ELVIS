@@ -5,28 +5,15 @@
 ## Table of Contents
 
 - [Introduction](#introduction)
-- [Architecture Overview](#architecture-overview)
-- [Core Models](#core-models)
-  - [BaseModel Interface](#basemodel-interface)
-  - [RandomForestModel](#randomforestmodel)
-  - [NeuralNetworkModel](#neuralnetworkmodel)
-  - [TransformerModel](#transformermodel)
-  - [EnsembleModel](#ensemblemodel)
-- [Training Pipeline](#training-pipeline)
-- [Data Processing](#data-processing)
-- [Trading Strategies](#trading-strategies)
-  - [BaseStrategy](#basestrategy)
-  - [EnsembleStrategy](#ensemblestrategy)
-- [Execution Modules](#execution-modules)
-  - [BaseExecutor](#baseexecutor)
-  - [BinanceExecutor](#binanceexecutor)
-- [Utilities](#utilities)
-  - [PriceFetcher](#pricefetcher)
-  - [ConsoleDashboard](#consoledashboard)
-  - [TrainingMonitor](#trainingmonitor)
-- [Testing](#testing)
+- [System Architecture](#system-architecture)
+- [Core Components](#core-components)
+  - [Models](#models)
+  - [Trading System](#trading-system)
+  - [Data Processing](#data-processing)
+  - [Training Pipeline](#training-pipeline)
+  - [Utilities & Monitoring](#utilities--monitoring)
 - [Configuration](#configuration)
-- [Monitoring and Metrics](#monitoring-and-metrics)
+- [Testing](#testing)
 - [Future Improvements](#future-improvements)
 - [References](#references)
 
@@ -34,23 +21,381 @@
 
 ## Introduction
 
-The ELVIS Trading Bot is a modular, extensible trading system designed to leverage machine learning models for algorithmic trading. It integrates multiple model architectures, a robust training pipeline, real-time data processing, and execution modules to facilitate automated trading strategies. The system includes monitoring and visualization tools to provide insights into trading performance and system health.
+The ELVIS Trading Bot is a sophisticated, modular algorithmic trading system that leverages machine learning models for automated cryptocurrency trading. The system integrates multiple ML architectures, real-time data processing, risk management, and execution modules to facilitate intelligent trading strategies with comprehensive monitoring and visualization capabilities.
 
 ---
 
-## Architecture Overview
+## System Architecture
 
-The system is organized into several key components:
+```mermaid
+graph TB
+    subgraph "Entry Points"
+        Main[main.py]
+        Training[training.py]
+        Scripts[run_*.sh]
+    end
+    
+    subgraph "Core Models"
+        BaseModel[BaseModel Interface]
+        RF[RandomForestModel]
+        NN[NeuralNetworkModel]
+        Trans[TransformerModel]
+        Ensemble[EnsembleModel]
+        RL[RL Agents]
+    end
+    
+    subgraph "Trading System"
+        BaseStrategy[BaseStrategy]
+        EnsStrategy[EnsembleStrategy]
+        BaseExecutor[BaseExecutor]
+        BinanceExec[BinanceExecutor]
+        RiskMgr[AdvancedRiskManager]
+    end
+    
+    subgraph "Data Pipeline"
+        BaseProcessor[BaseProcessor]
+        BinanceProcessor[BinanceProcessor]
+        PriceFetcher[PriceFetcher]
+        DataDownloader[DataDownloader]
+    end
+    
+    subgraph "Training Infrastructure"
+        TrainPipeline[TrainingPipeline]
+        ModelTrainer[ModelTrainer]
+        Evaluator[Evaluator]
+        ReplayBuffer[ReplayBuffer]
+    end
+    
+    subgraph "Utilities & Monitoring"
+        Dashboard[ConsoleDashboard]
+        TelegramBot[TelegramNotifier]
+        TradeAPI[TradeHistoryAPI]
+        Monitoring[Monitoring]
+        Grafana[Grafana Dashboards]
+    end
+    
+    subgraph "Configuration"
+        Config[config.py]
+        ModelConfig[model_config.yaml]
+        APIConfig[API Configuration]
+    end
+    
+    Main --> EnsStrategy
+    Main --> BinanceExec
+    Main --> Dashboard
+    Main --> RiskMgr
+    Main --> TelegramBot
+    Main --> TradeAPI
+    
+    Training --> TrainPipeline
+    TrainPipeline --> ModelTrainer
+    TrainPipeline --> Evaluator
+    
+    EnsStrategy --> RF
+    EnsStrategy --> NN
+    EnsStrategy --> Ensemble
+    
+    BaseModel <|-- RF
+    BaseModel <|-- NN
+    BaseModel <|-- Trans
+    BaseModel <|-- Ensemble
+    
+    BaseStrategy <|-- EnsStrategy
+    BaseExecutor <|-- BinanceExec
+    BaseProcessor <|-- BinanceProcessor
+    
+    EnsStrategy --> PriceFetcher
+    EnsStrategy --> RiskMgr
+    BinanceExec --> PriceFetcher
+    
+    TrainPipeline --> BinanceProcessor
+    ModelTrainer --> RL
+    
+    Dashboard --> Monitoring
+    Monitoring --> Grafana
+    
+    Config --> Main
+    Config --> Training
+    ModelConfig --> TrainPipeline
+```
 
-- **Core Models:** Implementations of machine learning models including Random Forest, Neural Networks, Transformers, and Ensembles.
-- **Training Pipeline:** Orchestrates data loading, model training, evaluation, and explanation generation.
-- **Data Processing:** Handles data acquisition, cleaning, feature engineering, and transformation.
-- **Trading Strategies:** Define signal generation and position sizing logic.
-- **Execution Modules:** Interface with trading platforms to execute orders.
-- **Utilities:** Support monitoring, logging, price fetching, and dashboard visualization.
-- **Testing:** Unit tests ensure model correctness and robustness.
-- **Configuration:** YAML and Python config files manage parameters and environment settings.
-- **Monitoring:** Prometheus metrics integration and console dashboards provide real-time insights.
+---
+
+## Core Components
+
+### Models
+
+The system implements a hierarchical model architecture with a common interface:
+
+```mermaid
+classDiagram
+    class BaseModel {
+        <<abstract>>
+        +train(X, y)
+        +predict(X) ndarray
+        +save(path)
+        +load(path) BaseModel
+        +get_params() Dict
+        +set_params(**params)
+    }
+    
+    class RandomForestModel {
+        -model: tfdf.RandomForestModel
+        -optuna_trial: Optional[Trial]
+        +train(X, y)
+        +predict(X) ndarray
+        +cross_validate(X, y, cv) Dict
+        +get_feature_importance() Dict
+        +explain_predictions(X) Dict
+        +push_cv_metrics_to_prometheus()
+    }
+    
+    class NeuralNetworkModel {
+        -model: tf.keras.Model
+        -sequence_length: int
+        +create_sequences(data) Tuple
+        +train(X, y)
+        +predict(X) ndarray
+        +evaluate(X, y) Dict
+        +get_feature_importance() Dict
+    }
+    
+    class TransformerModel {
+        -model: torch.nn.Module
+        -d_model: int
+        -nhead: int
+        -num_layers: int
+        +train(X, y)
+        +predict(X) ndarray
+        +save_model(path)
+        +load_model(path)
+        +get_attention_weights() ndarray
+    }
+    
+    class EnsembleModel {
+        -models: List[BaseModel]
+        -weights: List[float]
+        -voting_type: str
+        +add_model(model, weight)
+        +train(X, y)
+        +predict(X) ndarray
+        +get_feature_importance() Dict
+    }
+    
+    BaseModel <|-- RandomForestModel
+    BaseModel <|-- NeuralNetworkModel
+    BaseModel <|-- TransformerModel
+    BaseModel <|-- EnsembleModel
+    
+    EnsembleModel --> BaseModel : contains
+```
+
+### Trading System
+
+The trading system follows a strategy pattern with pluggable execution backends:
+
+```mermaid
+classDiagram
+    class BaseStrategy {
+        <<abstract>>
+        +generate_signals(data) Tuple[bool, bool]
+        +calculate_position_size(data, price, capital) float
+        +calculate_stop_loss(data, entry_price) float
+        +calculate_take_profit(data, entry_price) float
+    }
+    
+    class EnsembleStrategy {
+        -ydf_model: RandomForestModel
+        -coreml_model: NeuralNetworkModel
+        -mlx_model: Optional[LLMModel]
+        -executor: BaseExecutor
+        -risk_manager: RiskManager
+        +generate_signals(data) Tuple[bool, bool]
+        +run()
+        +_consensus_signal() bool
+    }
+    
+    class BaseExecutor {
+        <<abstract>>
+        +initialize()
+        +get_balance() Dict[str, float]
+        +get_position(symbol) Dict
+        +execute_buy(symbol, quantity, price) Dict
+        +execute_sell(symbol, quantity, price) Dict
+        +set_leverage(symbol, leverage)
+    }
+    
+    class BinanceExecutor {
+        -client: binance.Client
+        -is_testnet: bool
+        +initialize()
+        +get_balance() Dict[str, float]
+        +get_funding_rate(symbol) float
+        +get_order_book(symbol) Dict
+        +execute_buy(symbol, quantity, price) Dict
+        +execute_sell(symbol, quantity, price) Dict
+    }
+    
+    class AdvancedRiskManager {
+        -max_position_size: float
+        -max_daily_trades: int
+        -max_drawdown: float
+        +manage_risk(signal, current_position) bool
+        +calculate_position_size(signal_strength) float
+        +check_daily_limits() bool
+    }
+    
+    BaseStrategy <|-- EnsembleStrategy
+    BaseExecutor <|-- BinanceExecutor
+    
+    EnsembleStrategy --> BaseExecutor
+    EnsembleStrategy --> AdvancedRiskManager
+    EnsembleStrategy --> RandomForestModel
+    EnsembleStrategy --> NeuralNetworkModel
+```
+
+### Data Processing
+
+Data processing follows a pipeline pattern for modularity and extensibility:
+
+```mermaid
+classDiagram
+    class BaseProcessor {
+        <<abstract>>
+        -data_source: str
+        -start_date: str
+        -end_date: str
+        -time_interval: str
+        +download_data(ticker_list) DataFrame
+        +clean_data() DataFrame
+        +add_technical_indicator(indicators) DataFrame
+        +df_to_array(indicators, if_vix) tuple
+        +run(tickers, indicators, if_vix) tuple
+    }
+    
+    class BinanceProcessor {
+        -client: binance.Client
+        +download_data(ticker_list) DataFrame
+        +clean_data() DataFrame
+        +add_technical_indicator(indicators) DataFrame
+        +calculate_rsi(data) Series
+        +calculate_macd(data) DataFrame
+        +calculate_bollinger_bands(data) DataFrame
+    }
+    
+    class PriceFetcher {
+        -api_config: APIConfig
+        -prometheus_metrics: Dict
+        +fetch_historical_data(symbol, interval, limit) DataFrame
+        +fetch_current_price(symbol) float
+        +calculate_technical_indicators(data) DataFrame
+        +update_prometheus_metrics(data)
+    }
+    
+    class DataDownloader {
+        +download_binance_data(symbol, interval, start, end) DataFrame
+        +save_to_csv(data, filename)
+        +load_from_csv(filename) DataFrame
+    }
+    
+    BaseProcessor <|-- BinanceProcessor
+    BinanceProcessor --> PriceFetcher
+    PriceFetcher --> DataDownloader
+```
+
+### Training Pipeline
+
+The training system supports multiple model types and distributed training:
+
+```mermaid
+flowchart TD
+    Start([Training Start]) --> LoadConfig[Load Configuration]
+    LoadConfig --> SetupLogging[Setup Logging & Monitoring]
+    SetupLogging --> LoadData[Load Training Data]
+    LoadData --> PrepareFeatures[Prepare Features & Targets]
+    PrepareFeatures --> CreateLoaders[Create Data Loaders]
+    
+    CreateLoaders --> TrainModels{Train Models}
+    TrainModels --> |ML Models| TrainML[Train ML Models]
+    TrainModels --> |RL Agents| TrainRL[Train RL Agents]
+    
+    TrainML --> EvaluateML[Evaluate ML Models]
+    TrainRL --> EvaluateRL[Evaluate RL Agents]
+    
+    EvaluateML --> ExplainML[Generate ML Explanations]
+    EvaluateRL --> SkipExplain[Skip RL Explanations]
+    
+    ExplainML --> SaveModels[Save Models & Metrics]
+    SkipExplain --> SaveModels
+    
+    SaveModels --> End([Training Complete])
+    
+    subgraph "Model Training"
+        TrainML --> RF_Train[Random Forest]
+        TrainML --> NN_Train[Neural Network]
+        TrainML --> Trans_Train[Transformer]
+        TrainML --> Ensemble_Train[Ensemble]
+    end
+    
+    subgraph "RL Training"
+        TrainRL --> DQN_Train[DQN Agent]
+        TrainRL --> PPO_Train[PPO Agent]
+        TrainRL --> A3C_Train[A3C Agent]
+    end
+```
+
+### Utilities & Monitoring
+
+The system includes comprehensive monitoring and utility components:
+
+```mermaid
+classDiagram
+    class ConsoleDashboard {
+        -strategy: EnsembleStrategy
+        -risk_manager: RiskManager
+        -running: bool
+        +start()
+        +stop()
+        +_draw_frame()
+        +_update_metrics()
+        +_handle_input()
+    }
+    
+    class TelegramNotifier {
+        -bot_token: str
+        -chat_id: str
+        +send_message(message)
+        +send_trade_alert(trade_info)
+        +send_error_alert(error)
+    }
+    
+    class TradeHistoryAPI {
+        -app: Flask
+        +get_trades() List[Dict]
+        +get_performance_metrics() Dict
+        +get_balance_history() List[Dict]
+    }
+    
+    class Monitoring {
+        -prometheus_client: PrometheusClient
+        -grafana_config: Dict
+        +push_metrics(metrics)
+        +create_dashboard(config)
+        +setup_alerts(rules)
+    }
+    
+    class PerformanceMonitor {
+        -metrics_history: List[Dict]
+        +track_trade(trade_info)
+        +calculate_sharpe_ratio() float
+        +calculate_max_drawdown() float
+        +generate_report() Dict
+    }
+    
+    ConsoleDashboard --> PerformanceMonitor
+    TelegramNotifier --> TradeHistoryAPI
+    Monitoring --> PerformanceMonitor
+```
 
 ---
 
