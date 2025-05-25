@@ -31,7 +31,7 @@ The ELVIS Trading Bot is a sophisticated, modular algorithmic trading system tha
 graph TB
     subgraph "Entry Points"
         Main[main.py]
-        Training[training.py]
+        Training[training/train_models.py]
         Scripts[run_*.sh]
     end
     
