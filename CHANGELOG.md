@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+- eureka: Completed comprehensive project cleanup and reorganization:
+  - Removed all .DS_Store files (macOS system files)
+  - Deleted duplicate files: FUTURE_IMPROVEMENTS.md, ensemble_models.py, trading/rl_agents.py, trading/performance_monitor.py
+  - Moved standalone scripts to scripts/ directory: predict_with_ydf.py, create_coreml_model.py, function_*.py
+  - Moved model files to models/ directory: model_rf.ydf, nn_model.h5, NNModel.mlpackage
+  - Cleaned up old training results, keeping only recent successful runs
+  - Removed obsolete files: Miniforge3-MacOSX-arm64.sh, test_*.py from root
+  - Removed temporary files: data/queries.active, profile-metrics.json, paper_trades.db
+  - Created cleanup_analysis.md documenting all cleanup actions and recommendations
 - eureka: Fixed Mermaid diagram syntax error in README.md - corrected malformed inheritance arrow syntax that was causing parse error on line 68
 - eureka: Added `push_cv_metrics_to_prometheus()` function in `core/models/random_forest_model.py` to push mean cross-validation metrics to Prometheus Pushgateway with error handling and logging.
 - eureka: Documented new files `core/features/feature_pipeline.py`, `core/viz/streamlit_dashboard.py`, `core/viz/export_utils.py`, and `docs/plots/` directory with SHAP and CV plots in README.md.
