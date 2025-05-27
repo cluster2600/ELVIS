@@ -268,3 +268,12 @@ __pycache__/
 .DS_Store
 .env
 venv/
+*.pkl
+*.pt
+*.npy
+*.tfevents*
+__pycache__/
+*.log
+.DS_Store
+.env
+venv/
