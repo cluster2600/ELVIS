@@ -174,3 +174,11 @@
   - Training pipeline: TrainingPipeline → ModelTrainer → Evaluator with ReplayBuffer for RL agents
   - Data pipeline: BaseProcessor → BinanceProcessor → PriceFetcher → DataDownloader
   - Configuration managed through config.py, model_config.yaml, and API configurations
+
+- eureka: Fixed mermaid diagram inheritance syntax errors in README.md:
+  - Changed all inheritance arrows from `<|--` to `--|>` format to avoid HTML tag parsing errors
+  - Updated inheritance relationships in System Architecture diagram: RF, NN, Trans, Ensemble --|> BaseModel
+  - Updated inheritance relationships in Models class diagram: RandomForestModel, NeuralNetworkModel, TransformerModel, EnsembleModel --|> BaseModel
+  - Updated inheritance relationships in Trading System diagram: EnsembleStrategy --|> BaseStrategy, BinanceExecutor --|> BaseExecutor
+  - Updated inheritance relationships in Data Processing diagram: BinanceProcessor --|> BaseProcessor
+  - The `<|--` syntax was being incorrectly parsed as an HTML tag start, causing GitHub mermaid renderer to fail
