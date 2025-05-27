@@ -183,3 +183,10 @@
   - Updated inheritance relationships in Data Processing diagram: BinanceProcessor --|> BaseProcessor
   - The `<|--` syntax was being incorrectly parsed as an HTML tag start, causing GitHub mermaid renderer to fail
   - Further fixed the System Architecture flowchart diagram by changing inheritance arrows to regular dependency arrows (`-->`) since inheritance syntax is not valid in `graph TB` flowcharts, only in `classDiagram`
+
+- eureka: Fixed incorrect image paths in documentation:
+  - Fixed image path in `docs/random_forest.md` from `../ELVIS/images/random_forest.png` to `../images/random_forest.png`
+  - Verified all markdown files for image references - only 2 files contain images:
+    - `README.md`: Uses correct path `./images/elvis.png` (at root level)
+    - `docs/random_forest.md`: Now uses correct path `../images/random_forest.png` (fixed)
+  - All 3 images exist in the `images/` directory: elvis.png, random_forest.png, dashboard.png
