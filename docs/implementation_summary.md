@@ -75,6 +75,42 @@ This document summarizes the improvements implemented to enhance the ELVIS Tradi
   - AsyncCache with TTL support
   - Thread-safe operations
 
+### 8. **Backtesting Framework** 📊
+- **Files Created**: 
+  - `trading/backtesting/backtest_engine.py` - Core backtesting engine
+  - `trading/scripts/run_backtest.py` - Backtesting runner script
+  - `trading/backtesting/__init__.py` - Module initialization
+- **Features**:
+  - Realistic trading simulation with fees and slippage
+  - Position management with stop loss/take profit
+  - Comprehensive performance statistics (Sharpe ratio, max drawdown)
+  - Trade tracking and PnL calculations
+  - Visualization support with matplotlib
+  - JSON export of results
+
+### 9. **REST API with JWT Authentication** 🔌
+- **Files Created**: 
+  - `trading/api/app.py` - Flask REST API application
+  - `trading/api/__init__.py` - API module initialization
+- **Features**:
+  - JWT-based authentication
+  - Rate limiting for API protection
+  - CORS support for web applications
+  - Comprehensive endpoints for bot control, trading data, and market info
+  - Redis caching integration
+  - Error handling and logging
+
+### 10. **API Documentation with Swagger/OpenAPI** 📚
+- **Files Created**: 
+  - `trading/api/swagger.py` - Swagger/OpenAPI specification
+- **Features**:
+  - Interactive API documentation at `/api/docs`
+  - OpenAPI 3.0 specification
+  - Complete endpoint documentation with schemas
+  - Authentication flow documentation
+  - Request/response examples
+  - Added flask-swagger-ui to requirements
+
 ## 📊 Impact Summary
 
 ### Performance Improvements
