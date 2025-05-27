@@ -95,14 +95,14 @@ graph TB
     EnsStrategy --> NN
     EnsStrategy --> Ensemble
     
-    BaseModel <|-- RF
-    BaseModel <|-- NN
-    BaseModel <|-- Trans
-    BaseModel <|-- Ensemble
+    RF --|> BaseModel
+    NN --|> BaseModel
+    Trans --|> BaseModel
+    Ensemble --|> BaseModel
     
-    BaseStrategy <|-- EnsStrategy
-    BaseExecutor <|-- BinanceExec
-    BaseProcessor <|-- BinanceProcessor
+    EnsStrategy --|> BaseStrategy
+    BinanceExec --|> BaseExecutor
+    BinanceProcessor --|> BaseProcessor
     
     EnsStrategy --> PriceFetcher
     EnsStrategy --> RiskMgr
@@ -182,10 +182,10 @@ classDiagram
         +get_feature_importance() Dict
     }
     
-    BaseModel <|-- RandomForestModel
-    BaseModel <|-- NeuralNetworkModel
-    BaseModel <|-- TransformerModel
-    BaseModel <|-- EnsembleModel
+    RandomForestModel --|> BaseModel
+    NeuralNetworkModel --|> BaseModel
+    TransformerModel --|> BaseModel
+    EnsembleModel --|> BaseModel
     
     EnsembleModel --> BaseModel : contains
 ```
@@ -245,8 +245,8 @@ classDiagram
         +check_daily_limits() bool
     }
     
-    BaseStrategy <|-- EnsembleStrategy
-    BaseExecutor <|-- BinanceExecutor
+    EnsembleStrategy --|> BaseStrategy
+    BinanceExecutor --|> BaseExecutor
     
     EnsembleStrategy --> BaseExecutor
     EnsembleStrategy --> AdvancedRiskManager
@@ -298,7 +298,7 @@ classDiagram
         +load_from_csv(filename) DataFrame
     }
     
-    BaseProcessor <|-- BinanceProcessor
+    BinanceProcessor --|> BaseProcessor
     BinanceProcessor --> PriceFetcher
     PriceFetcher --> DataDownloader
 ```
