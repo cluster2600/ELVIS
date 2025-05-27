@@ -95,14 +95,14 @@ graph TB
     EnsStrategy --> NN
     EnsStrategy --> Ensemble
     
-    RF --|> BaseModel
-    NN --|> BaseModel
-    Trans --|> BaseModel
-    Ensemble --|> BaseModel
+    RF --> BaseModel
+    NN --> BaseModel
+    Trans --> BaseModel
+    Ensemble --> BaseModel
     
-    EnsStrategy --|> BaseStrategy
-    BinanceExec --|> BaseExecutor
-    BinanceProcessor --|> BaseProcessor
+    EnsStrategy --> BaseStrategy
+    BinanceExec --> BaseExecutor
+    BinanceProcessor --> BaseProcessor
     
     EnsStrategy --> PriceFetcher
     EnsStrategy --> RiskMgr
