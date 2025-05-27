@@ -1,6 +1,7 @@
 import argparse
 import logging
 import threading
+import os
 
 # Import configurations
 from config import TRADING_CONFIG, API_CONFIG
@@ -16,6 +17,9 @@ from trading.utils.trade_history_api import app as trade_history_app
 # Risk Manager
 from trading.risk.advanced_risk_manager import AdvancedRiskManager
 
+# Import new logging configuration
+from utils.logger_config import setup_logging, TradingLogger
+
 
 def start_trade_history_server():
     """
@@ -24,23 +28,37 @@ def start_trade_history_server():
     trade_history_app.run(host="0.0.0.0", port=5050)
 
 
-def setup_logger(log_level=logging.INFO):
-    """
-    Setup the logger for the application.
-    """
-    logging.basicConfig(level=log_level, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
-    return logging.getLogger("BTC_BOT")
-
-
-def main(mode: str, log_level: int):
+def main(mode: str, log_level: str):
     """
     Main entry point for the trading bot.
 
     Args:
         mode (str): Trading mode, either 'paper' or 'live'.
-        log_level (int): Logging level.
+        log_level (str): Logging level string.
     """
-    logger = setup_logger(log_level)
+    # Setup enhanced logging
+    trading_context = {
+        "mode": mode,
+        "symbol": TRADING_CONFIG.get('SYMBOL', 'BTCUSDT'),
+    }
+    
+    logger = setup_logging(
+        app_name="ELVIS",
+        log_level=log_level,
+        enable_file_logging=True,
+        enable_json_logging=os.getenv('ENABLE_JSON_LOGS', 'false').lower() == 'true',
+        enable_remote_logging=bool(os.getenv('REMOTE_LOG_HOST')),
+        remote_host=os.getenv('REMOTE_LOG_HOST'),
+        remote_port=int(os.getenv('REMOTE_LOG_PORT', 514)),
+        trading_context=trading_context
+    )
+    
+    # Create specialized trading logger
+    trading_logger = TradingLogger(
+        "main",
+        symbol=TRADING_CONFIG.get('SYMBOL', 'BTCUSDT'),
+        strategy="ensemble"
+    )
 
     # Start Trade History Server in background
     threading.Thread(target=start_trade_history_server, daemon=True).start()
@@ -90,8 +108,5 @@ if __name__ == "__main__":
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level")
     args = parser.parse_args()
 
-    # Map log level string to logging constant
-    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-
-    # Start the main bot
-    main(mode=args.mode, log_level=log_level)
+    # Start the main bot with log level as string
+    main(mode=args.mode, log_level=args.log_level.upper())

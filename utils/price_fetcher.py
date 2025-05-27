@@ -2,24 +2,27 @@
 PriceFetcher - Real-time Binance price streaming and indicator calculation for ELVIS Trading Bot
 
 Handles:
-- Fetching historical candles from Binance REST API.
+- Fetching historical candles from Binance REST API with Redis caching.
 - Streaming real-time kline updates via WebSocket.
-- Calculating technical indicators (RSI, MACD, SMA, EMA).
+- Calculating technical indicators (RSI, MACD, SMA, EMA) with caching.
 - Updating Prometheus metrics for monitoring.
 
-Dependencies: binance, websocket-client, prometheus_client, threading, logging
+Dependencies: binance, websocket-client, prometheus_client, threading, logging, redis
 """
 
 import logging
 import threading
 import time
 import json
+from datetime import datetime, timedelta
 
 from binance.client import Client
 import websocket
 
 import pandas as pd
 from prometheus_client import Gauge
+
+from utils.redis_cache import get_cache, make_price_key, make_indicator_key
 
 # Prometheus metrics
 CURRENT_PRICE = Gauge('elvis_current_price', 'Current BTC price')
@@ -45,6 +48,9 @@ class PriceFetcher:
         self.candles = []
         self.running = False
         self.lock = threading.Lock()
+        self.cache = get_cache()
+        self.cache_ttl = 60  # 1 minute cache for prices
+        self.indicator_cache_ttl = 30  # 30 seconds for indicators
 
     def get_historical_data(self):
         """
@@ -63,7 +69,7 @@ class PriceFetcher:
 
     def calculate_indicators(self):
         """
-        Calculate and publish technical indicators from the latest candle data.
+        Calculate and publish technical indicators from the latest candle data with caching.
         """
         try:
             if len(self.candles) < 26:
@@ -73,21 +79,56 @@ class PriceFetcher:
             df['close'] = df['close'].astype(float)
 
             close_prices = df['close']
+            current_price = close_prices.iloc[-1]
 
-            rsi = self.calculate_rsi(close_prices, window=14)
-            macd, signal = self.calculate_macd(close_prices)
-            sma = self.calculate_sma(close_prices, window=20)
-            ema_short = self.calculate_ema(close_prices, window=9)
-            ema_long = self.calculate_ema(close_prices, window=21)
+            # Check cache for indicators
+            indicators_cache_key = f"indicators:{self.symbol}:all"
+            cached_indicators = self.cache.get(indicators_cache_key)
+            
+            if cached_indicators:
+                # Use cached values
+                rsi = cached_indicators.get('rsi')
+                macd = cached_indicators.get('macd')
+                signal = cached_indicators.get('signal')
+                sma = cached_indicators.get('sma')
+                ema_short = cached_indicators.get('ema_short')
+                ema_long = cached_indicators.get('ema_long')
+            else:
+                # Calculate fresh
+                rsi = self.calculate_rsi(close_prices, window=14)
+                macd, signal = self.calculate_macd(close_prices)
+                sma = self.calculate_sma(close_prices, window=20)
+                ema_short = self.calculate_ema(close_prices, window=9)
+                ema_long = self.calculate_ema(close_prices, window=21)
+                
+                # Cache the indicators
+                indicators_data = {
+                    'rsi': rsi,
+                    'macd': macd,
+                    'signal': signal,
+                    'sma': sma,
+                    'ema_short': ema_short,
+                    'ema_long': ema_long,
+                    'timestamp': time.time()
+                }
+                self.cache.set(indicators_cache_key, indicators_data, ttl=self.indicator_cache_ttl)
+                
+                # Also cache individual indicators for specific queries
+                self.cache.set(make_indicator_key(self.symbol, 'rsi', 14), rsi, ttl=self.indicator_cache_ttl)
+                self.cache.set(make_indicator_key(self.symbol, 'sma', 20), sma, ttl=self.indicator_cache_ttl)
 
             # Update Prometheus Gauges
-            CURRENT_PRICE.set(close_prices.iloc[-1])
+            CURRENT_PRICE.set(current_price)
             RSI_GAUGE.set(rsi)
             MACD_GAUGE.set(macd)
             MACD_SIGNAL_GAUGE.set(signal)
             SMA_GAUGE.set(sma)
             EMA_SHORT_GAUGE.set(ema_short)
             EMA_LONG_GAUGE.set(ema_long)
+            
+            # Cache current price
+            self.cache.set(make_price_key(self.symbol), current_price, ttl=self.cache_ttl)
+            
         except Exception as e:
             self.logger.error(f"Error calculating indicators: {e}")
 
@@ -172,9 +213,21 @@ class PriceFetcher:
         self.logger.info("Price fetcher started.")
 
     def get_current_price(self):
+        """Get current price with Redis caching"""
+        # Try to get from cache first
+        cache_key = make_price_key(self.symbol)
+        cached_price = self.cache.get(cache_key)
+        
+        if cached_price is not None:
+            return cached_price
+        
+        # If not in cache, get from candles
         with self.lock:
             if self.candles:
-                return float(self.candles[-1][4])  # Close price
+                price = float(self.candles[-1][4])  # Close price
+                # Cache the price
+                self.cache.set(cache_key, price, ttl=self.cache_ttl)
+                return price
             return None
 
     def get_current_candle(self):
