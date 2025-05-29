@@ -1,5 +1,41 @@
 ## [Unreleased]
 
+- eureka: Implemented Architecture & Decoupling improvements:
+  1. **Dependency Injection Framework**:
+     - Created core/di module with Container and Provider classes
+     - Implemented multiple provider types: SingletonProvider, FactoryProvider, ConfigurationProvider, LazyProvider, ScopedProvider
+     - Thread-safe singleton implementation with proper locking
+     - Decorator support for dependency injection (@inject decorator)
+     - Scoped dependencies support with DependencyScope context manager
+  2. **Event-Driven Architecture**:
+     - Created core/events module with EventBus implementation
+     - Support for both synchronous and asynchronous event handling
+     - Rich event type system with dataclasses (MarketDataEvent, TradingSignalEvent, OrderEvent, RiskEvent, SystemEvent, etc.)
+     - Powerful event handler decorators: @event_handler, @async_event_handler, @priority_event_handler, @conditional_event_handler, @throttled_event_handler, @buffered_event_handler
+     - Event history tracking with configurable size limits
+     - Thread-safe event publishing and subscription
+  3. **Application Bootstrapper**:
+     - Created core/bootstrap.py for centralized application initialization
+     - Systematic dependency registration (configurations, services, models)
+     - Event handler setup and auto-registration
+     - Graceful cleanup on shutdown
+  4. **Refactored main.py**:
+     - Updated to use dependency injection and event-driven architecture
+     - Cleaner initialization with bootstrap_application()
+     - Better separation of concerns and reduced coupling
+     - Signal handler integration for graceful shutdown
+  5. **Example Event Handlers**:
+     - Market data handlers: price updates, caching, batching, volatility monitoring
+     - Trading signal handlers: validation, execution, notifications, risk checking
+     - Risk handlers: critical risk handling, alerts, parameter adjustments, emergency stop loss
+     - System handlers: health monitoring, error handling, backup, metrics
+  6. **Benefits of New Architecture**:
+     - Highly decoupled components - easy to test and maintain
+     - Event-driven communication reduces direct dependencies
+     - Dependency injection enables easy mocking and configuration
+     - Better scalability - can easily move to microservices
+     - Improved observability through event history and metrics
+
 - eureka: Implemented backtesting framework:
   1. **BacktestEngine**:
      - Created trading/backtesting/backtest_engine.py with comprehensive backtesting capabilities
