@@ -1,0 +1,54 @@
+---
+# Ansible Galaxy requirements file
+# Install with: ansible-galaxy install -r requirements.yml
+
+collections:
+  # Community general collection
+  - name: community.general
+    version: ">=5.0.0"
+    
+  # Community crypto collection (for SSL/TLS)
+  - name: community.crypto
+    version: ">=2.0.0"
+    
+  # Community docker collection
+  - name: community.docker
+    version: ">=3.0.0"
+    
+  # Community postgresql collection
+  - name: community.postgresql
+    version: ">=2.0.0"
+    
+  # Ansible posix collection
+  - name: ansible.posix
+    version: ">=1.0.0"
+    
+  # Community mysql collection (optional)
+  - name: community.mysql
+    version: ">=3.0.0"
+
+roles:
+  # Geerlingguy roles for common services
+  - name: geerlingguy.pip
+    version: "2.2.0"
+    
+  - name: geerlingguy.docker
+    version: "6.1.0"
+    
+  - name: geerlingguy.redis
+    version: "1.7.0"
+    
+  - name: geerlingguy.postgresql
+    version: "3.4.2"
+    
+  - name: geerlingguy.nodejs
+    version: "6.1.0"
+    
+  - name: geerlingguy.nginx
+    version: "3.1.4"
+    
+  - name: geerlingguy.firewall
+    version: "2.5.0"
+    
+  - name: geerlingguy.security
+    version: "2.0.1"
