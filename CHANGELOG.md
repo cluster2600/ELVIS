@@ -1,5 +1,83 @@
 ## [Unreleased]
 
+- eureka: Documented comprehensive Ansible deployment system in README.md:
+  1. **Added Deployment with Ansible section** to main README.md:
+     - Complete Ansible automation overview with visual workflow diagram
+     - Quick deployment instructions for immediate setup
+     - Cross-platform support documentation (Ubuntu/Debian, CentOS/RHEL, macOS)
+     - Environment configuration examples (dev/staging/production)
+     - Post-deployment setup steps with service management
+     - Integration with existing project documentation structure
+  2. **Visual Deployment Workflow**:
+     - Created comprehensive Mermaid diagram showing entire Ansible deployment process
+     - Illustrates OS detection, package installation, service configuration
+     - Shows dependency flow from system packages to monitoring stack
+     - Documents TA-Lib compilation differences between platforms
+     - Covers security hardening and service isolation steps
+  3. **Deployment Features Documentation**:
+     - Cross-platform support with automated dependency resolution
+     - Service management with systemd service creation
+     - Security hardening with file permissions and service isolation
+     - Multi-environment support for different deployment scenarios
+     - Database setup automation for PostgreSQL and Redis
+     - Monitoring integration with Prometheus and Grafana
+     - Container support with Docker and Docker Compose
+  4. **Usage Examples**:
+     - Environment-specific deployment commands
+     - Testing and dry-run capabilities
+     - Connection validation options
+     - Production-ready deployment instructions
+  5. **Integration Benefits**:
+     - Seamless one-command deployment across platforms
+     - Consistent environment setup with security best practices
+     - Complete automation from dependencies to service management
+     - Production-ready configuration with monitoring stack
+     - Clear documentation for DevOps workflows
+
+- eureka: Implemented comprehensive Ansible automation for ELVIS Trading Bot deployment:
+  1. **Complete Ansible Playbook** (ansible/playbook.yml):
+     - Cross-platform support (Ubuntu/Debian, CentOS/RHEL, macOS)
+     - System dependencies installation (Python 3.11, build tools, development libraries)
+     - TA-Lib compilation from source (Linux) or Homebrew installation (macOS)
+     - Docker and Docker Compose installation with user configuration
+     - PostgreSQL and Redis database setup with service initialization
+     - Node.js 18 installation for web dashboard support
+     - Python virtual environment creation with all project dependencies
+     - Systemd service creation for automatic bot startup
+     - Security hardening with restricted file permissions and service isolation
+  2. **Inventory Management** (ansible/inventory.yml):
+     - Multi-environment support (development, staging, production)
+     - Environment-specific variable configuration
+     - Localhost and remote server deployment options
+     - Security settings with firewall and port configuration
+  3. **Service Template** (ansible/templates/elvis-bot.service.j2):
+     - Systemd service definition with automatic restart capabilities
+     - Security restrictions and resource isolation
+     - Environment variable integration
+     - Dependency management for PostgreSQL and Redis services
+  4. **Automated Setup Script** (ansible/run_setup.sh):
+     - Colored output with status indicators
+     - Command-line argument parsing for different environments
+     - Connection testing and dry-run capabilities
+     - Ansible Galaxy requirements installation
+     - Comprehensive error handling and user guidance
+  5. **Galaxy Requirements** (ansible/requirements.yml):
+     - Community collections for Docker, PostgreSQL, crypto operations
+     - Geerlingguy roles for production-ready service installation
+     - Version pinning for stability and reproducibility
+  6. **Documentation** (ansible/README.md):
+     - Complete setup instructions for all platforms
+     - Usage examples for different deployment scenarios
+     - Troubleshooting guide with common issues and solutions
+     - Security considerations and post-installation steps
+  7. **Benefits of Ansible Automation**:
+     - One-command deployment across multiple platforms
+     - Consistent and reproducible environments
+     - Production-ready configuration with security best practices
+     - Multi-environment support (dev/staging/prod)
+     - Complete dependency resolution and service management
+     - Automated system service creation and management
+
 - eureka: Implemented Architecture & Decoupling improvements:
   1. **Dependency Injection Framework**:
      - Created core/di module with Container and Provider classes
