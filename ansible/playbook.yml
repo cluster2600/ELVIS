@@ -1,11 +1,10 @@
 ---
 - name: Install ELVIS Trading Bot Dependencies
   hosts: localhost
-  become: yes
   vars:
     project_name: "elvis-trading-bot"
     project_user: "{{ ansible_user_id }}"
-    project_dir: "/home/{{ project_user }}/{{ project_name }}"
+    project_dir: "{% if ansible_os_family == 'Darwin' %}{{ ansible_env.HOME }}{% else %}/home/{{ project_user }}{% endif %}/{{ project_name }}"
     python_version: "3.11"
     node_version: "18"
     
@@ -15,11 +14,13 @@
         update_cache: yes
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Update package cache (CentOS/RHEL)
       yum:
         update_cache: yes
       when: ansible_os_family == "RedHat"
+      become: yes
       
     - name: Install system dependencies (Ubuntu/Debian)
       apt:
@@ -59,6 +60,7 @@
           - libpq-dev
         state: present
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Install system dependencies (CentOS/RHEL)
       yum:
@@ -88,6 +90,7 @@
           - postgresql-devel
         state: present
       when: ansible_os_family == "RedHat"
+      become: yes
       
     - name: Install system dependencies (macOS)
       homebrew:
@@ -114,6 +117,7 @@
         url: "http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz"
         dest: "/tmp/ta-lib-0.4.0-src.tar.gz"
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Extract TA-Lib source
       unarchive:
@@ -121,23 +125,27 @@
         dest: "/tmp"
         remote_src: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Configure TA-Lib
       command: ./configure --prefix=/usr/local
       args:
         chdir: "/tmp/ta-lib"
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Compile TA-Lib
       make:
         chdir: "/tmp/ta-lib"
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Install TA-Lib
       make:
         chdir: "/tmp/ta-lib"
         target: install
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Install TA-Lib via Homebrew (macOS)
       homebrew:
@@ -151,10 +159,12 @@
         line: "/usr/local/lib"
         create: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Update library cache
       command: ldconfig
       when: ansible_os_family != "Darwin"
+      become: yes
       
     # Docker Installation
     - name: Add Docker GPG key (Ubuntu/Debian)
@@ -162,12 +172,14 @@
         url: https://download.docker.com/linux/ubuntu/gpg
         state: present
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Add Docker repository (Ubuntu/Debian)
       apt_repository:
         repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
         state: present
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Install Docker (Ubuntu/Debian)
       apt:
@@ -179,6 +191,7 @@
           - docker-compose-plugin
         state: present
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Install Docker (CentOS/RHEL)
       yum:
@@ -190,6 +203,7 @@
           - docker-compose-plugin
         state: present
       when: ansible_os_family == "RedHat"
+      become: yes
       
     - name: Install Docker (macOS)
       homebrew_cask:
@@ -203,6 +217,7 @@
         state: started
         enabled: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Add user to docker group
       user:
@@ -210,6 +225,7 @@
         groups: docker
         append: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     # Node.js Installation (for potential web dashboard)
     - name: Install Node.js (Ubuntu/Debian)
@@ -217,12 +233,14 @@
         curl -fsSL https://deb.nodesource.com/setup_{{ node_version }}.x | sudo -E bash -
         apt-get install -y nodejs
       when: ansible_os_family == "Debian"
+      become: yes
       
     - name: Install Node.js (CentOS/RHEL)
       shell: |
         curl -fsSL https://rpm.nodesource.com/setup_{{ node_version }}.x | sudo bash -
         yum install -y nodejs
       when: ansible_os_family == "RedHat"
+      become: yes
       
     - name: Install Node.js (macOS)
       homebrew:
@@ -305,6 +323,7 @@
       command: postgresql-setup initdb
       when: ansible_os_family == "RedHat"
       ignore_errors: yes
+      become: yes
       
     - name: Start and enable PostgreSQL
       systemd:
@@ -312,6 +331,7 @@
         state: started
         enabled: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Start and enable Redis
       systemd:
@@ -319,6 +339,7 @@
         state: started
         enabled: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
     # Create necessary directories
     - name: Create project subdirectories
@@ -372,11 +393,13 @@
         dest: /etc/systemd/system/elvis-bot.service
         mode: '0644'
       when: ansible_os_family != "Darwin"
+      become: yes
       
     - name: Reload systemd
       systemd:
         daemon_reload: yes
       when: ansible_os_family != "Darwin"
+      become: yes
       
   handlers:
     - name: restart docker
@@ -384,3 +407,4 @@
         name: docker
         state: restarted
       when: ansible_os_family != "Darwin"
+      become: yes

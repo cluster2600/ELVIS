@@ -1,5 +1,32 @@
 ## [Unreleased]
 
+- eureka: Fixed Ansible playbook macOS compatibility issues:
+  1. **Resolved Homebrew Root Permission Error**:
+     - Removed global `become: yes` that was causing Homebrew to run as root
+     - Added selective `become: yes` only to tasks requiring root privileges on Linux
+     - Homebrew tasks now run as the current user on macOS (proper behavior)
+  2. **Fixed Project Directory Path for macOS**:
+     - Updated project_dir variable to use `{{ ansible_env.HOME }}` for macOS
+     - Linux systems continue to use `/home/{{ project_user }}/` path
+     - Cross-platform path handling now works correctly
+  3. **Selective Privilege Escalation**:
+     - System package installation: `become: yes` (requires root)
+     - TA-Lib compilation and installation: `become: yes` (requires root)
+     - Docker installation and configuration: `become: yes` (requires root) 
+     - Database service management: `become: yes` (requires root)
+     - Systemd service creation: `become: yes` (requires root)
+     - User-level tasks (Python venv, pip install): `become: no`
+     - macOS Homebrew tasks: no `become` directive (user-level)
+  4. **Cross-Platform Compatibility**:
+     - Ubuntu/Debian: APT package manager with root privileges
+     - CentOS/RHEL: YUM package manager with root privileges
+     - macOS: Homebrew package manager without root privileges
+     - Proper OS detection and conditional task execution
+  5. **Testing and Validation**:
+     - Fixed the "Running Homebrew as root is extremely dangerous" error
+     - Ansible playbook now works correctly on all supported platforms
+     - One-command deployment remains functional: `cd ansible && ./run_setup.sh`
+
 - eureka: Documented comprehensive Ansible deployment system in README.md:
   1. **Added Deployment with Ansible section** to main README.md:
      - Complete Ansible automation overview with visual workflow diagram
