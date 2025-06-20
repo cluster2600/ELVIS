@@ -1,0 +1,34 @@
+[Unit]
+Description=ELVIS Trading Bot
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User={{ project_user }}
+Group={{ project_user }}
+WorkingDirectory={{ project_dir }}
+Environment=PATH={{ project_dir }}/venv/bin
+ExecStart={{ project_dir }}/venv/bin/python {{ project_dir }}/main.py
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=on-failure
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ project_dir }}
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Environment variables
+EnvironmentFile={{ project_dir }}/.env
+
+[Install]
+WantedBy=multi-user.target

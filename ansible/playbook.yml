@@ -1,0 +1,386 @@
+---
+- name: Install ELVIS Trading Bot Dependencies
+  hosts: localhost
+  become: yes
+  vars:
+    project_name: "elvis-trading-bot"
+    project_user: "{{ ansible_user_id }}"
+    project_dir: "/home/{{ project_user }}/{{ project_name }}"
+    python_version: "3.11"
+    node_version: "18"
+    
+  tasks:
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      
+    - name: Update package cache (CentOS/RHEL)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      
+    - name: Install system dependencies (Ubuntu/Debian)
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - python3-dev
+          - build-essential
+          - git
+          - curl
+          - wget
+          - unzip
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - pkg-config
+          - libffi-dev
+          - libssl-dev
+          - libbz2-dev
+          - libreadline-dev
+          - libsqlite3-dev
+          - libncursesw5-dev
+          - xz-utils
+          - tk-dev
+          - libxml2-dev
+          - libxmlsec1-dev
+          - liblzma-dev
+          - libhdf5-dev
+          - libatlas-base-dev
+          - gfortran
+          - redis-server
+          - postgresql
+          - postgresql-contrib
+          - libpq-dev
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Install system dependencies (CentOS/RHEL)
+      yum:
+        name:
+          - python3
+          - python3-pip
+          - python3-devel
+          - gcc
+          - gcc-c++
+          - make
+          - git
+          - curl
+          - wget
+          - unzip
+          - openssl-devel
+          - bzip2-devel
+          - libffi-devel
+          - readline-devel
+          - sqlite-devel
+          - xz-devel
+          - tk-devel
+          - libxml2-devel
+          - xmlsec1-devel
+          - redis
+          - postgresql
+          - postgresql-server
+          - postgresql-devel
+        state: present
+      when: ansible_os_family == "RedHat"
+      
+    - name: Install system dependencies (macOS)
+      homebrew:
+        name:
+          - python@3.11
+          - git
+          - curl
+          - wget
+          - openssl
+          - readline
+          - sqlite3
+          - xz
+          - tk
+          - libxml2
+          - libxmlsec1
+          - redis
+          - postgresql
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    # TA-Lib Installation (Required for technical analysis)
+    - name: Download TA-Lib source (Linux)
+      get_url:
+        url: "http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz"
+        dest: "/tmp/ta-lib-0.4.0-src.tar.gz"
+      when: ansible_os_family != "Darwin"
+      
+    - name: Extract TA-Lib source
+      unarchive:
+        src: "/tmp/ta-lib-0.4.0-src.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+      when: ansible_os_family != "Darwin"
+      
+    - name: Configure TA-Lib
+      command: ./configure --prefix=/usr/local
+      args:
+        chdir: "/tmp/ta-lib"
+      when: ansible_os_family != "Darwin"
+      
+    - name: Compile TA-Lib
+      make:
+        chdir: "/tmp/ta-lib"
+      when: ansible_os_family != "Darwin"
+      
+    - name: Install TA-Lib
+      make:
+        chdir: "/tmp/ta-lib"
+        target: install
+      when: ansible_os_family != "Darwin"
+      
+    - name: Install TA-Lib via Homebrew (macOS)
+      homebrew:
+        name: ta-lib
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    - name: Update library path
+      lineinfile:
+        path: /etc/ld.so.conf.d/talib.conf
+        line: "/usr/local/lib"
+        create: yes
+      when: ansible_os_family != "Darwin"
+      
+    - name: Update library cache
+      command: ldconfig
+      when: ansible_os_family != "Darwin"
+      
+    # Docker Installation
+    - name: Add Docker GPG key (Ubuntu/Debian)
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Add Docker repository (Ubuntu/Debian)
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Install Docker (Ubuntu/Debian)
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "Debian"
+      
+    - name: Install Docker (CentOS/RHEL)
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "RedHat"
+      
+    - name: Install Docker (macOS)
+      homebrew_cask:
+        name: docker
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: ansible_os_family != "Darwin"
+      
+    - name: Add user to docker group
+      user:
+        name: "{{ project_user }}"
+        groups: docker
+        append: yes
+      when: ansible_os_family != "Darwin"
+      
+    # Node.js Installation (for potential web dashboard)
+    - name: Install Node.js (Ubuntu/Debian)
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_{{ node_version }}.x | sudo -E bash -
+        apt-get install -y nodejs
+      when: ansible_os_family == "Debian"
+      
+    - name: Install Node.js (CentOS/RHEL)
+      shell: |
+        curl -fsSL https://rpm.nodesource.com/setup_{{ node_version }}.x | sudo bash -
+        yum install -y nodejs
+      when: ansible_os_family == "RedHat"
+      
+    - name: Install Node.js (macOS)
+      homebrew:
+        name: "node@{{ node_version }}"
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    # Project Setup
+    - name: Create project directory
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Clone or update project repository
+      git:
+        repo: "https://github.com/your-username/{{ project_name }}.git"
+        dest: "{{ project_dir }}"
+        version: main
+        force: yes
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes  # In case repo doesn't exist yet
+      
+    - name: Create Python virtual environment
+      command: python3 -m venv "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      args:
+        creates: "{{ project_dir }}/venv"
+        
+    - name: Upgrade pip in virtual environment
+      pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Install wheel and setuptools
+      pip:
+        name:
+          - wheel
+          - setuptools
+        state: latest
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Install Python dependencies from requirements.txt
+      pip:
+        requirements: "{{ project_dir }}/requirements.txt"
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      when: ansible_os_family != "Darwin"
+      
+    - name: Install CoreML dependencies (macOS)
+      pip:
+        requirements: "{{ project_dir }}/requirements_coreml.txt"
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      when: ansible_os_family == "Darwin"
+      
+    - name: Install YDF dependencies
+      pip:
+        requirements: "{{ project_dir }}/requirements_ydf.txt"
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes  # In case file doesn't exist
+      
+    # Database Setup
+    - name: Initialize PostgreSQL database (CentOS/RHEL)
+      command: postgresql-setup initdb
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      
+    - name: Start and enable PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+      when: ansible_os_family != "Darwin"
+      
+    - name: Start and enable Redis
+      systemd:
+        name: redis
+        state: started
+        enabled: yes
+      when: ansible_os_family != "Darwin"
+      
+    # Create necessary directories
+    - name: Create project subdirectories
+      file:
+        path: "{{ project_dir }}/{{ item }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      loop:
+        - data
+        - logs
+        - models
+        - config
+        - scripts
+        - ansible
+        
+    # Environment configuration
+    - name: Copy environment example file
+      copy:
+        src: "{{ project_dir }}/.env.example"
+        dest: "{{ project_dir }}/.env"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0600'
+        remote_src: yes
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes
+      
+    # Make scripts executable
+    - name: Make shell scripts executable
+      file:
+        path: "{{ project_dir }}/{{ item }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      loop:
+        - run_elvis.sh
+        - run_training.sh
+        - run_api.sh
+        - run_tests.sh
+      ignore_errors: yes
+      
+    # System service setup (optional)
+    - name: Create systemd service file for ELVIS bot
+      template:
+        src: templates/elvis-bot.service.j2
+        dest: /etc/systemd/system/elvis-bot.service
+        mode: '0644'
+      when: ansible_os_family != "Darwin"
+      
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+      when: ansible_os_family != "Darwin"
+      
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+      when: ansible_os_family != "Darwin"
