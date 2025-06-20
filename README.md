@@ -491,6 +491,122 @@ Unit tests for the RandomForestModel validate training, prediction, evaluation m
 
 ---
 
+## Deployment with Ansible
+
+The ELVIS Trading Bot includes comprehensive Ansible automation for seamless deployment across multiple platforms. The Ansible playbooks handle everything from system dependencies to service configuration.
+
+### Quick Deployment
+
+```bash
+cd ansible
+chmod +x run_setup.sh
+./run_setup.sh
+```
+
+### What Gets Automated
+
+The Ansible deployment system provides:
+
+```mermaid
+flowchart TD
+    Start([Ansible Deployment]) --> CheckOS[Detect Operating System]
+    CheckOS --> |Ubuntu/Debian| AptInstall[APT Package Installation]
+    CheckOS --> |CentOS/RHEL| YumInstall[YUM/DNF Package Installation]  
+    CheckOS --> |macOS| BrewInstall[Homebrew Installation]
+    
+    AptInstall --> SysDeps[System Dependencies]
+    YumInstall --> SysDeps
+    BrewInstall --> SysDeps
+    
+    SysDeps --> TALib[TA-Lib Installation]
+    TALib --> |Linux| CompileSource[Compile from Source]
+    TALib --> |macOS| BrewTALib[Homebrew TA-Lib]
+    
+    CompileSource --> Services[Service Installation]
+    BrewTALib --> Services
+    
+    Services --> Docker[Docker & Docker Compose]
+    Docker --> Databases[PostgreSQL & Redis]
+    Databases --> NodeJS[Node.js 18]
+    NodeJS --> PythonEnv[Python Virtual Environment]
+    PythonEnv --> Dependencies[Install Python Dependencies]
+    Dependencies --> SystemdService[Create Systemd Service]
+    SystemdService --> Security[Apply Security Settings]
+    Security --> Complete([Deployment Complete])
+    
+    subgraph "System Dependencies"
+        Python311[Python 3.11]
+        BuildTools[Build Tools]
+        DevLibs[Development Libraries]
+        Git[Git VCS]
+    end
+    
+    subgraph "Monitoring Stack"
+        Prometheus[Prometheus Metrics]
+        Grafana[Grafana Dashboards]
+        RedisMonitor[Redis Monitoring]
+    end
+    
+    Security --> Prometheus
+    Security --> Grafana
+    Security --> RedisMonitor
+```
+
+### Deployment Features
+
+- **Cross-platform Support**: Ubuntu/Debian, CentOS/RHEL, macOS
+- **Automated Dependency Resolution**: System packages, Python libraries, TA-Lib compilation
+- **Service Management**: Systemd service creation with auto-restart capabilities
+- **Security Hardening**: File permissions, service isolation, user separation
+- **Multi-environment Support**: Development, staging, production configurations
+- **Database Setup**: PostgreSQL and Redis installation and configuration
+- **Monitoring Integration**: Prometheus metrics and Grafana dashboards
+- **Container Support**: Docker and Docker Compose installation
+
+### Environment Configuration
+
+```bash
+# Development (default)
+./run_setup.sh
+
+# Staging environment
+./run_setup.sh staging
+
+# Production environment  
+./run_setup.sh production
+
+# Test connection only
+./run_setup.sh --test
+
+# Dry run (check mode)
+./run_setup.sh --check
+```
+
+### Post-Deployment
+
+After successful Ansible deployment:
+
+1. **Configure Environment Variables**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+2. **Start the ELVIS Bot**:
+   ```bash
+   sudo systemctl start elvis-bot
+   sudo systemctl enable elvis-bot
+   ```
+
+3. **Access Web Interfaces**:
+   - Grafana: http://localhost:3000
+   - API Documentation: http://localhost:5050/api/docs
+   - Prometheus: http://localhost:9090
+
+For detailed Ansible documentation, see [ansible/README.md](ansible/README.md).
+
+---
+
 ## Configuration
 
 Configuration files in YAML and Python manage model parameters, training settings, data paths, and environment variables. The training pipeline reads these configurations to orchestrate the workflow.
