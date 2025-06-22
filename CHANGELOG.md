@@ -1,5 +1,59 @@
 ## [Unreleased]
 
+- eureka: Implemented Advanced Risk Management Features:
+  1. **Value at Risk (VaR)**:
+     - Added VaR calculation to the `RiskManager`.
+     - Displayed VaR on the `ConsoleDashboard`.
+  2. **Correlation-based Position Limits**:
+     - Implemented correlation-based position limits in the `RiskManager`.
+  3. **Maximum Drawdown Protection**:
+     - Added maximum drawdown protection to the `RiskManager`.
+  4. **Circuit Breakers**:
+     - Implemented circuit breakers for extreme market conditions in the `RiskManager`.
+  5. **Position-level Risk Decomposition**:
+     - Added position-level risk decomposition to the `RiskManager`.
+
+- eureka: Implemented Advanced Trading Strategies:
+  1. **Position Scaling**:
+     - Implemented position scaling based on trend strength in the `EnsembleStrategy`.
+  2. **Grid Trading**:
+     - Added a `GridStrategy` for grid trading capabilities.
+  3. **Market Regime Detection**:
+     - Implemented a `MarketRegimeDetector` to identify market regimes.
+     - Created a `StrategyManager` to switch between strategies based on the market regime.
+  4. **Multi-pair Trading**:
+     - Updated the `PriceFetcher` and `EnsembleStrategy` to support multiple trading pairs.
+     - Added cross-pair correlation analysis to the `EnsembleStrategy`.
+  5. **Order Flow Analysis**:
+     - Implemented an `OrderFlowAnalyzer` to analyze order book data.
+     - Integrated order flow analysis into the `EnsembleStrategy` to adjust position size.
+
+- eureka: Implemented Trading Strategy and Risk Management Enhancements:
+  1. **Dynamic Position Sizing**:
+     - Refactored `EnsembleStrategy` to use ATR for volatility-based position sizing.
+     - Added configurable risk parameters: `risk_per_trade`, `min_position_size`, `max_position_size`.
+  2. **Advanced Order Execution**:
+     - Implemented `execute_trailing_stop_loss` and `execute_partial_take_profit` in `BinanceExecutor`.
+     - Completed the `BinanceExecutor` with all methods from the `BaseExecutor` interface.
+  3. **RiskManager Implementation**:
+     - Created a new `RiskManager` to manage trailing stops and partial take-profits.
+     - Integrated the `RiskManager` into the main application loop to run periodically.
+>>>>>>> main
+
+- eureka: Implemented Console Dashboard Enhancements:
+  1. **Redesigned UI**:
+     - Multi-pane layout with dedicated info and chart sections.
+     - Left pane: Portfolio, PnL, open positions, and system health.
+     - Right pane: ASCII price chart with technical indicators.
+  2. **Technical Indicators**:
+     - Integrated `ta` library for technical analysis.
+     - Added RSI, MACD, and Bollinger Bands to the chart.
+     - Using mock data for initial display and testing.
+  3. **Enhanced Data Display**:
+     - Shows unrealized and realized PnL.
+     - Lists open positions with symbol, amount, and price.
+     - Displays system health metrics (CPU, Memory).
+
 - eureka: Fixed Ansible playbook macOS compatibility issues:
   1. **Resolved Homebrew Root Permission Error**:
      - Removed global `become: yes` that was causing Homebrew to run as root

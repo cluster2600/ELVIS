@@ -5,8 +5,9 @@ import requests
 import coremltools as ct
 # import ydf
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from trading.strategies.base_strategy import BaseStrategy
+import ta
 
 class EnsembleStrategy(BaseStrategy):
     """
@@ -19,27 +20,46 @@ class EnsembleStrategy(BaseStrategy):
     """
 
     def __init__(self, logger: logging.Logger, 
+                 symbols: List[str] = ['BTCUSDT'],
                  ydf_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
                  coreml_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage",
-                 mlx_url: str = None):
+                 mlx_url: str = None,
+                 risk_per_trade: float = 0.01,
+                 min_position_size: float = 0.001,
+                 max_position_size: float = 0.1,
+                 order_flow_analyzer=None,
+                 price_fetcher=None):
         """
         Initialize the ensemble strategy, loading models and setting parameters.
 
         Args:
             logger (logging.Logger): The logger for debugging/info output.
+            symbols (List[str]): The trading pairs to manage.
             ydf_model_path (str): Path to the YDF Random Forest model.
             coreml_model_path (str): Path to the CoreML Neural Network model.
             mlx_url (str, optional): URL to MLX server for LLM support.
+            risk_per_trade (float): The percentage of the portfolio to risk on a single trade.
+            min_position_size (float): The minimum position size in BTC.
+            max_position_size (float): The maximum position size in BTC.
+            order_flow_analyzer: The order flow analyzer instance.
+            price_fetcher: The price fetcher instance.
         """
         super().__init__(logger)
         self.logger = logger
+        self.symbols = symbols
+        self.order_flow_analyzer = order_flow_analyzer
+        self.price_fetcher = price_fetcher
         self.REQUIRED_FEATURES = [
             "price", "Order_Amount", "sma", "Filled", "Total", "future_price", "atr",
             "vol_adjusted_price", "volume_ma", "macd", "signal_line", "lower_bb",
             "sma_bb", "upper_bb", "news_sentiment", "social_feature", "adx", "rsi",
-            "order_book_depth", "volume"
+            "order_book_depth", "volume", "high", "low", "close"
         ]
         self.CLASSES = ["BUY", "HOLD", "SELL"]
+
+        self.risk_per_trade = risk_per_trade
+        self.min_position_size = min_position_size
+        self.max_position_size = max_position_size
 
         self.mlx_url = mlx_url or os.getenv('MLX_URL', '')
         self.mlx_available = False
@@ -164,46 +184,158 @@ class EnsembleStrategy(BaseStrategy):
 
         return preds
 
-    def generate_signals(self, data: pd.DataFrame) -> Dict[str, Any]:
+    def generate_signals(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
         """
-        Generate a trading signal based on ensemble voting.
+        Generate trading signals for all symbols based on ensemble voting.
 
         Args:
-            data (pd.DataFrame): The latest market data.
+            data (Dict[str, pd.DataFrame]): A dictionary of market data for each symbol.
 
         Returns:
-            Dict[str, Any]: {'signal': 'BUY'/'SELL'/'HOLD', 'confidence': float}
+            Dict[str, Dict[str, Any]]: A dictionary of signals for each symbol.
         """
-        if data.empty:
-            return {"signal": "HOLD", "confidence": 0.0}
+        signals = {}
+        for symbol in self.symbols:
+            if symbol not in data or data[symbol].empty:
+                signals[symbol] = {"signal": "HOLD", "confidence": 0.0}
+                continue
 
-        features = data.iloc[-1].to_dict()
-        features = {k: features.get(k, 0.0) for k in self.REQUIRED_FEATURES}
+            features = data[symbol].iloc[-1].to_dict()
+            features = {k: features.get(k, 0.0) for k in self.REQUIRED_FEATURES}
 
-        preds = self._get_model_predictions(features)
+            preds = self._get_model_predictions(features)
 
-        pred_array = np.mean([p for p in preds.values() if p is not None], axis=0)
-        best_idx = np.argmax(pred_array)
+            pred_array = np.mean([p for p in preds.values() if p is not None], axis=0)
+            best_idx = np.argmax(pred_array)
 
-        decision = self.CLASSES[best_idx]
-        confidence = float(pred_array[best_idx])
+            decision = self.CLASSES[best_idx]
+            confidence = float(pred_array[best_idx])
 
-        self.logger.info(f"Ensemble decision: {decision} ({confidence:.4f})")
+            self.logger.info(f"Ensemble decision for {symbol}: {decision} ({confidence:.4f})")
 
-        return {"signal": decision, "confidence": confidence}
+            signals[symbol] = {"signal": decision, "confidence": confidence}
 
-    def calculate_position_size(self, portfolio_value: float, price: float, volatility: float) -> float:
+        return signals
+
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
         """
-        Basic risk-based position sizing: 1% of portfolio at risk.
+        Calculate the Average True Range (ATR) as a measure of volatility.
 
         Args:
-            portfolio_value (float): Total portfolio value.
-            price (float): Current asset price.
-            volatility (float): Estimated volatility (for size adjustment).
+            data (pd.DataFrame): DataFrame with high, low, and close prices.
+            period (int): The period over which to calculate the ATR.
 
         Returns:
-            float: Size of the position.
+            float: The latest ATR value.
         """
-        risk_amount = portfolio_value * 0.01
-        position_size = risk_amount / (price * volatility)
-        return max(position_size, 0.001)  # minimum threshold
+        if not all(col in data.columns for col in ['high', 'low', 'close']):
+            self.logger.warning("ATR calculation requires 'high', 'low', 'close' columns.")
+            return 0.01 # Return a default small volatility
+        
+        high_low = data['high'] - data['low']
+        high_close = np.abs(data['high'] - data['close'].shift())
+        low_close = np.abs(data['low'] - data['close'].shift())
+        
+        tr = np.max([high_low, high_close, low_close], axis=0)
+        atr = pd.Series(tr).rolling(window=period).mean().iloc[-1]
+        return atr if pd.notna(atr) else 0.01
+
+    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float) -> float:
+        """
+        Calculate position size based on volatility (ATR) and risk per trade.
+        
+        Args:
+            data (pd.DataFrame): The data to calculate position size from.
+            current_price (float): The current price.
+            available_capital (float): The available capital.
+            
+        Returns:
+            float: The position size in BTC.
+        """
+        atr = self._calculate_atr(data)
+        if atr == 0:
+            return self.min_position_size
+
+        trend_strength = self._calculate_trend_strength(data)
+        
+        # Adjust position size based on trend strength
+        size_multiplier = 1.0 + (trend_strength - 0.5) # Scale from 0.5 to 1.5
+
+        # Adjust position size based on order flow imbalance
+        if self.order_flow_analyzer and self.price_fetcher:
+            symbol = getattr(data, 'name', self.symbols[0]) # Fallback to first symbol
+            order_book = self.price_fetcher.get_order_book(symbol)
+            if order_book:
+                bids = pd.DataFrame(order_book['bids'], columns=['price', 'qty'], dtype=float)
+                asks = pd.DataFrame(order_book['asks'], columns=['price', 'qty'], dtype=float)
+                imbalance = self.order_flow_analyzer.get_order_flow_imbalance(bids, asks)
+                size_multiplier += imbalance / 1000 # Small adjustment based on imbalance
+
+        # Dynamic stop loss based on ATR
+        stop_loss_distance = atr * 2  # Example: 2 * ATR
+        
+        # Amount to risk
+        risk_amount = available_capital * self.risk_per_trade
+        
+        # Calculate position size
+        position_size = (risk_amount / stop_loss_distance) * size_multiplier
+        
+        # Clamp the position size to the min/max limits
+        position_size = np.clip(position_size, self.min_position_size, self.max_position_size)
+        
+        # Ensure we don't exceed available capital
+        if position_size * current_price > available_capital:
+            position_size = available_capital / current_price
+            
+        return max(position_size, self.min_position_size)
+
+    def calculate_stop_loss(self, data: pd.DataFrame, entry_price: float) -> float:
+        """
+        Calculate the stop loss price based on ATR.
+        
+        Args:
+            data (pd.DataFrame): The data to calculate stop loss from.
+            entry_price (float): The entry price.
+            
+        Returns:
+            float: The stop loss price.
+        """
+        atr = self._calculate_atr(data)
+        return entry_price - (atr * 2) # Example: 2 * ATR below entry
+
+    def calculate_take_profit(self, data: pd.DataFrame, entry_price: float) -> float:
+        """
+        Calculate the take profit price based on ATR.
+        
+        Args:
+            data (pd.DataFrame): The data to calculate take profit from.
+            entry_price (float): The entry price.
+            
+        Returns:
+            float: The take profit price.
+        """
+        atr = self._calculate_atr(data)
+        return entry_price + (atr * 3) # Example: 3 * ATR above entry
+
+    def _calculate_trend_strength(self, data: pd.DataFrame, adx_period: int = 14, rsi_period: int = 14) -> float:
+        """
+        Calculate the trend strength using ADX and RSI.
+        
+        Returns:
+            float: A value between 0 and 1 representing the trend strength.
+        """
+        adx = ta.trend.ADXIndicator(data['high'], data['low'], data['close'], window=adx_period).adx()
+        rsi = ta.momentum.RSIIndicator(data['close'], window=rsi_period).rsi()
+        
+        # Normalize ADX and RSI to a 0-1 scale
+        adx_strength = min(adx.iloc[-1] / 50, 1.0) # ADX > 50 is a strong trend
+        rsi_strength = abs(rsi.iloc[-1] - 50) / 50 # RSI further from 50 is a stronger trend
+        
+        return (adx_strength + rsi_strength) / 2
+
+    def calculate_cross_pair_correlation(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate the correlation matrix for the close prices of all symbols.
+        """
+        close_prices = pd.DataFrame({symbol: df['close'] for symbol, df in data.items()})
+        return close_prices.corr()

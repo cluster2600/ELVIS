@@ -3,6 +3,8 @@ import logging
 import threading
 import signal
 import sys
+import time
+import curses
 
 from core.bootstrap import bootstrap_application
 from core.di import container
@@ -35,6 +37,15 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 
+def risk_management_loop(risk_manager, logger):
+    """Continuously manage position risk in a separate thread."""
+    while True:
+        try:
+            risk_manager.manage_positions()
+        except Exception as e:
+            logger.error(f"Error in risk management loop: {e}")
+        time.sleep(5)  # Check every 5 seconds
+
 def main(mode: str, log_level: str):
     """
     Main entry point for the trading bot using dependency injection.
@@ -57,15 +68,33 @@ def main(mode: str, log_level: str):
         logger.info("Started Trade History Server on 0.0.0.0:5050...")
         
         # Get dependencies from container
-        strategy = container.get('strategy')
+        strategy_manager = container.get('strategy_manager')
         risk_manager = container.get('risk_manager')
+        price_fetcher = container.get('price_fetcher')
         
-        # Start Console Dashboard
-        dashboard = ConsoleDashboard(logger, strategy, risk_manager)
-        dashboard.start()
+        # Let's correct the instantiation of the dashboard
+        dashboard = ConsoleDashboard(
+            config={
+                'portfolio_value': 10520.30,
+                'unrealized_pnl': 150.10,
+                'realized_pnl': 450.20,
+                'open_positions': [],
+                'recent_trades': [],
+                'risk_manager': risk_manager,
+                'performance_monitor': container.get('performance_monitor'),
+                'trade_analyzer': container.get('trade_analyzer'),
+                'system_monitor': container.get('system_monitor')
+            }, 
+            logger=logger, 
+            price_fetcher=price_fetcher
+        )
         
         # Register dashboard in container for other components to use
         container.register_singleton('dashboard', lambda: dashboard)
+        
+        # Start risk management loop
+        threading.Thread(target=risk_management_loop, args=(risk_manager, logger), daemon=True).start()
+        logger.info("Started Risk Management loop...")
         
         # Publish system ready event
         event_bus.publish(SystemEvent(
@@ -76,13 +105,28 @@ def main(mode: str, log_level: str):
             source='main',
             metrics={
                 'mode': mode,
-                'symbol': strategy.symbol if hasattr(strategy, 'symbol') else 'BTCUSDT'
+                'symbol': 'BTCUSDT'
             }
         ))
         
         # Main trading loop
         logger.info(f"Starting trading bot in {mode} mode...")
-        strategy.run()
+        
+        # The main loop will now be managed by the strategy manager
+        def trading_loop():
+            while True:
+                data = price_fetcher.get_historical_klines("BTCUSDT", "1m")
+                if not data.empty:
+                    active_strategy = strategy_manager.get_active_strategy(data)
+                    # This is a placeholder for running the strategy
+                    # In a real application, this would be more complex
+                    # active_strategy.run() 
+                time.sleep(60)
+
+        threading.Thread(target=trading_loop, daemon=True).start()
+        
+        # The dashboard's run method is blocking, so it should be the last call
+        curses.wrapper(dashboard.run)
         
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")

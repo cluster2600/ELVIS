@@ -15,7 +15,7 @@ from trading.strategies.technical_strategy import TechnicalStrategy
 from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
 from trading.strategies.trend_following_strategy import TrendFollowingStrategy
 from trading.execution.binance_executor import BinanceExecutor
-from trading.risk.risk_manager import RiskManager
+from trading.risk_management import RiskManager
 from core.models.random_forest_model import RandomForestModel
 from core.models.neural_network_model import NeuralNetworkModel
 from core.models.ensemble_model import EnsembleModel

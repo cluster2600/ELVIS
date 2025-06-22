@@ -7,7 +7,7 @@ import logging
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 
-from trading.risk.risk_manager import RiskManager
+from trading.risk_management import RiskManager
 from config import TRADING_CONFIG
 
 class TestRiskManager(unittest.TestCase):
