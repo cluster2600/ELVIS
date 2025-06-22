@@ -17,7 +17,6 @@ from core.models.base_model import BaseModel
 # Import necessary model classes for loading
 from core.models.random_forest_model import RandomForestModel
 from core.models.neural_network_model import NeuralNetworkModel
-from config import FILE_PATHS
 
 class EnsembleModel(BaseModel):
     """
@@ -45,7 +44,7 @@ class EnsembleModel(BaseModel):
         self.threshold: float = kwargs.get('threshold', 0.5) # Used for 'hard' voting or final decision
 
         # Path to save/load the ensemble configuration (not the models themselves)
-        self.config_path: str = kwargs.get('config_path', os.path.join(FILE_PATHS['TRAIN_RESULTS_DIR'], 'ensemble_config.json'))
+        self.config_path: str = kwargs.get('config_path', 'models/ensemble_config.json')
 
         # Ensure weights match number of models if provided
         if self.weights and len(self.weights) != len(self.models):

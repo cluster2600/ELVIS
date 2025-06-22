@@ -1,371 +1,211 @@
-"""
-Risk management module for the ELVIS trading system.
-Implements advanced position sizing, drawdown protection, and correlation analysis.
-"""
-
+import logging
+from typing import Dict, Any
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass
-from enum import Enum
-import logging
-from scipy.stats import norm
-from sklearn.covariance import LedoitWolf
-import warnings
-warnings.filterwarnings('ignore')
-
-class MarketRegime(Enum):
-    """Market regime classification."""
-    HIGH_VOLATILITY = "high_volatility"
-    LOW_VOLATILITY = "low_volatility"
-    TRENDING_UP = "trending_up"
-    TRENDING_DOWN = "trending_down"
-    SIDEWAYS = "sideways"
-
-@dataclass
-class PositionSizingParams:
-    """Parameters for position sizing."""
-    max_position_size: float = 0.1  # Maximum position size as fraction of portfolio
-    min_position_size: float = 0.01  # Minimum position size
-    kelly_fraction: float = 0.5  # Fraction of Kelly criterion to use
-    volatility_scaling: bool = True  # Whether to scale positions based on volatility
-    regime_based_scaling: bool = True  # Whether to adjust position sizes based on market regime
-
-@dataclass
-class DrawdownParams:
-    """Parameters for drawdown protection."""
-    max_drawdown: float = 0.2  # Maximum allowed drawdown
-    circuit_breaker_levels: List[float] = None  # Drawdown levels for circuit breakers
-    volatility_threshold: float = 0.3  # Volatility threshold for position scaling
-    pause_threshold: float = 0.4  # Volatility threshold for trading pause
-
-@dataclass
-class CorrelationParams:
-    """Parameters for correlation analysis."""
-    lookback_window: int = 60  # Days to look back for correlation calculation
-    correlation_threshold: float = 0.7  # Threshold for high correlation
-    min_pairs_distance: float = 2.0  # Minimum standard deviations for pair trading
-    rebalance_frequency: int = 5  # Days between correlation updates
+from trading.execution.base_executor import BaseExecutor
+from core.metrics.performance_monitor import PerformanceMonitor
+import ta
 
 class RiskManager:
-    """Manages risk for the trading system."""
-    
-    def __init__(self, 
-                 position_params: PositionSizingParams = None,
-                 drawdown_params: DrawdownParams = None,
-                 correlation_params: CorrelationParams = None):
+    """
+    The RiskManager is responsible for managing risk across all open positions.
+    It handles trailing stop-losses and partial take-profits.
+    """
+
+    def __init__(self, executor: BaseExecutor, logger: logging.Logger = None, performance_monitor: PerformanceMonitor = None):
         """
-        Initialize the risk manager.
-        
+        Initialize the RiskManager.
+
         Args:
-            position_params: Position sizing parameters
-            drawdown_params: Drawdown protection parameters
-            correlation_params: Correlation analysis parameters
+            executor (BaseExecutor): The executor to use for placing orders.
+            logger (logging.Logger): The logger to use.
+            performance_monitor (PerformanceMonitor): The performance monitor instance.
         """
-        self.position_params = position_params or PositionSizingParams()
-        self.drawdown_params = drawdown_params or DrawdownParams()
-        self.correlation_params = correlation_params or CorrelationParams()
-        
-        if self.drawdown_params.circuit_breaker_levels is None:
-            self.drawdown_params.circuit_breaker_levels = [
-                0.1, 0.15, 0.2
-            ]
-            
-        self.logger = logging.getLogger(__name__)
-        self.current_regime = MarketRegime.SIDEWAYS
-        self.trading_paused = False
-        self.correlations = {}
-        self.pairs = {}
-        
-    def calculate_kelly_position(self, 
-                               win_rate: float,
-                               win_loss_ratio: float,
-                               current_volatility: float) -> float:
+        self.executor = executor
+        self.logger = logger or logging.getLogger(__name__)
+        self.performance_monitor = performance_monitor or PerformanceMonitor()
+        self.open_positions: Dict[str, Dict[str, Any]] = {}
+        self.realized_pnl = 0.0
+        self.unrealized_pnl = 0.0
+
+    def add_position(self, symbol: str, position_data: Dict[str, Any]):
         """
-        Calculate optimal position size using Kelly Criterion.
-        
+        Add a new position to be managed by the RiskManager.
+
         Args:
-            win_rate: Probability of winning trades
-            win_loss_ratio: Ratio of average win to average loss
-            current_volatility: Current market volatility
-            
-        Returns:
-            Optimal position size as fraction of portfolio
+            symbol (str): The symbol of the position.
+            position_data (Dict[str, Any]): The position data.
         """
-        try:
-            # Basic Kelly formula
-            kelly = win_rate - (1 - win_rate) / win_loss_ratio
-            
-            # Adjust for volatility
-            if self.position_params.volatility_scaling:
-                volatility_factor = 1 / (1 + current_volatility)
-                kelly *= volatility_factor
-                
-            # Apply regime-based scaling
-            if self.position_params.regime_based_scaling:
-                regime_factor = self._get_regime_scaling_factor()
-                kelly *= regime_factor
-                
-            # Apply fraction and bounds
-            kelly = kelly * self.position_params.kelly_fraction
-            kelly = np.clip(
-                kelly,
-                self.position_params.min_position_size,
-                self.position_params.max_position_size
-            )
-            
-            return kelly
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating Kelly position: {str(e)}")
-            return self.position_params.min_position_size
-            
-    def _get_regime_scaling_factor(self) -> float:
-        """Get position scaling factor based on market regime."""
-        regime_factors = {
-            MarketRegime.HIGH_VOLATILITY: 0.5,
-            MarketRegime.LOW_VOLATILITY: 1.2,
-            MarketRegime.TRENDING_UP: 1.1,
-            MarketRegime.TRENDING_DOWN: 0.8,
-            MarketRegime.SIDEWAYS: 0.9
-        }
-        return regime_factors[self.current_regime]
-        
-    def detect_market_regime(self, 
-                           prices: pd.Series,
-                           volatility: float) -> MarketRegime:
+        self.open_positions[symbol] = position_data
+        self.logger.info(f"Added position {symbol} to RiskManager.")
+
+    def remove_position(self, symbol: str):
         """
-        Detect current market regime based on price action and volatility.
-        
+        Remove a position from the RiskManager.
+
         Args:
-            prices: Price series
-            volatility: Current market volatility
-            
-        Returns:
-            Detected market regime
+            symbol (str): The symbol of the position to remove.
         """
-        try:
-            # Calculate trend
-            returns = prices.pct_change()
-            sma_20 = prices.rolling(20).mean()
-            sma_50 = prices.rolling(50).mean()
-            
-            # Determine trend
-            if sma_20.iloc[-1] > sma_50.iloc[-1] and returns.mean() > 0:
-                trend = MarketRegime.TRENDING_UP
-            elif sma_20.iloc[-1] < sma_50.iloc[-1] and returns.mean() < 0:
-                trend = MarketRegime.TRENDING_DOWN
-            else:
-                trend = MarketRegime.SIDEWAYS
-                
-            # Adjust for volatility
-            if volatility > self.drawdown_params.volatility_threshold:
-                if trend in [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN]:
-                    return MarketRegime.HIGH_VOLATILITY
-                return MarketRegime.HIGH_VOLATILITY
-            elif volatility < self.drawdown_params.volatility_threshold * 0.5:
-                return MarketRegime.LOW_VOLATILITY
-                
-            return trend
-            
-        except Exception as e:
-            self.logger.error(f"Error detecting market regime: {str(e)}")
-            return MarketRegime.SIDEWAYS
-            
-    def check_drawdown_protection(self,
-                                portfolio_value: float,
-                                peak_value: float,
-                                current_volatility: float) -> Tuple[bool, str]:
+        if symbol in self.open_positions:
+            position = self.open_positions.pop(symbol)
+            pnl = position.get('pnl', 0.0)
+            # Update realized PnL when position is closed
+            self.realized_pnl += pnl
+            self.performance_monitor.add_return(pnl)
+            self.logger.info(f"Removed position {symbol} from RiskManager. Realized PnL: {self.realized_pnl:.2f}")
+
+    def manage_positions(self, data: Dict[str, pd.DataFrame] = None):
         """
-        Check if drawdown protection measures should be triggered.
+        Iterate through all open positions and manage their risk.
+        This method should be called on each price tick.
+        """
+        current_unrealized_pnl = 0.0
+        for symbol, position in list(self.open_positions.items()):
+            current_price = self.executor.get_current_price(symbol)
+            
+            # Calculate unrealized PnL
+            entry_price = position.get('entry_price', current_price)
+            quantity = position.get('quantity', 0)
+            pnl = (current_price - entry_price) * quantity
+            position['pnl'] = pnl
+            current_unrealized_pnl += pnl
+
+            # Manage trailing stop-loss
+            self._manage_trailing_stop(symbol, position, current_price)
+            
+            # Manage partial take-profit
+            self._manage_partial_take_profit(symbol, position, current_price)
         
-        Args:
-            portfolio_value: Current portfolio value
-            peak_value: Peak portfolio value
-            current_volatility: Current market volatility
-            
-        Returns:
-            Tuple of (should_pause, reason)
-        """
-        try:
-            # Calculate drawdown
-            drawdown = (peak_value - portfolio_value) / peak_value
-            
-            # Check circuit breakers
-            for level in sorted(self.drawdown_params.circuit_breaker_levels):
-                if drawdown >= level:
-                    return True, f"Circuit breaker triggered at {level*100}% drawdown"
-                    
-            # Check volatility pause
-            if current_volatility >= self.drawdown_params.pause_threshold:
-                return True, "Volatility exceeds pause threshold"
-                
-            return False, ""
-            
-        except Exception as e:
-            self.logger.error(f"Error checking drawdown protection: {str(e)}")
-            return True, "Error in drawdown protection check"
-            
-    def calculate_correlations(self,
-                             asset_returns: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculate correlations between assets.
+        self.unrealized_pnl = current_unrealized_pnl
         
-        Args:
-            asset_returns: DataFrame of asset returns
+        if data:
+            self.apply_correlation_based_position_limits(data)
             
-        Returns:
-            Correlation matrix
-        """
-        try:
-            # Use Ledoit-Wolf shrinkage for more robust correlation estimation
-            cov = LedoitWolf().fit(asset_returns)
-            correlations = pd.DataFrame(
-                cov.correlation_,
-                index=asset_returns.columns,
-                columns=asset_returns.columns
-            )
-            
-            self.correlations = correlations
-            return correlations
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating correlations: {str(e)}")
-            return pd.DataFrame()
-            
-    def find_trading_pairs(self,
-                          asset_returns: pd.DataFrame,
-                          correlations: pd.DataFrame) -> List[Tuple[str, str]]:
-        """
-        Find potential pairs for pair trading.
+        self.check_max_drawdown()
         
-        Args:
-            asset_returns: DataFrame of asset returns
-            correlations: Correlation matrix
-            
-        Returns:
-            List of (asset1, asset2) pairs
+        if data and not data.empty:
+            # Assuming data contains ohlcv for the primary symbol
+            primary_symbol = list(data.keys())[0]
+            self.check_circuit_breakers(data[primary_symbol])
+
+
+    def _manage_trailing_stop(self, symbol: str, position: Dict[str, Any], current_price: float):
         """
-        try:
-            pairs = []
-            assets = asset_returns.columns
-            
-            for i, asset1 in enumerate(assets):
-                for asset2 in assets[i+1:]:
-                    # Check correlation
-                    if correlations.loc[asset1, asset2] > self.correlation_params.correlation_threshold:
-                        # Calculate spread
-                        spread = asset_returns[asset1] - asset_returns[asset2]
-                        spread_std = spread.std()
-                        
-                        # Check if spread is wide enough
-                        current_spread = spread.iloc[-1]
-                        if abs(current_spread) > self.correlation_params.min_pairs_distance * spread_std:
-                            pairs.append((asset1, asset2))
-                            
-            self.pairs = pairs
-            return pairs
-            
-        except Exception as e:
-            self.logger.error(f"Error finding trading pairs: {str(e)}")
-            return []
-            
-    def optimize_portfolio_weights(self,
-                                 asset_returns: pd.DataFrame,
-                                 target_volatility: float = 0.15) -> pd.Series:
+        Manage the trailing stop-loss for a single position.
         """
-        Optimize portfolio weights for risk-adjusted returns.
-        
-        Args:
-            asset_returns: DataFrame of asset returns
-            target_volatility: Target portfolio volatility
-            
-        Returns:
-            Series of optimized weights
+        if 'trailing_stop' not in position:
+            return
+
+        trailing_stop_info = position['trailing_stop']
+        stop_price = trailing_stop_info.get('stop_price')
+
+        if current_price < stop_price:
+            self.logger.info(f"Trailing stop triggered for {symbol} at {current_price}")
+            self.executor.execute_sell(symbol, position['quantity'])
+            self.remove_position(symbol)
+        else:
+            # Update the stop price if the current price has moved in our favor
+            new_stop_price = current_price - trailing_stop_info['trail_distance']
+            if new_stop_price > stop_price:
+                trailing_stop_info['stop_price'] = new_stop_price
+                self.logger.info(f"Updated trailing stop for {symbol} to {new_stop_price}")
+
+    def _manage_partial_take_profit(self, symbol: str, position: Dict[str, Any], current_price: float):
         """
-        try:
-            # Calculate covariance matrix
-            cov = LedoitWolf().fit(asset_returns)
-            cov_matrix = pd.DataFrame(
-                cov.covariance_,
-                index=asset_returns.columns,
-                columns=asset_returns.columns
-            )
-            
-            # Calculate inverse volatility weights
-            vols = np.sqrt(np.diag(cov_matrix))
-            inv_vols = 1 / vols
-            weights = inv_vols / inv_vols.sum()
-            
-            # Scale to target volatility
-            current_vol = np.sqrt(weights @ cov_matrix @ weights)
-            scaling_factor = target_volatility / current_vol
-            weights = weights * scaling_factor
-            
-            # Normalize weights
-            weights = weights / weights.sum()
-            
-            return pd.Series(weights, index=asset_returns.columns)
-            
-        except Exception as e:
-            self.logger.error(f"Error optimizing portfolio weights: {str(e)}")
-            return pd.Series(1/len(asset_returns.columns), index=asset_returns.columns)
-            
-    def get_position_sizes(self,
-                          portfolio_value: float,
-                          asset_returns: pd.DataFrame,
-                          win_rates: Dict[str, float],
-                          win_loss_ratios: Dict[str, float]) -> Dict[str, float]:
+        Manage the partial take-profit for a single position.
         """
-        Calculate position sizes for all assets.
-        
-        Args:
-            portfolio_value: Current portfolio value
-            asset_returns: DataFrame of asset returns
-            win_rates: Dictionary of win rates by asset
-            win_loss_ratios: Dictionary of win/loss ratios by asset
-            
-        Returns:
-            Dictionary of position sizes by asset
-        """
-        try:
-            # Get market regime
-            self.current_regime = self.detect_market_regime(
-                asset_returns.mean(axis=1),
-                asset_returns.std().mean()
-            )
-            
-            # Calculate correlations
-            correlations = self.calculate_correlations(asset_returns)
-            
-            # Get portfolio weights
-            weights = self.optimize_portfolio_weights(asset_returns)
-            
-            # Calculate position sizes
-            position_sizes = {}
-            for asset in asset_returns.columns:
-                # Get Kelly position
-                kelly_size = self.calculate_kelly_position(
-                    win_rates[asset],
-                    win_loss_ratios[asset],
-                    asset_returns[asset].std()
+        if 'partial_take_profits' not in position:
+            return
+
+        for i, tp in enumerate(position['partial_take_profits']):
+            if not tp.get('executed') and current_price >= tp['price']:
+                self.logger.info(f"Partial take-profit {i+1} triggered for {symbol} at {current_price}")
+                self.executor.execute_partial_take_profit(
+                    symbol,
+                    position['quantity'],
+                    tp['percentage'],
+                    tp['price']
                 )
-                
-                # Adjust for portfolio weight
-                position_size = kelly_size * weights[asset]
-                
-                # Apply bounds
-                position_size = np.clip(
-                    position_size,
-                    self.position_params.min_position_size,
-                    self.position_params.max_position_size
-                )
-                
-                position_sizes[asset] = position_size * portfolio_value
-                
-            return position_sizes
+                tp['executed'] = True
+
+    def calculate_var(self, confidence_level: float = 0.95) -> float:
+        """
+        Calculate the Value at Risk (VaR) for the portfolio.
+        """
+        if not self.performance_monitor.returns:
+            return 0.0
+
+        returns = np.array(self.performance_monitor.returns)
+        return np.percentile(returns, 100 * (1 - confidence_level))
+
+    def calculate_cross_pair_correlation(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate the correlation matrix for the close prices of all symbols.
+        """
+        close_prices = pd.DataFrame({symbol: df['close'] for symbol, df in data.items()})
+        return close_prices.corr()
+
+    def apply_correlation_based_position_limits(self, data: Dict[str, pd.DataFrame]):
+        """
+        Adjust position sizes based on the correlation between assets.
+        """
+        correlation_matrix = self.calculate_cross_pair_correlation(data)
+        
+        for symbol, position in self.open_positions.items():
+            # Example: Reduce position size if highly correlated with other positions
+            for other_symbol, other_position in self.open_positions.items():
+                if symbol != other_symbol:
+                    correlation = correlation_matrix.loc[symbol, other_symbol]
+                    if correlation > 0.8: # High correlation threshold
+                        # Reduce position size by a factor of the correlation
+                        position['quantity'] *= (1 - correlation * 0.5)
+                        self.logger.info(f"Reduced position size for {symbol} due to high correlation with {other_symbol}")
+
+    def check_max_drawdown(self, max_drawdown_threshold: float = 0.2):
+        """
+        Check if the maximum drawdown has been exceeded and take action.
+        """
+        drawdown = self.performance_monitor.calculate_rolling_drawdown()
+        if drawdown < -max_drawdown_threshold:
+            self.logger.warning(f"Maximum drawdown of {max_drawdown_threshold:.2%} exceeded. Current drawdown: {drawdown:.2%}")
+            # Liquidate all positions
+            for symbol, position in list(self.open_positions.items()):
+                self.executor.execute_sell(symbol, position['quantity'])
+                self.remove_position(symbol)
+            self.logger.warning("All positions liquidated due to excessive drawdown.")
+
+    def check_circuit_breakers(self, data: pd.DataFrame, volatility_threshold: float = 0.1):
+        """
+        Check for extreme market conditions and halt trading if necessary.
+        """
+        # Example: Check for extreme volatility
+        atr = ta.volatility.AverageTrueRange(data['high'], data['low'], data['close']).average_true_range()
+        if atr.iloc[-1] > volatility_threshold:
+            self.logger.warning(f"Extreme volatility detected. Halting trading. ATR: {atr.iloc[-1]}")
+            for symbol, position in list(self.open_positions.items()):
+                self.executor.execute_sell(symbol, position['quantity'])
+                self.remove_position(symbol)
+            self.logger.warning("All positions liquidated due to circuit breaker.")
+            # In a real application, you would also want to stop placing new trades.
+            # This could be done by setting a flag that is checked by the trading loop.
             
-        except Exception as e:
-            self.logger.error(f"Error calculating position sizes: {str(e)}")
-            return {asset: self.position_params.min_position_size * portfolio_value 
-                   for asset in asset_returns.columns} 
+    def get_position_level_risk(self) -> Dict[str, float]:
+        """
+        Calculate the risk contribution of each position.
+        """
+        position_risk = {}
+        total_risk = self.calculate_var()
+
+        if total_risk == 0:
+            return {}
+
+        portfolio_value = sum(pos.get('quantity', 0) * self.executor.get_current_price(s) for s, pos in self.open_positions.items())
+        if portfolio_value == 0:
+            return {}
+
+        for symbol, position in self.open_positions.items():
+            # Simplified example: risk contribution is proportional to position size
+            position_value = position.get('quantity', 0) * self.executor.get_current_price(symbol)
+            position_risk[symbol] = (position_value / portfolio_value) * total_risk
+                
+        return position_risk

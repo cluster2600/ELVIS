@@ -1,6 +1,56 @@
 import logging
 from typing import Dict, List
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+from sklearn.ensemble import RandomForestClassifier
+from core.models.base_model import BaseModel
+import pandas as pd
+import joblib
+
+class RandomForestModel(BaseModel):
+    """
+    A Random Forest model for classification.
+    """
+
+    def __init__(self, logger: logging.Logger = None, n_estimators: int = 100, max_depth: int = None):
+        """
+        Initialize the RandomForestModel.
+
+        Args:
+            logger (logging.Logger): The logger to use.
+            n_estimators (int): The number of trees in the forest.
+            max_depth (int): The maximum depth of the tree.
+        """
+        super().__init__(logger)
+        self.model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth)
+
+    def train(self, X_train: pd.DataFrame, y_train: pd.Series):
+        """
+        Train the model.
+        """
+        self.model.fit(X_train, y_train)
+
+    def predict(self, X_test: pd.DataFrame):
+        """
+        Make predictions with the model.
+        """
+        return self.model.predict(X_test)
+
+    def get_params(self):
+        return self.model.get_params()
+
+    def set_params(self, **params):
+        self.model.set_params(**params)
+
+    def save(self, path):
+        joblib.dump(self.model, path)
+
+    @classmethod
+    def load(cls, path: str):
+        model = joblib.load(path)
+        # We need to return an instance of the class, not the model itself
+        instance = cls()
+        instance.model = model
+        return instance
 
 def push_cv_metrics_to_prometheus(
     metrics: Dict[str, List[float]],

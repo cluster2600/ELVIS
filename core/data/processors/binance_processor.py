@@ -22,18 +22,19 @@ class BinanceProcessor(BaseProcessor):
     Fetches and processes data from Binance exchange.
     """
     
-    def __init__(self, start_date: str, end_date: str, time_interval: str, logger: logging.Logger, **kwargs):
+    def __init__(self, data_source: str, start_date: str, end_date: str, time_interval: str, logger: logging.Logger, **kwargs):
         """
         Initialize the Binance processor.
         
         Args:
+            data_source (str): The data source.
             start_date (str): The start date.
             end_date (str): The end date.
             time_interval (str): The time interval.
             logger (logging.Logger): The logger to use.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__('binance', start_date, end_date, time_interval, logger, **kwargs)
+        super().__init__(data_source, start_date, end_date, time_interval, logger, **kwargs)
         
         # Initialize Binance client
         self.api_key = API_CONFIG.get('BINANCE_API_KEY') # Use .get() for safety
@@ -418,7 +419,7 @@ class BinanceProcessor(BaseProcessor):
         
         return self.data, price_array, tech_array, time_array
     
-    def _generate_mock_data(self, ticker: str, start_timestamp: int, end_timestamp: int) -> List[List[float]]:
+    def _generate_mock_data(self, ticker: str, start_timestamp: int, end_timestamp: int) -> List[List[Any]]:
         """
         Generate mock OHLCV data for testing when API calls fail.
         
@@ -428,7 +429,7 @@ class BinanceProcessor(BaseProcessor):
             end_timestamp (int): The end timestamp in milliseconds.
             
         Returns:
-            List[List[float]]: The generated mock OHLCV data.
+            List[List[Any]]: The generated mock OHLCV data.
         """
         self.logger.info(f"Generating mock data for {ticker}")
         
@@ -485,3 +486,144 @@ class BinanceProcessor(BaseProcessor):
         
         self.logger.info(f"Generated {len(mock_data)} mock candles for {ticker}")
         return mock_data
+</final_file_content>
+
+IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
+
+<environment_details>
+# VSCode Visible Files
+../../../../src/app/src/index.html
+../../../../src/app/src/index.html
+core/data/processors/binance_processor.py
+
+# VSCode Open Tabs
+run_bot.sh
+utils/logging_utils.py
+core/models/base_model.py
+core/data/processors/base_processor.py
+trading/strategies/base_strategy.py
+trading/execution/base_executor.py
+grafana/dashboards/elvis-trading.json
+trading/paper_bot.py
+trading/rl_agents.py
+trading/scripts/train_models.py
+training/data/data_downloader.py
+training/data/__init__.py
+utils/monitoring.py
+trading/models/__init__.py
+config/__init__.py
+training.py
+trading/data/data_processor.py
+data/processed/training_data.csv
+trading/models/rl_agents.py
+trading/models/transformer_models.py
+.git/COMMIT_EDITMSG
+trading/models/model_trainer.py
+run_training.sh
+training/models/evaluator.py
+training/config/model_config.yaml
+training/models/model_trainer.py
+training/train_models.py
+predict_with_ydf.py
+run_elvis.sh
+utils/trade_history_api.py
+trading/execution/binance_executor.py
+utils/trade_analyzer.py
+core/metrics/performance_monitor.py
+utils/system_monitor.py
+trading/strategies/grid_strategy.py
+trading/market_regime_detector.py
+trading/strategy_manager.py
+main.py
+utils/price_fetcher.py
+trading/order_flow_analyzer.py
+core/bootstrap.py
+trading/strategies/ensemble_strategy.py
+trading/risk_management.py
+utils/console_dashboard.py
+docs/future_improvements.md
+CHANGELOG.md
+tests/test_integration.py
+requirements.txt
+core/models/neural_network_model.py
+tests/test_risk_manager.py
+core/models/ensemble_model.py
+tests/test_binance_executor.py
+tests/test_binance_processor.py
+core/models/random_forest_model.py
+tests/test_ensemble_model.py
+core/data/processors/binance_processor.py
+tests/test_random_forest_model.py
+docs/training.md
+docs/utilities_monitoring.md
+docs/trading_system.md
+docs/data_processing.md
+cleanup_analysis.md
+project_cleanup_summary.md
+mermaid_test.md
+docs/comprehensive_improvements.md
+Dockerfile
+docker-compose.yml
+.env.example
+utils/redis_cache.py
+.github/workflows/ci.yml
+utils/logger_config.py
+tests/conftest.py
+tests/test_redis_cache.py
+tests/test_price_fetcher.py
+tests/test_logger_config.py
+run_tests.sh
+.coveragerc
+utils/secrets_manager.py
+utils/async_utils.py
+trading/backtesting/backtest_engine.py
+trading/backtesting/__init__.py
+trading/scripts/run_backtest.py
+trading/api/__init__.py
+trading/api/swagger.py
+trading/api/app.py
+docs/implementation_summary.md
+run_api.sh
+ansible/templates/elvis-bot.service.j2
+ansible/inventory.yml
+ansible/ansible.cfg
+ansible/requirements.yml
+ansible/run_setup.sh
+ansible/README.md
+README.md
+ansible/playbook.yml
+docs/random_forest.md
+core/di/__init__.py
+core/di/providers.py
+core/di/container.py
+core/events/__init__.py
+core/events/event_bus.py
+core/events/event_types.py
+core/events/decorators.py
+trading/event_handlers/__init__.py
+trading/event_handlers/market_data_handlers.py
+trading/event_handlers/trading_signal_handlers.py
+trading/event_handlers/risk_handlers.py
+trading/event_handlers/system_handlers.py
+trading/scripts/run_api.py
+training/replay_buffer.py
+training/models/rl_agents.py
+training/evaluator.py
+training/config.py
+training/learner.py
+training/worker.py
+training/__init__.py
+utils/paper_trade_db.py
+trading/scripts/run_dashboard.py
+core/models/transformer_model.py
+function_finance_metrics.py
+
+# Current Time
+22/06/2025, 6:03:09 pm (Europe/Zurich, UTC+2:00)
+
+# Context Window Usage
+1,000,161 / 1,048.576K tokens used (95%)
+
+# Current Mode
+ACT MODE
+</environment_details>

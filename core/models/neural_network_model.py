@@ -16,7 +16,6 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
 from core.models.base_model import BaseModel
-from config import FILE_PATHS
 
 class NeuralNetworkModel(BaseModel):
     """
@@ -44,7 +43,7 @@ class NeuralNetworkModel(BaseModel):
         self.epochs = kwargs.get('epochs', 100)
         
         # Model path
-        self.model_path = kwargs.get('model_path', os.path.join(FILE_PATHS['TRAIN_RESULTS_DIR'], 'nn_model.h5'))
+        self.model_path = kwargs.get('model_path', 'models/nn_model.h5')
         
         # Initialize model
         self.model = None

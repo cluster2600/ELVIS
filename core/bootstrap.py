@@ -120,10 +120,50 @@ class ApplicationBootstrapper:
         
         # Event Bus (already global, but register for consistency)
         container.register_singleton('event_bus', lambda: event_bus)
+
+        # Performance Monitor
+        from core.metrics.performance_monitor import PerformanceMonitor
+        container.register_singleton('performance_monitor', lambda: PerformanceMonitor())
+
+        # Trade Analyzer
+        from utils.trade_analyzer import TradeAnalyzer
+        def create_trade_analyzer():
+            # This should be initialized with actual trade data
+            return TradeAnalyzer([])
+        container.register_singleton('trade_analyzer', create_trade_analyzer)
+
+        # System Monitor
+        from utils.system_monitor import SystemMonitor
+        container.register_singleton('system_monitor', lambda: SystemMonitor(api_url='https://api.binance.com'))
+
+        # Market Regime Detector
+        from trading.market_regime_detector import MarketRegimeDetector
+        container.register_singleton('market_regime_detector', lambda: MarketRegimeDetector())
+
+        # Order Flow Analyzer
+        from trading.order_flow_analyzer import OrderFlowAnalyzer
+        container.register_singleton('order_flow_analyzer', lambda: OrderFlowAnalyzer())
+
+        # Strategy Manager
+        from trading.strategy_manager import StrategyManager
+        def create_strategy_manager():
+            from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
+            from trading.strategies.trend_following_strategy import TrendFollowingStrategy
+            
+            strategies = {
+                'trending': container.get('trend_following_strategy'),
+                'mean-reverting': container.get('mean_reversion_strategy'),
+                'default': container.get('strategy') # EnsembleStrategy
+            }
+            return StrategyManager(
+                market_regime_detector=container.get('market_regime_detector'),
+                strategies=strategies
+            )
+        container.register_singleton('strategy_manager', create_strategy_manager)
     
     def _register_data_services(self) -> None:
         """Register data-related service dependencies."""
-        from trading.data.price_fetcher import PriceFetcher
+        from utils.price_fetcher import PriceFetcher
         from core.data.processors.binance_processor import BinanceProcessor
         
         # Price Fetcher
@@ -147,7 +187,7 @@ class ApplicationBootstrapper:
     def _register_trading_services(self) -> None:
         """Register trading-related service dependencies."""
         from trading.execution.binance_executor import BinanceExecutor
-        from trading.risk.advanced_risk_manager import AdvancedRiskManager
+        from trading.risk_management import RiskManager
         from trading.utils.telegram_notifier import TelegramNotifier
         from trading.strategies.ensemble_strategy import EnsembleStrategy
         
@@ -162,9 +202,9 @@ class ApplicationBootstrapper:
         # Risk Manager
         def create_risk_manager():
             logger = container.get('logger')
-            app_config = container.get('app_config')
-            starting_balance = app_config['starting_balance']
-            return AdvancedRiskManager(logger, starting_balance=starting_balance)
+            executor = container.get('executor')
+            performance_monitor = container.get('performance_monitor')
+            return RiskManager(executor, logger, performance_monitor)
         
         container.register_singleton('risk_manager', create_risk_manager)
         
@@ -202,6 +242,21 @@ class ApplicationBootstrapper:
             )
         
         container.register_singleton('strategy', create_strategy)
+
+        # Grid Strategy
+        from trading.strategies.grid_strategy import GridStrategy
+        container.register_factory('grid_strategy', 
+                                 lambda: GridStrategy(logger=container.get('logger')))
+                                 
+        # Mean Reversion Strategy
+        from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
+        container.register_factory('mean_reversion_strategy',
+                                 lambda: MeanReversionStrategy(logger=container.get('logger')))
+                                 
+        # Trend Following Strategy
+        from trading.strategies.trend_following_strategy import TrendFollowingStrategy
+        container.register_factory('trend_following_strategy',
+                                 lambda: TrendFollowingStrategy(logger=container.get('logger')))
     
     def _register_models(self) -> None:
         """Register ML model dependencies."""
