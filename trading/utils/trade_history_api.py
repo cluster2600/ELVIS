@@ -101,6 +101,15 @@ def market_depth():
 def root():
     return jsonify({"status": "ok"})
 
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint for Docker container"""
+    return jsonify({
+        "status": "healthy",
+        "service": "trade_history_api",
+        "version": "1.0.0"
+    })
+
 # NEW: Create a function that can be called externally
 def start_trade_history_server(host='0.0.0.0', port=5050):
     """

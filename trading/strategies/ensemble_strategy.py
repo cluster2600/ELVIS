@@ -21,8 +21,8 @@ class EnsembleStrategy(BaseStrategy):
 
     def __init__(self, logger: logging.Logger, 
                  symbols: List[str] = ['BTCUSDT'],
-                 ydf_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/model_rf.ydf",
-                 coreml_model_path: str = "/Users/maxime/BTC_BOT/BTC_BOT/NNModel.mlpackage",
+                 ydf_model_path: str = "models/model_rf.ydf",
+                 coreml_model_path: str = "models/NNModel.mlpackage",
                  mlx_url: str = None,
                  risk_per_trade: float = 0.01,
                  min_position_size: float = 0.001,

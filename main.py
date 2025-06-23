@@ -11,6 +11,8 @@ from core.di import container
 from core.events import event_bus, SystemEvent
 from utils.console_dashboard import ConsoleDashboard
 from trading.utils.trade_history_api import app as trade_history_app
+import pandas as pd
+import ta
 
 
 def start_trade_history_server():
@@ -18,6 +20,43 @@ def start_trade_history_server():
     Start the Trade History Flask server in a separate thread.
     """
     trade_history_app.run(host="0.0.0.0", port=5050)
+
+
+def add_technical_indicators(data: pd.DataFrame) -> pd.DataFrame:
+    """Add technical indicators to the price data."""
+    try:
+        if len(data) < 50:  # Need enough data for indicators
+            return data
+            
+        # Add Simple Moving Averages
+        data['sma_20'] = ta.trend.sma_indicator(data['close'], window=20)
+        data['sma_50'] = ta.trend.sma_indicator(data['close'], window=50)
+        
+        # Add ADX
+        data['adx'] = ta.trend.adx(data['high'], data['low'], data['close'], window=14)
+        
+        # Add RSI
+        data['rsi'] = ta.momentum.rsi(data['close'], window=14)
+        
+        # Add MACD
+        macd = ta.trend.MACD(data['close'])
+        data['macd'] = macd.macd()
+        data['signal_line'] = macd.macd_signal()
+        
+        # Add Bollinger Bands
+        bollinger = ta.volatility.BollingerBands(data['close'])
+        data['lower_bb'] = bollinger.bollinger_lband()
+        data['sma_bb'] = bollinger.bollinger_mavg() 
+        data['upper_bb'] = bollinger.bollinger_hband()
+        
+        # Add other indicators that might be needed
+        data['atr'] = ta.volatility.average_true_range(data['high'], data['low'], data['close'])
+        
+        return data
+    except Exception as e:
+        logger = container.get_optional('logger', logging.getLogger(__name__))
+        logger.error(f"Error calculating technical indicators: {e}")
+        return data
 
 
 def signal_handler(signum, frame):
@@ -112,21 +151,90 @@ def main(mode: str, log_level: str):
         # Main trading loop
         logger.info(f"Starting trading bot in {mode} mode...")
         
+        # Get executor for trade execution
+        executor = container.get('executor')
+        
         # The main loop will now be managed by the strategy manager
         def trading_loop():
             while True:
-                data = price_fetcher.get_historical_klines("BTCUSDT", "1m")
-                if not data.empty:
-                    active_strategy = strategy_manager.get_active_strategy(data)
-                    # This is a placeholder for running the strategy
-                    # In a real application, this would be more complex
-                    # active_strategy.run() 
-                time.sleep(60)
+                try:
+                    # Get market data
+                    data = price_fetcher.get_historical_klines("BTCUSDT", "1m")
+                    if not data.empty:
+                        # Calculate technical indicators for the data
+                        data = add_technical_indicators(data)
+                        
+                        # Get active strategy
+                        active_strategy = strategy_manager.get_active_strategy(data)
+                        
+                        # Generate signals using the strategy
+                        if hasattr(active_strategy, 'generate_signals'):
+                            # For ensemble strategy, pass data as dict
+                            if hasattr(active_strategy, 'symbols'):
+                                signal_data = {"BTCUSDT": data}
+                                signals = active_strategy.generate_signals(signal_data)
+                                
+                                # Process signals for each symbol
+                                for symbol, signal_info in signals.items():
+                                    signal = signal_info.get('signal', 'HOLD')
+                                    confidence = signal_info.get('confidence', 0.0)
+                                    
+                                    logger.info(f"Strategy signal for {symbol}: {signal} (confidence: {confidence:.3f})")
+                                    
+                                    # Execute trades based on signals
+                                    if signal in ['BUY', 'SELL'] and confidence > 0.6:  # Only trade with high confidence
+                                        current_price = data.iloc[-1]['close']
+                                        
+                                        # Calculate position size
+                                        available_balance = executor.get_account_balance()
+                                        position_size = active_strategy.calculate_position_size(
+                                            data, current_price, available_balance
+                                        )
+                                        
+                                        # Place order
+                                        if signal == 'BUY':
+                                            order_result = executor.place_order(symbol, 'buy', position_size, current_price)
+                                            if order_result:
+                                                logger.info(f"[PAPER TRADE] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                        elif signal == 'SELL':
+                                            order_result = executor.place_order(symbol, 'sell', position_size, current_price)
+                                            if order_result:
+                                                logger.info(f"[PAPER TRADE] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                            else:
+                                # For other strategies, use traditional approach
+                                buy_signal, sell_signal = active_strategy.generate_signals(data)
+                                
+                                if buy_signal or sell_signal:
+                                    current_price = data.iloc[-1]['close']
+                                    available_balance = executor.get_account_balance()
+                                    position_size = active_strategy.calculate_position_size(
+                                        data, current_price, available_balance
+                                    )
+                                    
+                                    if buy_signal:
+                                        executor.place_order("BTCUSDT", 'buy', position_size, current_price)
+                                        logger.info(f"BUY signal executed: {position_size} BTC at {current_price}")
+                                    elif sell_signal:
+                                        executor.place_order("BTCUSDT", 'sell', position_size, current_price)
+                                        logger.info(f"SELL signal executed: {position_size} BTC at {current_price}")
+                        
+                    # Wait before next iteration
+                    time.sleep(60)
+                    
+                except Exception as e:
+                    logger.error(f"Error in trading loop: {e}")
+                    time.sleep(60)
 
         threading.Thread(target=trading_loop, daemon=True).start()
         
         # The dashboard's run method is blocking, so it should be the last call
-        curses.wrapper(dashboard.run)
+        try:
+            curses.wrapper(dashboard.run)
+        except curses.error as e:
+            logger.warning(f"Curses terminal UI not available: {e}")
+            logger.info("Running in headless mode - check logs for trading activity")
+            # Keep the main thread alive in headless mode
+            signal.pause()
         
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")

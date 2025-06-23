@@ -3,7 +3,7 @@ Event-driven architecture module for ELVIS Trading Bot.
 Provides event bus, event types, and event handling mechanisms.
 """
 
-from .event_bus import EventBus, Event, EventHandler
+from .event_bus import EventBus, Event, EventHandler, event_bus
 from .event_types import (
     MarketDataEvent,
     TradingSignalEvent,
@@ -17,6 +17,7 @@ __all__ = [
     'EventBus',
     'Event',
     'EventHandler',
+    'event_bus',
     'MarketDataEvent',
     'TradingSignalEvent',
     'OrderEvent',

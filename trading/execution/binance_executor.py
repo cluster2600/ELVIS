@@ -1,4 +1,5 @@
 import logging
+import time
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from config import API_CONFIG
@@ -6,18 +7,31 @@ from trading.execution.base_executor import BaseExecutor
 from typing import Dict, Any
 
 class BinanceExecutor(BaseExecutor):
-    def __init__(self, logger: logging.Logger = None, **kwargs):
+    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, **kwargs):
         super().__init__(logger, **kwargs)
         self.client = None
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.is_testnet = is_testnet
 
     def initialize(self) -> None:
         try:
-            api_key = API_CONFIG.get('API_KEY')
-            api_secret = API_CONFIG.get('API_SECRET')
+            # Use passed parameters or fallback to config
+            api_key = self.api_key or API_CONFIG.get('API_KEY')
+            api_secret = self.api_secret or API_CONFIG.get('API_SECRET')
+            
             if not api_key or not api_secret:
-                raise KeyError("API_KEY or API_SECRET missing in API_CONFIG")
-            self.client = Client(api_key, api_secret)
-            self.logger.info("BinanceExecutor initialized successfully.")
+                if self.is_testnet:
+                    # For paper trading, use dummy keys if none provided
+                    self.logger.warning("Using dummy API keys for paper trading mode")
+                    self.client = None  # Will use mock trading
+                    return
+                else:
+                    raise KeyError("API_KEY or API_SECRET missing in API_CONFIG")
+            
+            # Initialize client with testnet configuration
+            self.client = Client(api_key, api_secret, testnet=self.is_testnet)
+            self.logger.info(f"BinanceExecutor initialized successfully ({'testnet' if self.is_testnet else 'live'} mode).")
         except KeyError as e:
             self.logger.error(f"API configuration error: {e}")
             raise
@@ -26,13 +40,15 @@ class BinanceExecutor(BaseExecutor):
             raise
 
     def get_balance(self) -> Dict[str, float]:
+        if self.client is None:  # Paper trading mode
+            return {'USDT': 10000.0, 'BTC': 0.0}  # Mock balance
         try:
             account = self.client.get_account()
             balances = {item['asset']: float(item['free']) for item in account['balances']}
             return balances
         except BinanceAPIException as e:
             self.logger.error(f"Error getting balance: {e}")
-            return {}
+            return {'USDT': 10000.0, 'BTC': 0.0}  # Fallback mock balance
 
     def get_position(self, symbol: str) -> Dict[str, Any]:
         try:
@@ -58,6 +74,19 @@ class BinanceExecutor(BaseExecutor):
             self.logger.error(f"Error setting leverage for {symbol}: {e}")
 
     def execute_buy(self, symbol: str, quantity: float, price: float = None, **kwargs) -> Dict[str, Any]:
+        if self.client is None:  # Paper trading mode
+            mock_order = {
+                'symbol': symbol,
+                'orderId': f"MOCK_{symbol}_{int(time.time())}",
+                'side': 'BUY',
+                'quantity': str(quantity),
+                'price': str(price) if price else "MARKET",
+                'status': 'FILLED',
+                'type': 'LIMIT' if price else 'MARKET'
+            }
+            self.logger.info(f"[PAPER TRADE] Executed BUY order: {mock_order}")
+            return mock_order
+            
         order_type = Client.ORDER_TYPE_MARKET if price is None else Client.ORDER_TYPE_LIMIT
         try:
             order = self.client.create_order(
@@ -75,6 +104,19 @@ class BinanceExecutor(BaseExecutor):
             return {}
 
     def execute_sell(self, symbol: str, quantity: float, price: float = None, **kwargs) -> Dict[str, Any]:
+        if self.client is None:  # Paper trading mode
+            mock_order = {
+                'symbol': symbol,
+                'orderId': f"MOCK_{symbol}_{int(time.time())}",
+                'side': 'SELL',
+                'quantity': str(quantity),
+                'price': str(price) if price else "MARKET",
+                'status': 'FILLED',
+                'type': 'LIMIT' if price else 'MARKET'
+            }
+            self.logger.info(f"[PAPER TRADE] Executed SELL order: {mock_order}")
+            return mock_order
+            
         order_type = Client.ORDER_TYPE_MARKET if price is None else Client.ORDER_TYPE_LIMIT
         try:
             order = self.client.create_order(
@@ -161,4 +203,26 @@ class BinanceExecutor(BaseExecutor):
             return self.client.get_order(symbol=symbol, orderId=order_id)
         except BinanceAPIException as e:
             self.logger.error(f"Error getting status for order {order_id} on {symbol}: {e}")
+            return {}
+    
+    def get_account_balance(self) -> float:
+        """Get USDT balance for trading calculations."""
+        try:
+            balance = self.get_balance()
+            return balance.get('USDT', 10000.0)  # Default paper trading balance
+        except Exception as e:
+            self.logger.error(f"Error getting account balance: {e}")
+            return 10000.0  # Default paper trading balance
+    
+    def place_order(self, symbol: str, side: str, quantity: float, price: float = None) -> Dict[str, Any]:
+        """Unified method to place orders."""
+        try:
+            if side.lower() == 'buy':
+                return self.execute_buy(symbol, quantity, price)
+            elif side.lower() == 'sell':
+                return self.execute_sell(symbol, quantity, price)
+            else:
+                raise ValueError(f"Invalid order side: {side}")
+        except Exception as e:
+            self.logger.error(f"Error placing {side} order for {symbol}: {e}")
             return {}

@@ -1,0 +1,48 @@
+# Simple Dockerfile for ELVIS Trading Bot
+FROM python:3.11-slim
+
+# Install basic system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy basic requirements
+COPY requirements.txt /app/requirements.txt
+
+# Install only essential Python packages
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+    numpy pandas scipy scikit-learn matplotlib tqdm pyyaml requests \
+    Flask Flask-CORS prometheus-flask-exporter \
+    redis prometheus-client SQLAlchemy websocket-client psycopg2-binary \
+    psutil python-dotenv keyring ccxt python-binance python-telegram-bot \
+    colorlog ta
+
+# Copy application code
+COPY . /app
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/models /app/data
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Expose ports
+EXPOSE 5050 8000
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5050/health', timeout=5)" || exit 1
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash elvis && \
+    chown -R elvis:elvis /app
+USER elvis
+
+# Start ELVIS
+CMD ["python", "main.py", "--mode", "paper", "--log-level", "INFO"]
