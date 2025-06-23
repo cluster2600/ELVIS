@@ -283,99 +283,96 @@ class BinanceProcessor(BaseProcessor):
         self.logger.info(f"Adding technical indicators: {tech_indicator_list}")
         
         # Group by ticker
-        for ticker in self.data['ticker'].unique():
-            ticker_data = self.data[self.data['ticker'] == ticker].copy()
-            
-            # Calculate technical indicators
-            for indicator in tech_indicator_list:
-                if indicator == 'macd':
-                    # MACD
-                    macd, macdsignal, macdhist = talib.MACD(
-                        ticker_data['close'].values,
-                        fastperiod=12,
-                        slowperiod=26,
-                        signalperiod=9
-                    )
-                    ticker_data['macd'] = macd
-                    ticker_data['macdsignal'] = macdsignal
-                    ticker_data['macdhist'] = macdhist
-                
-                elif indicator == 'rsi':
-                    # RSI
-                    ticker_data['rsi'] = talib.RSI(ticker_data['close'].values, timeperiod=14)
-                
-                elif indicator == 'cci':
-                    # CCI
-                    ticker_data['cci'] = talib.CCI(
-                        ticker_data['high'].values,
-                        ticker_data['low'].values,
-                        ticker_data['close'].values,
-                        timeperiod=14
-                    )
-                
-                elif indicator == 'dx':
-                    # DX (Directional Movement Index)
-                    ticker_data['dx'] = talib.DX(
-                        ticker_data['high'].values,
-                        ticker_data['low'].values,
-                        ticker_data['close'].values,
-                        timeperiod=14
-                    )
-                
-                elif indicator == 'obv':
-                    # OBV (On Balance Volume)
-                    ticker_data['obv'] = talib.OBV(
-                        ticker_data['close'].values,
-                        ticker_data['volume'].values
-                    )
-                
-                elif indicator == 'atr':
-                    # ATR (Average True Range)
-                    ticker_data['atr'] = talib.ATR(
-                        ticker_data['high'].values,
-                        ticker_data['low'].values,
-                        ticker_data['close'].values,
-                        timeperiod=14
-                    )
-                
-                elif indicator == 'adx':
-                    # ADX (Average Directional Movement Index)
-                    ticker_data['adx'] = talib.ADX(
-                        ticker_data['high'].values,
-                        ticker_data['low'].values,
-                        ticker_data['close'].values,
-                        timeperiod=14
-                    )
-                
-                elif indicator == 'bbands':
-                    # Bollinger Bands
-                    upperband, middleband, lowerband = talib.BBANDS(
-                        ticker_data['close'].values,
-                        timeperiod=20,
-                        nbdevup=2,
-                        nbdevdn=2,
-                        matype=0
-                    )
-                    ticker_data['upperband'] = upperband
-                    ticker_data['middleband'] = middleband
-                    ticker_data['lowerband'] = lowerband
-                
-                elif indicator == 'sma':
-                    # SMA (Simple Moving Average)
-                    ticker_data['sma_5'] = talib.SMA(ticker_data['close'].values, timeperiod=5)
-                    ticker_data['sma_10'] = talib.SMA(ticker_data['close'].values, timeperiod=10)
-                    ticker_data['sma_20'] = talib.SMA(ticker_data['close'].values, timeperiod=20)
-                    ticker_data['sma_50'] = talib.SMA(ticker_data['close'].values, timeperiod=50)
-                    ticker_data['sma_100'] = talib.SMA(ticker_data['close'].values, timeperiod=100)
-                    ticker_data['sma_200'] = talib.SMA(ticker_data['close'].values, timeperiod=200)
-            
-            # Update the main DataFrame
-            self.data.loc[self.data['ticker'] == ticker] = ticker_data
+        data_with_indicators = self.data.groupby('ticker').apply(lambda x: self._add_indicators_to_group(x, tech_indicator_list))
         
         # Drop rows with NaN values
-        self.data = self.data.dropna()
+        self.data = data_with_indicators.dropna()
         
         return self.data
+
+    def _add_indicators_to_group(self, group, tech_indicator_list):
+        for indicator in tech_indicator_list:
+            if indicator == 'macd':
+                # MACD
+                macd, macdsignal, macdhist = talib.MACD(
+                    group['close'].values,
+                    fastperiod=12,
+                    slowperiod=26,
+                    signalperiod=9
+                )
+                group['macd'] = macd
+                group['macdsignal'] = macdsignal
+                group['macdhist'] = macdhist
+            
+            elif indicator == 'rsi':
+                # RSI
+                group['rsi'] = talib.RSI(group['close'].values, timeperiod=14)
+            
+            elif indicator == 'cci':
+                # CCI
+                group['cci'] = talib.CCI(
+                    group['high'].values,
+                    group['low'].values,
+                    group['close'].values,
+                    timeperiod=14
+                )
+            
+            elif indicator == 'dx':
+                # DX (Directional Movement Index)
+                group['dx'] = talib.DX(
+                    group['high'].values,
+                    group['low'].values,
+                    group['close'].values,
+                    timeperiod=14
+                )
+            
+            elif indicator == 'obv':
+                # OBV (On Balance Volume)
+                group['obv'] = talib.OBV(
+                    group['close'].values,
+                    group['volume'].values
+                )
+            
+            elif indicator == 'atr':
+                # ATR (Average True Range)
+                group['atr'] = talib.ATR(
+                    group['high'].values,
+                    group['low'].values,
+                    group['close'].values,
+                    timeperiod=14
+                )
+            
+            elif indicator == 'adx':
+                # ADX (Average Directional Movement Index)
+                group['adx'] = talib.ADX(
+                    group['high'].values,
+                    group['low'].values,
+                    group['close'].values,
+                    timeperiod=14
+                )
+            
+            elif indicator == 'bbands':
+                # Bollinger Bands
+                upperband, middleband, lowerband = talib.BBANDS(
+                    group['close'].values,
+                    timeperiod=20,
+                    nbdevup=2,
+                    nbdevdn=2,
+                    matype=0
+                )
+                group['upperband'] = upperband
+                group['middleband'] = middleband
+                group['lowerband'] = lowerband
+            
+            elif indicator == 'sma':
+                # SMA (Simple Moving Average)
+                group['sma_5'] = talib.SMA(group['close'].values, timeperiod=5)
+                group['sma_10'] = talib.SMA(group['close'].values, timeperiod=10)
+                group['sma_20'] = talib.SMA(group['close'].values, timeperiod=20)
+                group['sma_50'] = talib.SMA(group['close'].values, timeperiod=50)
+                group['sma_100'] = talib.SMA(group['close'].values, timeperiod=100)
+                group['sma_200'] = talib.SMA(group['close'].values, timeperiod=200)
+        return group
     
     def df_to_array(self, tech_indicator_list: List[str], if_vix: bool) -> tuple:
         """
@@ -452,7 +449,7 @@ class BinanceProcessor(BaseProcessor):
         
         # Calculate the number of candles
         time_diff_minutes = (end_timestamp - start_timestamp) // (60 * 1000)
-        num_candles = min(time_diff_minutes // timeframe_minutes, 100)  # Limit to 100 candles
+        num_candles = min(time_diff_minutes // timeframe_minutes, 500)  # Limit to 500 candles
         
         # Generate timestamps
         timestamps = [start_timestamp + i * timeframe_minutes * 60 * 1000 for i in range(num_candles)]
@@ -486,144 +483,3 @@ class BinanceProcessor(BaseProcessor):
         
         self.logger.info(f"Generated {len(mock_data)} mock candles for {ticker}")
         return mock_data
-</final_file_content>
-
-IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
-
-<environment_details>
-# VSCode Visible Files
-../../../../src/app/src/index.html
-../../../../src/app/src/index.html
-core/data/processors/binance_processor.py
-
-# VSCode Open Tabs
-run_bot.sh
-utils/logging_utils.py
-core/models/base_model.py
-core/data/processors/base_processor.py
-trading/strategies/base_strategy.py
-trading/execution/base_executor.py
-grafana/dashboards/elvis-trading.json
-trading/paper_bot.py
-trading/rl_agents.py
-trading/scripts/train_models.py
-training/data/data_downloader.py
-training/data/__init__.py
-utils/monitoring.py
-trading/models/__init__.py
-config/__init__.py
-training.py
-trading/data/data_processor.py
-data/processed/training_data.csv
-trading/models/rl_agents.py
-trading/models/transformer_models.py
-.git/COMMIT_EDITMSG
-trading/models/model_trainer.py
-run_training.sh
-training/models/evaluator.py
-training/config/model_config.yaml
-training/models/model_trainer.py
-training/train_models.py
-predict_with_ydf.py
-run_elvis.sh
-utils/trade_history_api.py
-trading/execution/binance_executor.py
-utils/trade_analyzer.py
-core/metrics/performance_monitor.py
-utils/system_monitor.py
-trading/strategies/grid_strategy.py
-trading/market_regime_detector.py
-trading/strategy_manager.py
-main.py
-utils/price_fetcher.py
-trading/order_flow_analyzer.py
-core/bootstrap.py
-trading/strategies/ensemble_strategy.py
-trading/risk_management.py
-utils/console_dashboard.py
-docs/future_improvements.md
-CHANGELOG.md
-tests/test_integration.py
-requirements.txt
-core/models/neural_network_model.py
-tests/test_risk_manager.py
-core/models/ensemble_model.py
-tests/test_binance_executor.py
-tests/test_binance_processor.py
-core/models/random_forest_model.py
-tests/test_ensemble_model.py
-core/data/processors/binance_processor.py
-tests/test_random_forest_model.py
-docs/training.md
-docs/utilities_monitoring.md
-docs/trading_system.md
-docs/data_processing.md
-cleanup_analysis.md
-project_cleanup_summary.md
-mermaid_test.md
-docs/comprehensive_improvements.md
-Dockerfile
-docker-compose.yml
-.env.example
-utils/redis_cache.py
-.github/workflows/ci.yml
-utils/logger_config.py
-tests/conftest.py
-tests/test_redis_cache.py
-tests/test_price_fetcher.py
-tests/test_logger_config.py
-run_tests.sh
-.coveragerc
-utils/secrets_manager.py
-utils/async_utils.py
-trading/backtesting/backtest_engine.py
-trading/backtesting/__init__.py
-trading/scripts/run_backtest.py
-trading/api/__init__.py
-trading/api/swagger.py
-trading/api/app.py
-docs/implementation_summary.md
-run_api.sh
-ansible/templates/elvis-bot.service.j2
-ansible/inventory.yml
-ansible/ansible.cfg
-ansible/requirements.yml
-ansible/run_setup.sh
-ansible/README.md
-README.md
-ansible/playbook.yml
-docs/random_forest.md
-core/di/__init__.py
-core/di/providers.py
-core/di/container.py
-core/events/__init__.py
-core/events/event_bus.py
-core/events/event_types.py
-core/events/decorators.py
-trading/event_handlers/__init__.py
-trading/event_handlers/market_data_handlers.py
-trading/event_handlers/trading_signal_handlers.py
-trading/event_handlers/risk_handlers.py
-trading/event_handlers/system_handlers.py
-trading/scripts/run_api.py
-training/replay_buffer.py
-training/models/rl_agents.py
-training/evaluator.py
-training/config.py
-training/learner.py
-training/worker.py
-training/__init__.py
-utils/paper_trade_db.py
-trading/scripts/run_dashboard.py
-core/models/transformer_model.py
-function_finance_metrics.py
-
-# Current Time
-22/06/2025, 6:03:09 pm (Europe/Zurich, UTC+2:00)
-
-# Context Window Usage
-1,000,161 / 1,048.576K tokens used (95%)
-
-# Current Mode
-ACT MODE
-</environment_details>

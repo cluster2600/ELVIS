@@ -75,14 +75,14 @@ class MeanReversionStrategy(BaseStrategy):
             
             # Generate buy signal
             # Price below lower band and RSI oversold
-            buy_signal = (
+            buy_signal = bool(
                 close < lower_band and 
                 rsi < self.rsi_oversold
             )
             
             # Generate sell signal
             # Price above upper band or RSI overbought
-            sell_signal = (
+            sell_signal = bool(
                 close > upper_band or 
                 rsi > self.rsi_overbought
             )

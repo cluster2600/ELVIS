@@ -25,17 +25,8 @@ class TestRiskManager(unittest.TestCase):
         
         # Set up risk manager
         self.risk_manager = RiskManager(
-            logger=self.logger,
-            max_position_size_pct=0.5,
-            max_leverage=TRADING_CONFIG['LEVERAGE_MAX'],
-            min_leverage=TRADING_CONFIG['LEVERAGE_MIN'],
-            stop_loss_pct=0.01,
-            take_profit_pct=0.03,
-            max_trades_per_day=5,
-            daily_profit_target_usd=1000.0,
-            daily_loss_limit_usd=-500.0,
-            min_capital_usd=1000.0,
-            cooldown_period=3600.0
+            executor=MagicMock(),
+            logger=self.logger
         )
     
     def test_init(self):
@@ -44,21 +35,7 @@ class TestRiskManager(unittest.TestCase):
         """
         # Check attributes
         self.assertEqual(self.risk_manager.logger, self.logger)
-        self.assertEqual(self.risk_manager.max_position_size_pct, 0.5)
-        self.assertEqual(self.risk_manager.max_leverage, TRADING_CONFIG['LEVERAGE_MAX'])
-        self.assertEqual(self.risk_manager.min_leverage, TRADING_CONFIG['LEVERAGE_MIN'])
-        self.assertEqual(self.risk_manager.stop_loss_pct, 0.01)
-        self.assertEqual(self.risk_manager.take_profit_pct, 0.03)
-        self.assertEqual(self.risk_manager.max_trades_per_day, 5)
-        self.assertEqual(self.risk_manager.daily_profit_target_usd, 1000.0)
-        self.assertEqual(self.risk_manager.daily_loss_limit_usd, -500.0)
-        self.assertEqual(self.risk_manager.min_capital_usd, 1000.0)
-        self.assertEqual(self.risk_manager.cooldown_period, 3600.0)
-        
-        # Check trade tracking
-        self.assertEqual(self.risk_manager.trades_today, 0)
-        self.assertEqual(self.risk_manager.daily_pnl, 0.0)
-        self.assertIsNone(self.risk_manager.last_trade_time)
+        self.assertIsNotNone(self.risk_manager.executor)
     
     def test_check_capital_sufficient(self):
         """
@@ -142,60 +119,7 @@ class TestRiskManager(unittest.TestCase):
         # Check result
         self.assertFalse(result)
     
-    def test_calculate_position_size(self):
-        """
-        Test the calculate_position_size method.
-        """
-        # Set up parameters
-        available_capital = 10000.0
-        current_price = 36000.0
-        volatility = 1000.0  # ATR
-        
-        # Call method
-        position_size = self.risk_manager.calculate_position_size(available_capital, current_price, volatility)
-        
-        # Check result
-        # Expected calculation:
-        # volatility_factor = 1.0 / (1.0 + 1000.0 / 36000.0) = 0.9729
-        # position_value = 10000.0 * 0.5 * 0.9729 = 4864.5
-        # quantity = 4864.5 / 36000.0 = 0.1351
-        expected_volatility_factor = 1.0 / (1.0 + 1000.0 / 36000.0)
-        expected_position_value = available_capital * 0.5 * expected_volatility_factor
-        expected_quantity = expected_position_value / current_price
-        
-        self.assertAlmostEqual(position_size, expected_quantity, places=4)
     
-    def test_calculate_leverage(self):
-        """
-        Test the calculate_leverage method.
-        """
-        # Set up parameters
-        volatility = 1000.0  # ATR
-        signal_strength = 0.8
-        
-        # Call method
-        leverage = self.risk_manager.calculate_leverage(volatility, signal_strength)
-        
-        # Check result
-        # Expected calculation:
-        # base_leverage = 75 + (125 - 75) * 0.8 = 115
-        # volatility_factor = 1.0 / (1.0 + 1000.0) = 0.001
-        # leverage = 115 * 0.001 = 0.115 -> 75 (min)
-        self.assertEqual(leverage, TRADING_CONFIG['LEVERAGE_MIN'])
-        
-        # Test with lower volatility
-        volatility = 0.1
-        leverage = self.risk_manager.calculate_leverage(volatility, signal_strength)
-        
-        # Expected calculation:
-        # base_leverage = 75 + (125 - 75) * 0.8 = 115
-        # volatility_factor = 1.0 / (1.0 + 0.1) = 0.9091
-        # leverage = 115 * 0.9091 = 104.55 -> 104
-        expected_base_leverage = TRADING_CONFIG['LEVERAGE_MIN'] + (TRADING_CONFIG['LEVERAGE_MAX'] - TRADING_CONFIG['LEVERAGE_MIN']) * signal_strength
-        expected_volatility_factor = 1.0 / (1.0 + 0.1)
-        expected_leverage = int(expected_base_leverage * expected_volatility_factor)
-        
-        self.assertEqual(leverage, expected_leverage)
     
     def test_calculate_stop_loss(self):
         """

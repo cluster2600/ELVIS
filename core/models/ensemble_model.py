@@ -46,19 +46,22 @@ class EnsembleModel(BaseModel):
         # Path to save/load the ensemble configuration (not the models themselves)
         self.config_path: str = kwargs.get('config_path', 'models/ensemble_config.json')
 
-        # Ensure weights match number of models if provided
-        if self.weights and len(self.weights) != len(self.models):
-            self.logger.warning(f"Number of weights ({len(self.weights)}) does not match number of models ({len(self.models)}). Ignoring weights.")
-            self.weights = None
-        if not self.weights:
-             self.weights = [1.0] * len(self.models) # Default to equal weights
-
         # Initialize models from configs if models list is empty
         if not self.models and self.model_configs:
             self._load_models_from_configs()
         elif not self.model_configs and self.models:
              # Populate configs from models if possible (requires models to have a path attribute)
              self._populate_configs_from_models()
+
+        # Ensure weights match number of models if provided
+        if self.weights and len(self.weights) != len(self.models):
+            self.logger.warning(f"Number of weights ({len(self.weights)}) does not match number of models ({len(self.models)}). Ignoring weights.")
+            self.weights = None
+        if not self.weights:
+            if self.models:
+                self.weights = [1.0 / len(self.models)] * len(self.models)
+            else:
+                self.weights = []
 
 
     def _get_model_class(self, class_name: str) -> Type[BaseModel]:
@@ -96,7 +99,10 @@ class EnsembleModel(BaseModel):
         self.logger.info(f"Finished loading sub-models. {len(self.models)} loaded.")
         # Reset weights if model count changed
         if len(self.weights) != len(self.models):
-             self.weights = [1.0] * len(self.models)
+            if self.models:
+                self.weights = [1.0 / len(self.models)] * len(self.models)
+            else:
+                self.weights = []
 
 
     def _populate_configs_from_models(self):

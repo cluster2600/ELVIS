@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_validate, KFold
 from core.models.base_model import BaseModel
 import pandas as pd
 import joblib
@@ -20,13 +21,15 @@ class RandomForestModel(BaseModel):
             n_estimators (int): The number of trees in the forest.
             max_depth (int): The maximum depth of the tree.
         """
-        super().__init__(logger)
+        super().__init__()
         self.model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth)
+        self.logger = logger
 
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         """
         Train the model.
         """
+        self.X_train = X_train
         self.model.fit(X_train, y_train)
 
     def predict(self, X_test: pd.DataFrame):
@@ -35,11 +38,45 @@ class RandomForestModel(BaseModel):
         """
         return self.model.predict(X_test)
 
+    def evaluate(self, X_test: pd.DataFrame, y_test: pd.Series):
+        """
+        Evaluate the model.
+        """
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, log_loss
+        
+        predictions = self.predict(X_test)
+        
+        return {
+            'accuracy': accuracy_score(y_test, predictions),
+            'loss': log_loss(y_test, self.model.predict_proba(X_test)),
+            'precision': precision_score(y_test, predictions, zero_division=0),
+            'recall': recall_score(y_test, predictions, zero_division=0),
+            'f1': f1_score(y_test, predictions, zero_division=0)
+        }
+
     def get_params(self):
         return self.model.get_params()
 
+    def get_feature_importance(self):
+        """
+        Get feature importance.
+        """
+        return pd.DataFrame({
+            'feature': self.X_train.columns,
+            'importance': self.model.feature_importances_
+        })
+
     def set_params(self, **params):
         self.model.set_params(**params)
+
+    def cross_validate(self, X, y, n_splits=5):
+        """
+        Perform cross-validation.
+        """
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        scoring = ['accuracy', 'precision', 'recall', 'f1']
+        scores = cross_validate(self.model, X, y, cv=kf, scoring=scoring)
+        return scores
 
     def save(self, path):
         joblib.dump(self.model, path)

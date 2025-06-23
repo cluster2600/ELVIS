@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Virtualenv
+venv/
+venv310/
+env/
+env-coreml/
+env-ydf/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and editor files
+.vscode/
+.idea/
+.cursor/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+elvis.egg-info/
+
+# Test and coverage
+.coverage
+.coveragerc
+coverage.xml
+htmlcov/
+tests/
+test_data/
+
+# Data and Logs
+data/
+logs/
+*.log
+plots_and_metrics/
+models/
+
+# OS-specific
+.DS_Store
+
+# Other
+ansible/
+drl_agents/
+grafana/
+images/
+tensorflow/

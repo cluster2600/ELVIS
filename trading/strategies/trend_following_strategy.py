@@ -77,14 +77,14 @@ class TrendFollowingStrategy(BaseStrategy):
             
             # Generate buy signal
             # Golden cross and strong trend
-            buy_signal = (
+            buy_signal = bool(
                 golden_cross and 
                 adx > self.adx_threshold
             )
             
             # Generate sell signal
             # Death cross or weakening trend
-            sell_signal = (
+            sell_signal = bool(
                 death_cross or 
                 (adx < self.adx_threshold and fast_ma < slow_ma)
             )

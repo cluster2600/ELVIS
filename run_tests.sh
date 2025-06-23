@@ -8,14 +8,12 @@ set -e  # Exit on error
 echo "🧪 Running ELVIS Trading Bot Test Suite..."
 echo "========================================="
 
-# Check if virtual environment is activated
-if [[ "$VIRTUAL_ENV" == "" ]]; then
-    echo "⚠️  Warning: No virtual environment detected. Consider activating your venv."
-fi
+# Activate virtual environment
+source venv/bin/activate
 
 # Install test dependencies if needed
 echo "📦 Checking test dependencies..."
-pip install -q pytest pytest-cov pytest-mock pytest-asyncio
+# Dependencies are installed via requirements.txt
 
 # Clean up any previous coverage data
 rm -f .coverage

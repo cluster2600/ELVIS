@@ -72,7 +72,7 @@ class TechnicalStrategy(BaseStrategy):
             
             # Generate buy signal
             # Trend strength (DX > threshold), momentum (MACD > 0), RSI not overbought, OBV increasing
-            buy_signal = (
+            buy_signal = bool(
                 dx > self.dx_threshold and 
                 macd > self.macd_threshold and 
                 rsi < self.rsi_overbought and 
@@ -81,7 +81,7 @@ class TechnicalStrategy(BaseStrategy):
             
             # Generate sell signal
             # RSI overbought or trend weakening
-            sell_signal = (
+            sell_signal = bool(
                 rsi > self.rsi_overbought or 
                 (dx < self.dx_threshold and macd < self.macd_threshold)
             )
