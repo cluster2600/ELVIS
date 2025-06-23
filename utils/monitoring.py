@@ -5,6 +5,13 @@ Tracks training and validation metrics, supports early stopping, and displays pr
 
 import time
 import logging
+from prometheus_client import Counter, Histogram, Gauge
+
+try:
+    from prometheus_client.gateway import push_to_gateway
+    HAS_PUSHGATEWAY = True
+except ImportError:
+    HAS_PUSHGATEWAY = False
 
 class TrainingMonitor:
     def __init__(self, config=None):
@@ -66,3 +73,34 @@ class TrainingMonitor:
         Get the epoch with the best validation loss.
         """
         return self.best_epoch
+
+
+def push_metric_to_prometheus(metric_name, value, job_name='elvis_trading', gateway='localhost:9091', labels=None):
+    """
+    Push a metric to Prometheus pushgateway.
+    
+    Args:
+        metric_name (str): Name of the metric
+        value (float): Value of the metric
+        job_name (str): Job name for Prometheus
+        gateway (str): Pushgateway address
+        labels (dict): Optional labels for the metric
+    """
+    if not HAS_PUSHGATEWAY:
+        logging.getLogger(__name__).debug(f"Prometheus pushgateway not available, skipping metric {metric_name}={value}")
+        return
+        
+    try:
+        # Create gauge with labels if provided
+        if labels:
+            label_names = list(labels.keys())
+            gauge = Gauge(metric_name, f'ELVIS Trading Bot metric: {metric_name}', labelnames=label_names)
+            gauge.labels(**labels).set(value)
+        else:
+            gauge = Gauge(metric_name, f'ELVIS Trading Bot metric: {metric_name}')
+            gauge.set(value)
+        
+        push_to_gateway(gateway, job=job_name, registry=gauge.registry)
+        logging.getLogger(__name__).debug(f"Pushed metric {metric_name}={value} to {gateway}")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Failed to push metric to Prometheus: {e}")

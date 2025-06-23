@@ -93,7 +93,7 @@ class ApplicationBootstrapper:
     def _register_configurations(self) -> None:
         """Register configuration dependencies."""
         container.register_configuration('trading_config', TRADING_CONFIG)
-        container.register_configuration('api_config', vars(API_CONFIG))
+        container.register_configuration('api_config', API_CONFIG)
         container.register_configuration('app_config', {
             'mode': self.mode,
             'log_level': self.log_level,
@@ -116,20 +116,34 @@ class ApplicationBootstrapper:
         
         # Async Task Manager
         container.register_singleton('async_task_manager', 
-                                   lambda: AsyncTaskManager(max_concurrent_tasks=10))
+                                   lambda: AsyncTaskManager(max_concurrent=10))
         
         # Event Bus (already global, but register for consistency)
         container.register_singleton('event_bus', lambda: event_bus)
 
         # Performance Monitor
         from core.metrics.performance_monitor import PerformanceMonitor
-        container.register_singleton('performance_monitor', lambda: PerformanceMonitor())
+        def create_performance_monitor():
+            pm = PerformanceMonitor(window=50)  # Smaller window for demo
+            # Add sample percentage returns for demonstration (in decimal format)
+            sample_returns = [0.005, 0.012, -0.008, 0.015, -0.003, 0.007, 0.018, -0.002, 0.021, 0.004] * 10  # 100 returns
+            for ret in sample_returns:
+                pm.add_return(ret)
+            return pm
+        container.register_singleton('performance_monitor', create_performance_monitor)
 
         # Trade Analyzer
         from utils.trade_analyzer import TradeAnalyzer
         def create_trade_analyzer():
-            # This should be initialized with actual trade data
-            return TradeAnalyzer([])
+            # Initialize with sample trades for demonstration (replace with real trades in production)
+            sample_trades = [
+                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.001, 'price': 95000, 'pnl': 50.0, 'timestamp': '2024-06-23 10:00:00'},
+                {'symbol': 'BTCUSDT', 'side': 'sell', 'quantity': 0.001, 'price': 96000, 'pnl': 100.0, 'timestamp': '2024-06-23 11:00:00'},
+                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.002, 'price': 94000, 'pnl': -25.0, 'timestamp': '2024-06-23 12:00:00'},
+                {'symbol': 'BTCUSDT', 'side': 'sell', 'quantity': 0.0015, 'price': 97000, 'pnl': 150.0, 'timestamp': '2024-06-23 13:00:00'},
+                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.0005, 'price': 93000, 'pnl': -10.0, 'timestamp': '2024-06-23 14:00:00'},
+            ]
+            return TradeAnalyzer(sample_trades)
         container.register_singleton('trade_analyzer', create_trade_analyzer)
 
         # System Monitor
@@ -168,8 +182,8 @@ class ApplicationBootstrapper:
         
         # Price Fetcher
         def create_price_fetcher():
-            api_config = container.get('api_config')
-            return PriceFetcher(api_config)
+            logger = container.get('logger')
+            return PriceFetcher(logger)
         
         container.register_singleton('price_fetcher', create_price_fetcher)
         
@@ -204,7 +218,11 @@ class ApplicationBootstrapper:
             logger = container.get('logger')
             executor = container.get('executor')
             performance_monitor = container.get('performance_monitor')
-            return RiskManager(executor, logger, performance_monitor)
+            rm = RiskManager(executor, logger, performance_monitor)
+            # Add sample PnL data for demonstration
+            rm.realized_pnl = 265.0  # Sum of sample trade PnLs
+            rm.unrealized_pnl = 0.0  # No open positions yet
+            return rm
         
         container.register_singleton('risk_manager', create_risk_manager)
         
@@ -228,17 +246,9 @@ class ApplicationBootstrapper:
         # Ensemble Strategy
         def create_strategy():
             logger = container.get('logger')
-            executor = container.get('executor')
-            price_fetcher = container.get('price_fetcher')
-            risk_manager = container.get('risk_manager')
-            notifier = container.get('notifier')
             
             return EnsembleStrategy(
-                logger=logger,
-                executor=executor,
-                price_fetcher=price_fetcher,
-                risk_manager=risk_manager,
-                notifier=notifier
+                logger=logger
             )
         
         container.register_singleton('strategy', create_strategy)

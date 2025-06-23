@@ -164,7 +164,7 @@ class TrainingPipeline:
             self.monitor.display_progress(epoch)
 
     def train_rl_agents(self):
-        from trading.rl_agents import MultiAgentTradingSystem
+        from training.models.rl_agents import MultiAgentTradingSystem
         rl_config = self.config.get('rl', {})
         # Pass only expected arguments to avoid TypeError
         expected_args = {

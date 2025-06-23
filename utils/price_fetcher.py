@@ -40,7 +40,25 @@ class PriceFetcher:
 
     def __init__(self, logger, client=None, symbols=['BTCUSDT'], timeframe='5m', history_limit=200):
         self.logger = logger or logging.getLogger(__name__)
-        self.client = client
+        
+        # Initialize client if not provided
+        if client is None:
+            try:
+                from config import API_CONFIG
+                api_key = API_CONFIG.get('API_KEY')
+                api_secret = API_CONFIG.get('API_SECRET')
+                if api_key and api_secret:
+                    self.client = Client(api_key, api_secret)
+                else:
+                    # Use public client for price data (no trading)
+                    self.client = Client()
+                    self.logger.info("Using public Binance client for price data")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize Binance client: {e}")
+                self.client = None
+        else:
+            self.client = client
+            
         self.symbols = symbols
         self.timeframe = timeframe
         self.history_limit = history_limit
@@ -283,7 +301,24 @@ class PriceFetcher:
                 klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
                 self.cache.set(cache_key, klines, ttl=self.cache_ttl)
                 self.logger.info(f"Fetched and cached {len(klines)} klines for {symbol} {interval}.")
-                return pd.DataFrame(klines, columns=['open_time', 'open', 'high', 'low', 'close', 'volume'] + [f'extra_{i}' for i in range(6)])
+                
+                # Create DataFrame with proper column names
+                df = pd.DataFrame(klines, columns=[
+                    'open_time', 'open', 'high', 'low', 'close', 'volume',
+                    'close_time', 'quote_asset_volume', 'number_of_trades',
+                    'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+                ])
+                
+                # Convert to proper data types
+                numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+                for col in numeric_columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Convert timestamps
+                df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
+                df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+                
+                return df
             except Exception as e:
                 self.logger.error(f"Error fetching historical klines for {symbol} {interval}: {e}")
                 return pd.DataFrame()

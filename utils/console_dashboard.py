@@ -139,23 +139,42 @@ class ConsoleDashboard:
         self.safe_addstr(y, start_x, "--- Portfolio ---", curses.A_BOLD)
         
         risk_manager = self.config.get('risk_manager')
-        portfolio_value = self.config.get('portfolio_value', 0.0)
-        unrealized_pnl = risk_manager.unrealized_pnl if risk_manager else 0.0
-        realized_pnl = risk_manager.realized_pnl if risk_manager else 0.0
+        
+        # Get live data from risk manager and executor
+        if risk_manager:
+            unrealized_pnl = risk_manager.unrealized_pnl
+            realized_pnl = risk_manager.realized_pnl
+            # Calculate portfolio value as starting balance + realized PnL + unrealized PnL
+            starting_balance = 10000.0  # Default paper trading balance
+            portfolio_value = starting_balance + realized_pnl + unrealized_pnl
+        else:
+            portfolio_value = 10000.0
+            unrealized_pnl = 0.0
+            realized_pnl = 0.0
         
         self.safe_addstr(y + 1, start_x, f"Value: ${portfolio_value:,.2f}")
-        self.safe_addstr(y + 2, start_x, f"Unrealized PnL: ${unrealized_pnl:,.2f}")
-        self.safe_addstr(y + 3, start_x, f"Realized PnL: ${realized_pnl:,.2f}")
+        
+        # Color code PnL based on positive/negative
+        unrealized_color = curses.A_BOLD if unrealized_pnl >= 0 else curses.A_DIM
+        realized_color = curses.A_BOLD if realized_pnl >= 0 else curses.A_DIM
+        
+        self.safe_addstr(y + 2, start_x, f"Unrealized PnL: ${unrealized_pnl:,.2f}", unrealized_color)
+        self.safe_addstr(y + 3, start_x, f"Realized PnL: ${realized_pnl:,.2f}", realized_color)
 
         # Positions
         y += 5
         self.safe_addstr(y, start_x, "--- Open Positions ---", curses.A_BOLD)
-        open_positions = self.config.get('open_positions', [])
-        if not open_positions:
-            self.safe_addstr(y + 1, start_x, "None")
+        
+        # Get live positions from risk manager
+        if risk_manager and risk_manager.open_positions:
+            open_positions = risk_manager.open_positions
+            for i, (symbol, pos_data) in enumerate(list(open_positions.items())[:5]): # Show top 5
+                side = pos_data.get('side', 'N/A')
+                amount = pos_data.get('quantity', 0)
+                price = pos_data.get('entry_price', 0)
+                self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {amount:.4f} @ ${price:.2f}")
         else:
-            for i, pos in enumerate(open_positions[:5]): # Show top 5
-                self.safe_addstr(y + 1 + i, start_x, f"{pos['symbol']} {pos['amount']} @ {pos['price']}")
+            self.safe_addstr(y + 1, start_x, "None")
 
         # System Monitoring
         y += 8
@@ -212,7 +231,6 @@ class ConsoleDashboard:
             for symbol, risk in position_risk.items():
                 self.safe_addstr(y + 1, start_x, f"{symbol}: ${risk:,.2f}")
                 y += 1
->>>>>>> main
 
     def _draw_position_sizing_pane(self, start_y: int, start_x: int, height: int, width: int):
         """Draws the position sizing visualization pane."""
@@ -320,11 +338,15 @@ class ConsoleDashboard:
             bar_width = int((row['cumulative'] / max_cumulative) * (width - 15))
             self.safe_addstr(y + i, start_x, f"{row['price']:.2f} | {'#' * bar_width}")
 
-    def run(self):
+    def run(self, stdscr):
         """
         Main loop to run the dashboard UI. Handles keyboard input and periodic redraws.
         Press 'q' to quit the dashboard.
+        
+        Args:
+            stdscr: The curses standard screen object passed by curses.wrapper()
         """
+        self.stdscr = stdscr
         try:
             curses.start_color()
             curses.use_default_colors()
