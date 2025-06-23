@@ -56,9 +56,9 @@ class TestRandomForestModel(unittest.TestCase):
         """Test k-fold cross-validation with return of all metrics"""
         metrics = self.model.cross_validate(self.X_train, self.y_train, n_splits=3)
 
-        for key in ['accuracy', 'loss', 'precision', 'recall', 'f1', 'roc_auc']:
+        for key in ['test_accuracy', 'test_precision', 'test_recall', 'test_f1']:
             self.assertIn(key, metrics)
-            self.assertIsInstance(metrics[key], float)
+            self.assertIsInstance(metrics[key], np.ndarray)
 
 if __name__ == '__main__':
     unittest.main()

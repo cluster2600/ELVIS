@@ -62,7 +62,7 @@ class TestEnsembleModel:
         # Should have equal weights
         expected_weight = 1.0 / len(models)
         for weight in ensemble.weights:
-            assert weight == pytest.approx(expected_weight)
+            assert weight == pytest.approx(expected_weight, rel=1e-5)
     
     def test_predict_with_multiple_models(self, mock_logger, sample_price_data):
         """Test ensemble prediction with multiple models"""

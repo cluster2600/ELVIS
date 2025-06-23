@@ -162,7 +162,7 @@ class TestBinanceProcessor(unittest.TestCase):
         self.assertIsInstance(data, pd.DataFrame)
         self.assertIsInstance(price_array, np.ndarray)
         self.assertIsInstance(tech_array, np.ndarray)
-        self.assertIsInstance(time_array, pd.DatetimeIndex)
+        self.assertIsInstance(time_array, pd.arrays.DatetimeArray)
         
         self.assertEqual(price_array.shape, (20, 1))
         self.assertEqual(tech_array.shape, (20, 2))

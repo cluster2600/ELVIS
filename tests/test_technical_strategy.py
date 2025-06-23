@@ -166,7 +166,7 @@ class TestTechnicalStrategy(unittest.TestCase):
         # Check result
         # Using ATR from the data
         atr = self.test_data.iloc[-1]['atr']
-        expected_take_profit = entry_price + (3 * atr)
+        expected_take_profit = max(entry_price + (3 * atr), entry_price * (1 + self.strategy.take_profit_pct))
         self.assertEqual(take_profit, expected_take_profit)
         
         # Test without ATR

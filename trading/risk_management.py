@@ -1,5 +1,6 @@
 import logging
 from typing import Dict, Any
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from trading.execution.base_executor import BaseExecutor
@@ -27,6 +28,15 @@ class RiskManager:
         self.open_positions: Dict[str, Dict[str, Any]] = {}
         self.realized_pnl = 0.0
         self.unrealized_pnl = 0.0
+        self.stop_loss_pct = 0.01
+        self.take_profit_pct = 0.03
+        self.last_trade_time = None
+        self.trades_today = 0
+        self.daily_pnl = 0.0
+        self.daily_profit_target_usd = 1000.0
+        self.daily_loss_limit_usd = -500.0
+        self.cooldown_period = 3600.0
+        self.max_trades_per_day = 5
 
     def add_position(self, symbol: str, position_data: Dict[str, Any]):
         """
@@ -209,3 +219,63 @@ class RiskManager:
             position_risk[symbol] = (position_value / portfolio_value) * total_risk
                 
         return position_risk
+
+    def check_capital(self, capital: float) -> bool:
+        """
+        Check if there is sufficient capital to continue trading.
+        """
+        return capital > 1000.0
+
+    def calculate_stop_loss(self, entry_price: float, volatility: float) -> float:
+        """
+        Calculate the stop loss price.
+        """
+        return entry_price * (1 - self.stop_loss_pct)
+
+    def calculate_take_profit(self, entry_price: float, volatility: float) -> float:
+        """
+        Calculate the take profit price.
+        """
+        return max(entry_price + (3 * volatility), entry_price * (1 + self.take_profit_pct))
+
+    def check_new_day(self) -> bool:
+        """
+        Check if a new day has started.
+        """
+        if self.last_trade_time and self.last_trade_time.date() < datetime.now().date():
+            self.reset_daily_stats()
+            return True
+        return False
+
+    def reset_daily_stats(self):
+        """
+        Reset the daily statistics.
+        """
+        self.trades_today = 0
+        self.daily_pnl = 0.0
+
+    def update_trade_stats(self, pnl: float):
+        """
+        Update the trade statistics.
+        """
+        self.trades_today += 1
+        self.daily_pnl += pnl
+        self.last_trade_time = datetime.now()
+
+    def check_trade_limits(self) -> bool:
+        """
+        Check if any trade limits have been reached.
+        """
+        if self.trades_today >= self.max_trades_per_day:
+            self.logger.warning("Max trades per day reached.")
+            return False
+        if self.daily_pnl >= self.daily_profit_target_usd:
+            self.logger.warning("Daily profit target reached.")
+            return False
+        if self.daily_pnl <= self.daily_loss_limit_usd:
+            self.logger.warning("Daily loss limit reached.")
+            return False
+        if self.last_trade_time and (datetime.now() - self.last_trade_time).total_seconds() < self.cooldown_period:
+            self.logger.warning("Cooldown period has not elapsed.")
+            return False
+        return True
