@@ -23,17 +23,27 @@
 
 The ELVIS Trading Bot is a sophisticated, modular algorithmic trading system that leverages machine learning models for automated cryptocurrency trading. The system integrates multiple ML architectures, real-time data processing, risk management, and execution modules to facilitate intelligent trading strategies with comprehensive monitoring and visualization capabilities.
 
-## 🚀 Current Status (June 2024)
+## 🚀 Current Status (June 2025)
 
 **✅ FULLY OPERATIONAL TRADING BOT**
 
 The ELVIS Trading Bot is now fully functional and actively trading! Recent major updates have resolved all critical issues:
 
 ### 🎯 **Quick Start**
+
+**Option 1: Docker Deployment (Recommended)**
 ```bash
-# Clone and run the bot
-git clone <repository-url>
-cd BTC_BOT
+git clone https://github.com/cluster2600/ELVIS.git
+cd ELVIS/ansible
+chmod +x run_setup.sh
+./run_setup.sh --docker
+# Access at http://localhost:5050 when ready
+```
+
+**Option 2: Direct Execution**
+```bash
+git clone https://github.com/cluster2600/ELVIS.git
+cd ELVIS
 python main.py --mode paper --log-level INFO
 ```
 
@@ -540,15 +550,33 @@ Unit tests for the RandomForestModel validate training, prediction, evaluation m
 
 ## Deployment with Ansible
 
-The ELVIS Trading Bot includes comprehensive Ansible automation for seamless deployment across multiple platforms. The Ansible playbooks handle everything from system dependencies to service configuration.
+The ELVIS Trading Bot includes comprehensive Ansible automation for seamless deployment across multiple platforms. Choose between containerized Docker deployment (recommended) or traditional installation.
 
-### Quick Deployment
+### 🐳 **Docker Deployment (Recommended)**
 
 ```bash
 cd ansible
 chmod +x run_setup.sh
+./run_setup.sh --docker
+```
+
+**What you get:**
+- Complete containerized stack with PostgreSQL, Redis, Prometheus, and Grafana
+- Automatic service orchestration and health monitoring
+- Isolated environment with persistent data volumes
+- One-command deployment and management
+
+### 🔧 **Traditional Installation**
+
+```bash
+cd ansible
 ./run_setup.sh
 ```
+
+**What you get:**
+- Direct installation on host system
+- Full system integration and service management
+- Platform-specific optimizations
 
 ### What Gets Automated
 
@@ -613,6 +641,9 @@ flowchart TD
 ### Environment Configuration
 
 ```bash
+# Docker deployment (recommended)
+./run_setup.sh --docker
+
 # Development (default)
 ./run_setup.sh
 
@@ -627,6 +658,49 @@ flowchart TD
 
 # Dry run (check mode)
 ./run_setup.sh --check
+```
+
+### 🐳 **Docker Deployment Details**
+
+The Docker deployment creates a complete ecosystem:
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   ELVIS Bot     │    │   PostgreSQL    │    │     Redis       │
+│   Port: 5050    │◄──►│   Port: 5432    │    │   Port: 6379    │
+│   Port: 8000    │    │   DB: trading   │    │   Cache/Queue   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+┌─────────────────┐    ┌─────────────────┐
+│   Prometheus    │    │    Grafana      │
+│   Port: 9090    │    │   Port: 3000    │
+│   Metrics       │    │   Dashboards    │
+└─────────────────┘    └─────────────────┘
+```
+
+**Access Points:**
+- Trading Bot API: http://localhost:5050/api/docs
+- Web Dashboard: http://localhost:8000
+- Grafana Monitoring: http://localhost:3000 (admin/admin)
+- Prometheus Metrics: http://localhost:9090
+
+**Management Commands:**
+```bash
+# View service status
+docker ps
+
+# Check trading bot logs
+docker logs -f elvis-trading-bot
+
+# Restart services
+docker restart elvis-trading-bot
+
+# Full stack management
+docker-compose up -d
+docker-compose down
+docker-compose logs -f
 ```
 
 ### Post-Deployment

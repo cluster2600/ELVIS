@@ -49,6 +49,8 @@ FROM python:3.11-slim AS production
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    curl \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy TA-Lib from builder
@@ -79,7 +81,7 @@ EXPOSE 5050 8000
 
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5050/health', timeout=5)" || exit 1
+    CMD curl -f http://localhost:5050/health || exit 1
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash elvis

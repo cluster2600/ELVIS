@@ -2,9 +2,9 @@
 - name: Install ELVIS Trading Bot Dependencies
   hosts: localhost
   vars:
-    project_name: "elvis-trading-bot"
+    project_name: "BTC_BOT"
     project_user: "{{ ansible_user_id }}"
-    project_dir: "{% if ansible_os_family == 'Darwin' %}{{ ansible_env.HOME }}{% else %}/home/{{ project_user }}{% endif %}/{{ project_name }}"
+    project_dir: "{{ playbook_dir }}/.."
     python_version: "3.11"
     node_version: "18"
     
@@ -93,7 +93,7 @@
       become: yes
       
     - name: Install system dependencies (macOS)
-      homebrew:
+      community.general.homebrew:
         name:
           - python@3.11
           - git
@@ -148,7 +148,7 @@
       become: yes
       
     - name: Install TA-Lib via Homebrew (macOS)
-      homebrew:
+      community.general.homebrew:
         name: ta-lib
         state: present
       when: ansible_os_family == "Darwin"
@@ -206,7 +206,7 @@
       become: yes
       
     - name: Install Docker (macOS)
-      homebrew_cask:
+      community.general.homebrew_cask:
         name: docker
         state: present
       when: ansible_os_family == "Darwin"
@@ -243,31 +243,18 @@
       become: yes
       
     - name: Install Node.js (macOS)
-      homebrew:
+      community.general.homebrew:
         name: "node@{{ node_version }}"
         state: present
       when: ansible_os_family == "Darwin"
       
     # Project Setup
-    - name: Create project directory
+    - name: Ensure project directory exists
       file:
         path: "{{ project_dir }}"
         state: directory
-        owner: "{{ project_user }}"
-        group: "{{ project_user }}"
         mode: '0755'
-      become_user: "{{ project_user }}"
       become: no
-      
-    - name: Clone or update project repository
-      git:
-        repo: "https://github.com/your-username/{{ project_name }}.git"
-        dest: "{{ project_dir }}"
-        version: main
-        force: yes
-      become_user: "{{ project_user }}"
-      become: no
-      ignore_errors: yes  # In case repo doesn't exist yet
       
     - name: Create Python virtual environment
       command: python3 -m venv "{{ project_dir }}/venv"
