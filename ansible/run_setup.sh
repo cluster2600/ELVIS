@@ -71,6 +71,7 @@ install_galaxy_requirements() {
 run_playbook() {
     local environment=${1:-development}
     local extra_vars=""
+    local playbook_file="playbook.yml"
     
     print_status "Running Ansible playbook for environment: $environment"
     
@@ -84,13 +85,48 @@ run_playbook() {
         --inventory inventory.yml \
         --limit $environment \
         $extra_vars \
-        --ask-become-pass \
-        playbook.yml
+        $playbook_file
     
     if [ $? -eq 0 ]; then
         print_success "Ansible playbook completed successfully!"
     else
         print_error "Ansible playbook failed!"
+        exit 1
+    fi
+}
+
+# Function to run Docker deployment
+run_docker_deployment() {
+    print_status "Running Docker-based deployment..."
+    
+    # Check if Docker is installed
+    if ! command_exists docker; then
+        print_error "Docker is not installed. Please install Docker first:"
+        echo "  Visit: https://docs.docker.com/get-docker/"
+        exit 1
+    fi
+    
+    # Check if Docker is running
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker first."
+        exit 1
+    fi
+    
+    # Run the Docker playbook
+    ansible-playbook \
+        --inventory inventory.yml \
+        --limit development \
+        docker_playbook.yml
+    
+    if [ $? -eq 0 ]; then
+        print_success "Docker deployment completed successfully!"
+        print_status "Services are starting up, please wait 30-60 seconds..."
+        print_status "Then access the services at:"
+        echo "  - Trading Bot API: http://localhost:5050"
+        echo "  - Grafana Monitoring: http://localhost:3000 (admin/admin)"
+        echo "  - Prometheus Metrics: http://localhost:9090"
+    else
+        print_error "Docker deployment failed!"
         exit 1
     fi
 }
@@ -124,8 +160,10 @@ show_usage() {
     echo "  -v, --verbose  Verbose output"
     echo "  --check        Run in check mode (dry run)"
     echo "  --skip-galaxy  Skip Ansible Galaxy installation"
+    echo "  --docker       Use Docker deployment (recommended)"
     echo ""
     echo "Examples:"
+    echo "  $0 --docker                 # Docker deployment (recommended)"
     echo "  $0                          # Install on localhost"
     echo "  $0 development              # Install on development environment"
     echo "  $0 production --check       # Dry run on production"
@@ -139,6 +177,7 @@ main() {
     local verbose=false
     local check_mode=false
     local skip_galaxy=false
+    local use_docker=false
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -161,6 +200,10 @@ main() {
                 ;;
             --skip-galaxy)
                 skip_galaxy=true
+                shift
+                ;;
+            --docker)
+                use_docker=true
                 shift
                 ;;
             development|staging|production)
@@ -195,8 +238,10 @@ main() {
         exit 0
     fi
     
-    # Run the playbook
-    if [ "$check_mode" = true ]; then
+    # Run the appropriate deployment
+    if [ "$use_docker" = true ]; then
+        run_docker_deployment
+    elif [ "$check_mode" = true ]; then
         print_warning "Running in check mode (dry run)"
         ansible-playbook --check --inventory inventory.yml --limit $environment playbook.yml
     else

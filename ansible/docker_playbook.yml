@@ -1,0 +1,338 @@
+---
+- name: Deploy ELVIS Trading Bot in Docker Container
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    project_dir: "{{ playbook_dir }}/.."
+    container_name: "elvis-trading-bot"
+    image_name: "elvis-bot"
+    image_tag: "latest"
+    network_name: "elvis-network"
+    postgres_container: "elvis-postgres"
+    redis_container: "elvis-redis"
+    
+  tasks:
+    - name: Ensure Docker is installed and running
+      community.docker.docker_host_info:
+      register: docker_info
+      
+    - name: Display Docker information
+      debug:
+        msg: "Docker version: {{ docker_info.host_info.ServerVersion }}"
+    
+    - name: Create Docker network for ELVIS services
+      community.docker.docker_network:
+        name: "{{ network_name }}"
+        state: present
+    
+    - name: Start PostgreSQL container
+      community.docker.docker_container:
+        name: "{{ postgres_container }}"
+        image: postgres:15
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ network_name }}"
+        env:
+          POSTGRES_DB: trading_bot
+          POSTGRES_USER: elvis
+          POSTGRES_PASSWORD: elvis_password
+          POSTGRES_SCHEMA: np
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        ports:
+          - "5432:5432"
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U elvis -d trading_bot"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
+    
+    - name: Start Redis container
+      community.docker.docker_container:
+        name: "{{ redis_container }}"
+        image: redis:7-alpine
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ network_name }}"
+        volumes:
+          - redis_data:/data
+        ports:
+          - "6379:6379"
+        command: redis-server --appendonly yes
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 5s
+          timeout: 3s
+          retries: 3
+    
+    - name: Wait for PostgreSQL to be ready
+      wait_for:
+        host: localhost
+        port: 5432
+        timeout: 60
+    
+    - name: Wait for Redis to be ready
+      wait_for:
+        host: localhost
+        port: 6379
+        timeout: 30
+    
+    - name: Build ELVIS trading bot Docker image
+      community.docker.docker_image:
+        name: "{{ image_name }}"
+        tag: "{{ image_tag }}"
+        build:
+          path: "{{ project_dir }}"
+          dockerfile: Dockerfile
+          pull: yes
+        source: build
+        state: present
+        force_source: yes
+    
+    - name: Create environment file for container
+      copy:
+        content: |
+          # Database Configuration
+          DB_HOST={{ postgres_container }}
+          DB_PORT=5432
+          DB_NAME=trading_bot
+          DB_USER=elvis
+          DB_PASSWORD=elvis_password
+          DB_SCHEMA=np
+          
+          # Redis Configuration
+          REDIS_HOST={{ redis_container }}
+          REDIS_PORT=6379
+          
+          # Trading Configuration
+          TRADING_MODE=paper
+          LOG_LEVEL=INFO
+          
+          # API Configuration
+          API_HOST=0.0.0.0
+          API_PORT=5050
+          
+          # Binance API (placeholder - update with real keys)
+          BINANCE_API_KEY=your_api_key_here
+          BINANCE_API_SECRET=your_api_secret_here
+          BINANCE_TESTNET=true
+          
+          # Monitoring
+          PROMETHEUS_PORT=9090
+          GRAFANA_PORT=3000
+        dest: "{{ project_dir }}/.env.docker"
+        mode: '0600'
+    
+    - name: Stop existing ELVIS container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        state: absent
+        force_kill: yes
+      ignore_errors: yes
+    
+    - name: Start ELVIS trading bot container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ image_name }}:{{ image_tag }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ network_name }}"
+        env_file: "{{ project_dir }}/.env.docker"
+        volumes:
+          - "{{ project_dir }}/data:/app/data"
+          - "{{ project_dir }}/logs:/app/logs"
+          - "{{ project_dir }}/models:/app/models"
+        ports:
+          - "5050:5050"  # API port
+          - "8000:8000"  # Web dashboard
+        depends_on:
+          - "{{ postgres_container }}"
+          - "{{ redis_container }}"
+        healthcheck:
+          test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+        command: ["python", "main.py", "--mode", "paper"]
+    
+    - name: Start Prometheus container for monitoring
+      community.docker.docker_container:
+        name: "elvis-prometheus"
+        image: prom/prometheus:latest
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ network_name }}"
+        ports:
+          - "9090:9090"
+        volumes:
+          - prometheus_data:/prometheus
+        command:
+          - '--config.file=/etc/prometheus/prometheus.yml'
+          - '--storage.tsdb.path=/prometheus'
+          - '--web.console.libraries=/etc/prometheus/console_libraries'
+          - '--web.console.templates=/etc/prometheus/consoles'
+          - '--web.enable-lifecycle'
+    
+    - name: Start Grafana container for dashboards
+      community.docker.docker_container:
+        name: "elvis-grafana"
+        image: grafana/grafana:latest
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ network_name }}"
+        ports:
+          - "3000:3000"
+        volumes:
+          - grafana_data:/var/lib/grafana
+        env:
+          GF_SECURITY_ADMIN_PASSWORD: admin
+          GF_USERS_ALLOW_SIGN_UP: "false"
+    
+    - name: Wait for all services to be ready
+      uri:
+        url: "http://localhost:{{ item.port }}{{ item.path | default('') }}"
+        method: GET
+        status_code: [200, 302]
+      loop:
+        - { port: 5050, path: "/health" }
+        - { port: 3000 }
+        - { port: 9090 }
+      retries: 10
+      delay: 5
+      ignore_errors: yes
+    
+    - name: Display deployment status
+      debug:
+        msg: |
+          ✅ ELVIS Trading Bot deployment completed successfully!
+          
+          🚀 Services:
+          - Trading Bot API: http://localhost:5050
+          - Web Dashboard: http://localhost:8000  
+          - Grafana Monitoring: http://localhost:3000 (admin/admin)
+          - Prometheus Metrics: http://localhost:9090
+          - PostgreSQL Database: localhost:5432
+          - Redis Cache: localhost:6379
+          
+          📊 Container Status:
+          - {{ container_name }}: Running
+          - {{ postgres_container }}: Running  
+          - {{ redis_container }}: Running
+          - elvis-prometheus: Running
+          - elvis-grafana: Running
+          
+          🔧 Next Steps:
+          1. Update .env.docker with your real API keys
+          2. Access Grafana at http://localhost:3000 (admin/admin)
+          3. Check trading bot logs: docker logs {{ container_name }}
+          4. Monitor API: http://localhost:5050/api/docs
+          
+          📝 Useful Commands:
+          - View logs: docker logs -f {{ container_name }}
+          - Restart bot: docker restart {{ container_name }}
+          - Stop all: docker-compose down (if using docker-compose)
+    
+    - name: Create docker-compose.yml for easy management
+      copy:
+        content: |
+          version: '3.8'
+          
+          services:
+            postgres:
+              image: postgres:15
+              container_name: {{ postgres_container }}
+              environment:
+                POSTGRES_DB: trading_bot
+                POSTGRES_USER: elvis
+                POSTGRES_PASSWORD: elvis_password
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              ports:
+                - "5432:5432"
+              networks:
+                - {{ network_name }}
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U elvis -d trading_bot"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+            
+            redis:
+              image: redis:7-alpine
+              container_name: {{ redis_container }}
+              volumes:
+                - redis_data:/data
+              ports:
+                - "6379:6379"
+              networks:
+                - {{ network_name }}
+              command: redis-server --appendonly yes
+              healthcheck:
+                test: ["CMD", "redis-cli", "ping"]
+                interval: 5s
+                timeout: 3s
+                retries: 3
+            
+            trading-bot:
+              build: .
+              container_name: {{ container_name }}
+              env_file: .env.docker
+              volumes:
+                - ./data:/app/data
+                - ./logs:/app/logs
+                - ./models:/app/models
+              ports:
+                - "5050:5050"
+                - "8000:8000"
+              networks:
+                - {{ network_name }}
+              depends_on:
+                - postgres
+                - redis
+              command: ["python", "main.py", "--mode", "paper"]
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+            
+            prometheus:
+              image: prom/prometheus:latest
+              container_name: elvis-prometheus
+              ports:
+                - "9090:9090"
+              volumes:
+                - prometheus_data:/prometheus
+              networks:
+                - {{ network_name }}
+            
+            grafana:
+              image: grafana/grafana:latest
+              container_name: elvis-grafana
+              ports:
+                - "3000:3000"
+              volumes:
+                - grafana_data:/var/lib/grafana
+              environment:
+                GF_SECURITY_ADMIN_PASSWORD: admin
+                GF_USERS_ALLOW_SIGN_UP: "false"
+              networks:
+                - {{ network_name }}
+          
+          volumes:
+            postgres_data:
+            redis_data:
+            prometheus_data:
+            grafana_data:
+          
+          networks:
+            {{ network_name }}:
+              driver: bridge
+        dest: "{{ project_dir }}/docker-compose.yml"
+        mode: '0644'

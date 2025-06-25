@@ -1,5 +1,124 @@
 ## [Unreleased]
 
+## [2025-06-25] - Ansible Docker Deployment Implementation
+
+### 🐳 **Complete Docker-Based Deployment System**
+- **Implementation**: Created comprehensive Ansible automation for containerized deployment
+- **Architecture**: Full Docker-compose stack with all required services
+- **Services Deployed**:
+  - ELVIS Trading Bot (main application container)
+  - PostgreSQL 15 (database with 'np' schema)
+  - Redis 7 (caching and message broker)
+  - Prometheus (metrics collection)
+  - Grafana (monitoring dashboards)
+
+### 🛠️ **Ansible Playbook Features**
+- **Multi-Stage Dockerfile**: Optimized build with builder and production stages
+- **Health Checks**: Built-in container health monitoring
+- **Network Isolation**: Dedicated Docker network for service communication
+- **Volume Persistence**: Data, logs, and models persisted across container restarts
+- **Security**: Non-root user execution inside containers
+- **Auto-Restart**: All services configured with restart policies
+
+### 📋 **Installation Options**
+```bash
+# Docker deployment (recommended)
+cd ansible && ./run_setup.sh --docker
+
+# Traditional installation
+cd ansible && ./run_setup.sh
+
+# Test deployment
+cd ansible && ./run_setup.sh --test
+
+# Dry run
+cd ansible && ./run_setup.sh --check
+```
+
+### 🚀 **Service Architecture**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   ELVIS Bot     │    │   PostgreSQL    │    │     Redis       │
+│   Port: 5050    │◄──►│   Port: 5432    │    │   Port: 6379    │
+│   Port: 8000    │    │   DB: trading   │    │   Cache/Queue   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+┌─────────────────┐    ┌─────────────────┐
+│   Prometheus    │    │    Grafana      │
+│   Port: 9090    │    │   Port: 3000    │
+│   Metrics       │    │   Dashboards    │
+└─────────────────┘    └─────────────────┘
+```
+
+### 🔧 **Enhanced Configuration**
+- **Environment Management**: Separate .env.docker for container configuration
+- **Database Schema**: Automatic 'np' schema creation and permissions
+- **Network Security**: Internal service communication via Docker network
+- **Resource Management**: Optimized container resource allocation
+- **Logging**: Centralized logging with volume mounts
+
+### 📊 **Monitoring Integration**
+- **Prometheus Metrics**: Application and system metrics collection
+- **Grafana Dashboards**: Pre-configured monitoring visualizations
+- **Health Endpoints**: /health endpoint for container health checks
+- **Service Discovery**: Automatic service registration and monitoring
+
+### 🔄 **Deployment Workflow**
+1. **Pre-requisites**: Docker and Ansible installed
+2. **Collection Install**: Automatic community.docker collection installation
+3. **Network Creation**: Dedicated Docker network for service isolation
+4. **Database Setup**: PostgreSQL container with trading_bot database
+5. **Cache Setup**: Redis container with persistence
+6. **Application Build**: Multi-stage Docker build for ELVIS bot
+7. **Service Start**: All containers started with dependency management
+8. **Health Verification**: Automated health checks for all services
+9. **Access URLs**: Immediate access to all web interfaces
+
+### 📝 **Generated Assets**
+- **docker-compose.yml**: Complete stack management file
+- **.env.docker**: Container environment configuration
+- **Ansible Logs**: Detailed deployment logging
+- **Health Checks**: Built-in monitoring for all services
+
+### 🎯 **Post-Deployment Access**
+- **Trading Bot API**: http://localhost:5050/api/docs
+- **Web Dashboard**: http://localhost:8000
+- **Grafana Monitoring**: http://localhost:3000 (admin/admin)
+- **Prometheus Metrics**: http://localhost:9090
+- **Database**: localhost:5432 (elvis/elvis_password)
+- **Redis Cache**: localhost:6379
+
+### 🛡️ **Security Features**
+- Non-root container execution (elvis user)
+- Network isolation between services
+- Environment variable security (.env.docker with 600 permissions)
+- Health check endpoints for service monitoring
+- PostgreSQL user isolation and schema separation
+
+### 🔄 **Management Commands**
+```bash
+# View service status
+docker ps
+
+# Check logs
+docker logs -f elvis-trading-bot
+
+# Restart services
+docker restart elvis-trading-bot
+
+# Full stack management
+docker-compose up -d
+docker-compose down
+docker-compose logs -f
+
+# Database access
+docker exec -it elvis-postgres psql -U elvis -d trading_bot
+```
+
+This implementation provides a production-ready, containerized deployment of the ELVIS Trading Bot with complete monitoring, persistence, and management capabilities.
+
 ## [2025-06-25] - Critical Runtime Fixes & Dynamic Portfolio Implementation
 
 ### 🔧 **Core ML Shape Mismatch Resolution**
