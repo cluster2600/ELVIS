@@ -13,6 +13,10 @@ requests
 # Web server and API
 Flask
 Flask-CORS
+Flask-SocketIO
+Flask-Limiter
+flask-swagger-ui
+PyJWT
 prometheus-flask-exporter
 
 # Basic stats
@@ -20,6 +24,7 @@ statsmodels
 
 # Connectors and clients
 python-binance
+binance-futures-connector
 python-telegram-bot
 redis
 prometheus-client

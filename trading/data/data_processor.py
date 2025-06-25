@@ -1,4 +1,5 @@
 import pandas as pd
+import ta
 
 class DataProcessor:
     def __init__(self, exchange, feature_config, quality_config, logger):
@@ -86,3 +87,71 @@ class DataProcessor:
         except Exception as e:
             self.logger.error(f"Error fetching latest data: {str(e)}")
             return pd.DataFrame()  # Return empty DataFrame on failure
+
+    def add_technical_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Add technical indicators to the price data."""
+        try:
+            if len(data) < 50:  # Need enough data for indicators
+                return data
+                
+            # Add Simple Moving Averages
+            data['sma_20'] = ta.trend.sma_indicator(data['close'], window=20)
+            data['sma_50'] = ta.trend.sma_indicator(data['close'], window=50)
+            
+            # Add ADX
+            data['adx'] = ta.trend.adx(data['high'], data['low'], data['close'], window=14)
+            
+            # Add RSI
+            data['rsi'] = ta.momentum.rsi(data['close'], window=14)
+            
+            # Add MACD
+            macd = ta.trend.MACD(data['close'])
+            data['macd'] = macd.macd()
+            data['macd_signal'] = macd.macd_signal()
+            
+            # Add Bollinger Bands (with both naming conventions)
+            bollinger = ta.volatility.BollingerBands(data['close'])
+            data['bb_low'] = bollinger.bollinger_lband()
+            data['bb_mid'] = bollinger.bollinger_mavg() 
+            data['bb_high'] = bollinger.bollinger_hband()
+            
+            # Add mean reversion strategy compatible names
+            data['lowerband'] = data['bb_low']
+            data['middleband'] = data['bb_mid']
+            data['upperband'] = data['bb_high']
+            
+            # Add other indicators that might be needed
+            data['atr'] = ta.volatility.average_true_range(data['high'], data['low'], data['close'])
+            
+            return data
+        except Exception as e:
+            self.logger.error(f"Error calculating technical indicators: {e}")
+            return data
+
+    def add_market_regime_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Add market regime classification features."""
+        try:
+            # Add volume moving average
+            data['volume_ma'] = data['volume'].rolling(window=20).mean()
+            
+            # Add volatility measure
+            data['volatility'] = data['close'].pct_change().rolling(window=20).std()
+            
+            return data
+        except Exception as e:
+            self.logger.error(f"Error adding market regime features: {e}")
+            return data
+
+    def handle_missing_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Handle missing data in the DataFrame."""
+        try:
+            # Forward fill missing values (updated to avoid deprecation warning)
+            data = data.ffill()
+            
+            # If still missing, fill with 0
+            data = data.fillna(0)
+            
+            return data
+        except Exception as e:
+            self.logger.error(f"Error handling missing data: {e}")
+            return data

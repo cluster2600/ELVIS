@@ -14,14 +14,22 @@ TRADING_CONFIG = {
     'MIN_CAPITAL_USD': 50.0,
     'COOLDOWN': 10,               # 10 seconds cooldown between trades
 }
-# API Configuration
+# API Configuration - load from environment variables
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 API_CONFIG = {
-    'NEWS_API_KEY': 'YOUR_NEWS_API_KEY',
-    'TWITTER_API_KEY': 'YOUR_TWITTER_API_KEY',
-    'API_KEY': 'demo_api_key',
-    'API_SECRET': 'demo_api_secret',
-    'BINANCE_API_KEY': 'demo_api_key',
-    'BINANCE_API_SECRET': 'demo_api_secret',
+    'NEWS_API_KEY': os.getenv('NEWS_API_KEY', 'YOUR_NEWS_API_KEY'),
+    'TWITTER_API_KEY': os.getenv('TWITTER_API_KEY', 'YOUR_TWITTER_API_KEY'),
+    'API_KEY': os.getenv('BINANCE_FUTURES_TESTNET_API_KEY', os.getenv('BINANCE_API_KEY', 'demo_api_key')),
+    'API_SECRET': os.getenv('BINANCE_FUTURES_TESTNET_API_SECRET', os.getenv('BINANCE_API_SECRET', 'demo_api_secret')),
+    'BINANCE_API_KEY': os.getenv('BINANCE_API_KEY', 'demo_api_key'),
+    'BINANCE_API_SECRET': os.getenv('BINANCE_API_SECRET', 'demo_api_secret'),
+    'BINANCE_FUTURES_TESTNET_API_KEY': os.getenv('BINANCE_FUTURES_TESTNET_API_KEY', 'demo_api_key'),
+    'BINANCE_FUTURES_TESTNET_API_SECRET': os.getenv('BINANCE_FUTURES_TESTNET_API_SECRET', 'demo_api_secret'),
 }
 # Telegram Configuration
 TELEGRAM_CONFIG = {

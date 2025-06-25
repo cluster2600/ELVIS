@@ -1,8 +1,8 @@
 # RL models from elegantrl
 import torch
 import numpy as np
-from train.config import Arguments
-from train.run import train_and_evaluate, init_agent
+from training.config import Arguments
+from training.run import train_and_evaluate, init_agent
 
 from drl_agents.agents import AgentDDPG, AgentPPO, AgentSAC, AgentTD3, AgentA2C
 

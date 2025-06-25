@@ -4,9 +4,9 @@ import torch
 import numpy as np
 import multiprocessing as mp
 
-from train.config import build_env
-from train.evaluator import Evaluator
-from train.replay_buffer import ReplayBuffer, ReplayBufferList
+from training.config import build_env
+from training.models.evaluator import Evaluator
+from training.replay_buffer import ReplayBuffer, ReplayBufferList
 
 """[ElegantRL.2022.01.01](github.com/AI4Fiance-Foundation/ElegantRL)"""
 

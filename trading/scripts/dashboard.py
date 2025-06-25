@@ -18,6 +18,7 @@ sys.path.append(str(project_root))
 from utils.console_dashboard import ConsoleDashboard, ConsoleDashboardManager
 from trading.execution.binance_executor import BinanceExecutor
 from config import API_CONFIG, TRADING_CONFIG
+from utils.paper_trade_db import get_open_positions, get_all_trades
 
 class TradingDashboard:
     """Trading dashboard with automated trading functionality."""
@@ -106,7 +107,7 @@ class TradingDashboard:
         total_balance = 0.0
         try:
             self.logger.debug("Fetching account balance")
-            account = self.executor.client.account()
+            account = self.executor.client.futures_account()
             total_balance = float(account['totalWalletBalance'])
             self.logger.debug(f"Account balance fetched: {total_balance}")
         except Exception as e:
@@ -132,18 +133,20 @@ class TradingDashboard:
         
         open_positions = []
         try:
-            self.logger.debug("Processing positions")
-            positions = account['positions']
-            for pos in positions:
-                if float(pos['positionAmt']) != 0:
-                    size = float(pos['positionAmt'])
-                    entry_price = float(pos['entryPrice'])
-                    leverage = float(pos['leverage'])
-                    pnl = float(pos['unrealizedProfit'])
+            if self.is_testnet:  # Paper trading mode - use PostgreSQL
+                self.logger.debug("Processing positions from PostgreSQL")
+                positions = get_open_positions()
+                for pos in positions:
+                    # pos structure: (id, symbol, entry_price, quantity, leverage, entry_time)
+                    size = pos[3]
+                    entry_price = pos[2]
+                    leverage = pos[4]
+                    # Calculate unrealized PnL
+                    pnl = (current_price - entry_price) * size if current_price > 0 else 0
                     pnl_percentage = (pnl / (abs(size) * entry_price)) * 100 if size != 0 and entry_price != 0 else 0
                     
                     open_positions.append({
-                        'symbol': pos['symbol'],
+                        'symbol': pos[1],
                         'size': size,
                         'entry_price': entry_price,
                         'current_price': current_price,
@@ -151,24 +154,58 @@ class TradingDashboard:
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage
                     })
+            else:  # Live trading mode - use Binance API
+                self.logger.debug("Processing positions from Binance")
+                positions = account['positions']
+                for pos in positions:
+                    if float(pos['positionAmt']) != 0:
+                        size = float(pos['positionAmt'])
+                        entry_price = float(pos['entryPrice'])
+                        leverage = float(pos['leverage'])
+                        pnl = float(pos['unrealizedProfit'])
+                        pnl_percentage = (pnl / (abs(size) * entry_price)) * 100 if size != 0 and entry_price != 0 else 0
+                        
+                        open_positions.append({
+                            'symbol': pos['symbol'],
+                            'size': size,
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'leverage': leverage,
+                            'pnl': pnl,
+                            'pnl_percentage': pnl_percentage
+                        })
         except Exception as e:
             self.logger.error(f"Failed to process positions: {e}")
         
         recent_trades = []
         try:
-            self.logger.debug(f"Fetching recent trades for {symbol}")
-            trades = self.executor.client.get_account_trades({'symbol': symbol, 'limit': 10})
-            for trade in trades:
-                recent_trades.append({
-                    'symbol': trade['symbol'],
-                    'type': trade['side'],
-                    'size': float(trade['qty']),
-                    'price': float(trade['price']),
-                    'pnl': float(trade['realizedPnl']),
-                    'time': trade['time']
-                })
+            if self.is_testnet:  # Paper trading mode - use PostgreSQL
+                self.logger.debug(f"Fetching recent trades from PostgreSQL")
+                trades = get_all_trades(limit=10)
+                for trade in trades:
+                    # trade structure: (id, timestamp, symbol, side, price, quantity, pnl, fee)
+                    recent_trades.append({
+                        'symbol': trade[2],
+                        'type': trade[3],
+                        'size': trade[5],
+                        'price': trade[4],
+                        'pnl': trade[6],
+                        'time': int(trade[1].timestamp() * 1000)  # Convert to milliseconds
+                    })
+            else:  # Live trading mode - use Binance API
+                self.logger.debug(f"Fetching recent trades for {symbol}")
+                trades = self.executor.client.get_account_trades({'symbol': symbol, 'limit': 10})
+                for trade in trades:
+                    recent_trades.append({
+                        'symbol': trade['symbol'],
+                        'type': trade['side'],
+                        'size': float(trade['qty']),
+                        'price': float(trade['price']),
+                        'pnl': float(trade['realizedPnl']),
+                        'time': trade['time']
+                    })
         except Exception as e:
-            self.logger.warning(f"Failed to fetch trades for {symbol}: {e}")
+            self.logger.warning(f"Failed to fetch trades: {e}")
         
         self.config['portfolio_value'] = total_balance
         self.config['current_price'] = current_price
@@ -177,11 +214,23 @@ class TradingDashboard:
         self.config['cpu_usage'] = psutil.cpu_percent()
         self.config['memory_usage'] = psutil.virtual_memory().percent
         
-        self.logger.info(f"Updated dashboard - Mode: {'Production' if self.config['PRODUCTION_MODE'] else 'Testnet'}, Portfolio: ${total_balance:.2f}, Price: ${current_price:.2f}")
-        self.logger.info(f"Open positions: {len(open_positions)}")
+        # Log and add messages to dashboard
+        mode_msg = f"Mode: {'Production' if self.config['PRODUCTION_MODE'] else 'Testnet'}, Portfolio: ${total_balance:.2f}, Price: ${current_price:.2f}"
+        self.logger.info(f"Updated dashboard - {mode_msg}")
+        self.dashboard_manager.add_message(mode_msg)
+        
+        positions_msg = f"Open positions: {len(open_positions)}"
+        self.logger.info(positions_msg)
+        self.dashboard_manager.add_message(positions_msg)
+        
         for pos in open_positions:
-            self.logger.info(f"Position: {pos['symbol']} - Size: {pos['size']}, PnL: ${pos['pnl']:.2f} ({pos['pnl_percentage']:.2f}%)")
-        self.logger.info(f"Recent trades: {len(recent_trades)}")
+            pos_msg = f"Position: {pos['symbol']} - Size: {pos['size']}, PnL: ${pos['pnl']:.2f} ({pos['pnl_percentage']:.2f}%)"
+            self.logger.info(pos_msg)
+            self.dashboard_manager.add_message(pos_msg)
+        
+        trades_msg = f"Recent trades: {len(recent_trades)}"
+        self.logger.info(trades_msg)
+        self.dashboard_manager.add_message(trades_msg)
 
     def _generate_signals(self, data: pd.DataFrame) -> tuple:
         """Inline EMA-RSI signal generation."""
@@ -240,11 +289,15 @@ class TradingDashboard:
             self.logger.info("Forcing initial BUY for testing")
         
         if signal == 'BUY' and not position:
-            self.logger.info(f"Signal: BUY at {current_price}")
+            buy_msg = f"Signal: BUY at ${current_price:.2f}"
+            self.logger.info(buy_msg)
+            self.dashboard_manager.add_message(buy_msg)
             try:
                 order = self.executor.execute_buy('BTCUSDT', self.trade_size, current_price)
                 self.config['total_trades'] += 1
-                self.logger.info(f"Buy order executed: {order}")
+                order_msg = f"Buy order executed: {self.trade_size} BTC at ${current_price:.2f}"
+                self.logger.info(order_msg)
+                self.dashboard_manager.add_message(order_msg)
                 # Manually add trade to recent_trades if API fails
                 self.config['recent_trades'].append({
                     'symbol': 'BTCUSDT',
@@ -257,10 +310,14 @@ class TradingDashboard:
                 # Refresh positions immediately
                 self._update_positions()
             except Exception as e:
-                self.logger.error(f"Failed to execute BUY order: {e}")
+                error_msg = f"Failed to execute BUY order: {e}"
+                self.logger.error(error_msg)
+                self.dashboard_manager.add_message(error_msg)
         
         elif signal == 'SELL' and position:
-            self.logger.info(f"Signal: SELL at {current_price}")
+            sell_msg = f"Signal: SELL at ${current_price:.2f}"
+            self.logger.info(sell_msg)
+            self.dashboard_manager.add_message(sell_msg)
             try:
                 order = self.executor.execute_sell('BTCUSDT', abs(position['size']), current_price)
                 self.config['total_trades'] += 1
@@ -268,7 +325,9 @@ class TradingDashboard:
                     self.config['winning_trades'] += 1
                 else:
                     self.config['losing_trades'] += 1
-                self.logger.info(f"Sell order executed: {order}")
+                order_msg = f"Sell order executed: {abs(position['size'])} BTC at ${current_price:.2f} | PnL: ${position['pnl']:.2f}"
+                self.logger.info(order_msg)
+                self.dashboard_manager.add_message(order_msg)
                 self.config['recent_trades'].append({
                     'symbol': 'BTCUSDT',
                     'type': 'SELL',
@@ -279,31 +338,56 @@ class TradingDashboard:
                 })
                 self._update_positions()
             except Exception as e:
-                self.logger.error(f"Failed to execute SELL order: {e}")
+                error_msg = f"Failed to execute SELL order: {e}"
+                self.logger.error(error_msg)
+                self.dashboard_manager.add_message(error_msg)
         else:
             self.logger.debug(f"No trade action - Signal: {signal}, Position exists: {bool(position)}")
 
     def _update_positions(self):
         """Force update open positions after a trade."""
         try:
-            account = self.executor.client.account()
             self.config['open_positions'] = []
-            for pos in account['positions']:
-                if float(pos['positionAmt']) != 0:
-                    size = float(pos['positionAmt'])
-                    entry_price = float(pos['entryPrice'])
-                    leverage = float(pos['leverage'])
-                    pnl = float(pos['unrealizedProfit'])
+            current_price = self.config['current_price']
+            
+            if self.is_testnet:  # Paper trading mode - use PostgreSQL
+                positions = get_open_positions()
+                for pos in positions:
+                    # pos structure: (id, symbol, entry_price, quantity, leverage, entry_time)
+                    size = pos[3]
+                    entry_price = pos[2]
+                    leverage = pos[4]
+                    pnl = (current_price - entry_price) * size if current_price > 0 else 0
                     pnl_percentage = (pnl / (abs(size) * entry_price)) * 100 if size != 0 and entry_price != 0 else 0
+                    
                     self.config['open_positions'].append({
-                        'symbol': pos['symbol'],
+                        'symbol': pos[1],
                         'size': size,
                         'entry_price': entry_price,
-                        'current_price': self.config['current_price'],
+                        'current_price': current_price,
                         'leverage': leverage,
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage
                     })
+            else:  # Live trading mode - use Binance API
+                account = self.executor.client.futures_account()
+                for pos in account['positions']:
+                    if float(pos['positionAmt']) != 0:
+                        size = float(pos['positionAmt'])
+                        entry_price = float(pos['entryPrice'])
+                        leverage = float(pos['leverage'])
+                        pnl = float(pos['unrealizedProfit'])
+                        pnl_percentage = (pnl / (abs(size) * entry_price)) * 100 if size != 0 and entry_price != 0 else 0
+                        self.config['open_positions'].append({
+                            'symbol': pos['symbol'],
+                            'size': size,
+                            'entry_price': entry_price,
+                            'current_price': current_price,
+                            'leverage': leverage,
+                            'pnl': pnl,
+                            'pnl_percentage': pnl_percentage
+                        })
+                        
             self.logger.info(f"Positions updated: {len(self.config['open_positions'])} open")
         except Exception as e:
             self.logger.error(f"Failed to update positions: {e}")

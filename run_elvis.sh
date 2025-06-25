@@ -27,45 +27,25 @@ for var in "${REQUIRED_VARS[@]}"; do
     fi
 done
 
-# --- env-coreml setup ---
-if [ ! -d "env-coreml" ]; then
-    echo "📦 Creating env-coreml..."
-    python3.11 -m venv env-coreml
+# --- venv_new setup ---
+if [ ! -d "venv_new" ]; then
+    echo "📦 Creating venv_new..."
+    python3.11 -m venv venv_new
 fi
 
-echo "📄 Installing coreml requirements..."
-source env-coreml/bin/activate
+echo "📄 Installing requirements..."
+source venv_new/bin/activate
 pip install --upgrade pip
-if [ -f requirements_coreml.txt ]; then
-    pip install -r requirements_coreml.txt
+if [ -f requirements.txt ]; then
+    pip install -r requirements.txt
 else
-    echo "❌ requirements_coreml.txt not found."
+    echo "❌ requirements.txt not found."
     deactivate
     exit 1
 fi
-deactivate
 
-# --- env-ydf setup ---
-if [ ! -d "env-ydf" ]; then
-    echo "📦 Creating env-ydf..."
-    python3.11 -m venv env-ydf
-fi
-
-echo "📄 Installing ydf requirements..."
-source env-ydf/bin/activate
-pip install --upgrade pip
-if [ -f requirements_ydf.txt ]; then
-    pip install -r requirements_ydf.txt
-else
-    echo "❌ requirements_ydf.txt not found."
-    deactivate
-    exit 1
-fi
-deactivate
-
-# --- Activate env-coreml ---
-echo "🚀 Activating env-coreml..."
-source env-coreml/bin/activate
+# --- Activate venv_new ---
+echo "🚀 Activating venv_new..."
 echo "[DEBUG] Python: $(which python)"
 python --version
 

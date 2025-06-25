@@ -93,7 +93,7 @@ class ApplicationBootstrapper:
     def _register_configurations(self) -> None:
         """Register configuration dependencies."""
         container.register_configuration('trading_config', TRADING_CONFIG)
-        container.register_configuration('api_config', API_CONFIG)
+        container.register_singleton('api_config', lambda: API_CONFIG)  # Register as singleton since it's an object
         container.register_configuration('app_config', {
             'mode': self.mode,
             'log_level': self.log_level,
@@ -226,19 +226,100 @@ class ApplicationBootstrapper:
         
         container.register_singleton('risk_manager', create_risk_manager)
         
-        # Binance Executor
-        def create_executor():
+        # Exchange Manager
+        def create_exchange_manager():
+            from trading.execution.exchange_manager import ExchangeManager
+            from trading.execution.binance_executor import BinanceExecutor
+            from trading.execution.kraken_executor import KrakenExecutor
+            from trading.execution.coinbase_executor import CoinbaseExecutor
+            
             logger = container.get('logger')
             api_config = container.get('api_config')
             app_config = container.get('app_config')
             
-            executor = BinanceExecutor(
-                logger=logger,
-                api_key=api_config['BINANCE_API_KEY'],
-                api_secret=api_config['BINANCE_API_SECRET'],
-                is_testnet=(app_config['mode'] == 'paper')
-            )
-            executor.initialize()
+            # Initialize Exchange Manager
+            exchange_manager = ExchangeManager(logger=logger)
+            
+            # Add Binance
+            if hasattr(api_config, 'BINANCE_API_KEY'):
+                binance_config = {
+                    'api_key': api_config.BINANCE_API_KEY,
+                    'api_secret': api_config.BINANCE_API_SECRET,
+                    'is_testnet': (app_config['mode'] == 'paper')
+                }
+            else:
+                binance_config = {
+                    'api_key': api_config.get('BINANCE_API_KEY'),
+                    'api_secret': api_config.get('BINANCE_API_SECRET'),
+                    'is_testnet': (app_config['mode'] == 'paper')
+                }
+            
+            exchange_manager.add_exchange('binance', BinanceExecutor, binance_config)
+            
+            # Add Kraken (if configured)
+            kraken_api_key = getattr(api_config, 'KRAKEN_API_KEY', None) or api_config.get('KRAKEN_API_KEY')
+            kraken_secret = getattr(api_config, 'KRAKEN_API_SECRET', None) or api_config.get('KRAKEN_API_SECRET')
+            
+            if kraken_api_key and kraken_secret:
+                kraken_config = {
+                    'api_key': kraken_api_key,
+                    'api_secret': kraken_secret,
+                    'is_testnet': False  # Kraken doesn't have testnet
+                }
+                exchange_manager.add_exchange('kraken', KrakenExecutor, kraken_config)
+            
+            # Add Coinbase (if configured)
+            coinbase_api_key = getattr(api_config, 'COINBASE_API_KEY', None) or api_config.get('COINBASE_API_KEY')
+            coinbase_secret = getattr(api_config, 'COINBASE_API_SECRET', None) or api_config.get('COINBASE_API_SECRET')
+            coinbase_passphrase = getattr(api_config, 'COINBASE_PASSPHRASE', None) or api_config.get('COINBASE_PASSPHRASE')
+            
+            if coinbase_api_key and coinbase_secret and coinbase_passphrase:
+                coinbase_config = {
+                    'api_key': coinbase_api_key,
+                    'api_secret': coinbase_secret,
+                    'passphrase': coinbase_passphrase,
+                    'is_testnet': (app_config['mode'] == 'paper')
+                }
+                exchange_manager.add_exchange('coinbase', CoinbaseExecutor, coinbase_config)
+            
+            # Start health monitoring
+            exchange_manager.start_health_monitoring()
+            
+            return exchange_manager
+        
+        container.register_singleton('exchange_manager', create_exchange_manager)
+        
+        # Advanced Order Manager
+        def create_advanced_order_manager():
+            from trading.orders.advanced_order_manager import AdvancedOrderManager
+            exchange_manager = container.get('exchange_manager')
+            logger = container.get('logger')
+            return AdvancedOrderManager(exchange_manager, logger)
+        
+        container.register_singleton('advanced_order_manager', create_advanced_order_manager)
+        
+        # Binance Executor (for backward compatibility)
+        def create_executor():
+            exchange_manager = container.get('exchange_manager')
+            executor = exchange_manager.get_exchange('binance')
+            
+            # If Binance failed, try to get any available exchange
+            if executor is None:
+                logger = container.get('logger')
+                logger.warning("Binance executor not available, trying to use any available exchange")
+                
+                available_exchanges = list(exchange_manager.exchanges.keys())
+                if available_exchanges:
+                    executor = exchange_manager.get_exchange(available_exchanges[0])
+                    logger.info(f"Using {available_exchanges[0]} executor as fallback")
+                else:
+                    logger.error("No exchanges available - creating mock executor for paper trading")
+                    # Create a mock executor for paper trading
+                    from trading.execution.binance_executor import BinanceExecutor
+                    mock_executor = BinanceExecutor(logger=logger, is_testnet=True)
+                    mock_executor.initialize()
+                    return mock_executor
+            
             return executor
         
         container.register_singleton('executor', create_executor)
@@ -248,7 +329,11 @@ class ApplicationBootstrapper:
             logger = container.get('logger')
             
             return EnsembleStrategy(
-                logger=logger
+                logger=logger,
+                symbols=['BTCUSDT'],  # Ensure symbols are set
+                order_flow_analyzer=container.get('order_flow_analyzer'),
+                price_fetcher=container.get('price_fetcher'),
+                exchange_manager=container.get('exchange_manager')
             )
         
         container.register_singleton('strategy', create_strategy)
@@ -299,6 +384,18 @@ class ApplicationBootstrapper:
             return ensemble
         
         container.register_factory('ensemble_model', create_ensemble_model)
+        
+        # DRL Agent
+        def create_drl_agent():
+            try:
+                from drl_agents.elegantrl_models import DRLAgent
+                return DRLAgent()
+            except Exception as e:
+                logger = container.get('logger')
+                logger.warning(f"Failed to create DRL agent: {e}")
+                return None
+        
+        container.register_factory('drl_agent', create_drl_agent)
     
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for the application."""
