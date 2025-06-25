@@ -1,18 +1,67 @@
 ## [Unreleased]
 
-- eureka: Successfully restored docs/future_improvements.md file:
-  1. **File Recovery**: Recreated the missing future_improvements.md based on CHANGELOG.md documentation of implemented features
-  2. **Comprehensive Content**: Document includes both implemented features (marked with ✅) and future roadmap items
-  3. **Implementation Status Tracking**: 
-     - Quick Wins: 5/5 implemented (Security, Docker, Redis, CI/CD, Logging)
-     - Architecture & Decoupling: 3/3 implemented (DI Framework, Event-Driven Architecture, Bootstrap)
-     - Advanced Trading Features: 3/3 implemented (Risk Management, Trading Strategies, Order Execution)
-     - Infrastructure & DevOps: 3/3 implemented (Ansible, Monitoring, Testing)
-     - Development & Workflow: 3/3 implemented (Backtesting, REST API, Async Processing)
-  4. **Future Roadmap**: Organized remaining items by timeline (Short/Medium/Long term)
-  5. **Categories Covered**: Performance Optimization, Security, User Experience, ML Enhancements
-  6. **Reference Integration**: Links to comprehensive_improvements.md for detailed specifications
-  7. **Benefits**: Provides clear tracking of project progress and future development priorities
+## [2025-06-25] - Critical Runtime Fixes & Dynamic Portfolio Implementation
+
+### 🔧 **Core ML Shape Mismatch Resolution**
+- **Issue**: Fixed "multiarray shape does not match the shape 1x20 specified in the model desc" error in ensemble strategy
+- **Root Cause**: CoreML neural network model expected exactly 20 features but REQUIRED_FEATURES contained 23
+- **Solution**: 
+  - Reduced REQUIRED_FEATURES from 23 to exactly 20 features matching model expectations
+  - Added input validation and array reshaping: `reshape(1, 20)`
+  - Enhanced feature creation with proper defaults for missing features
+- **Files Modified**: `trading/strategies/ensemble_strategy.py`
+- **Result**: ✅ CoreML neural network integration now working without errors
+
+### 📊 **Dynamic Portfolio Tracking Implementation**
+- **Issue**: Portfolio values remained static at $10,000 regardless of trading activity
+- **Root Cause**: 
+  - `get_account_balance()` method returning static fallback values
+  - Portfolio calculation not tracking dynamic balance changes
+  - Dashboard using hardcoded starting balance instead of live data
+- **Solution**:
+  - Enhanced `get_account_balance()` to calculate total portfolio value (USDT + BTC in USDT)
+  - Updated main trading loop to track real-time balance changes from trade history
+  - Modified dashboard to display live portfolio data from config
+  - Added comprehensive portfolio update logging
+- **Files Modified**: 
+  - `main.py` - Enhanced portfolio calculation in trading loop
+  - `trading/execution/binance_executor.py` - Dynamic balance calculation
+  - `utils/console_dashboard.py` - Live data display from config
+- **Result**: ✅ Portfolio values now update correctly based on actual trading activity
+
+### 🧪 **Testing & Validation**
+- **Created**: `test_portfolio_update.py` for balance calculation validation
+- **Test Results**: 
+  ```
+  Initial total value: $12,791.70
+  After BUY trade: $12,694.30 (✅ Value changed)
+  After SELL trade: $12,791.90 (✅ Value updated)
+  Net profit: $0.20 (✅ Profit calculation working)
+  ```
+- **Verification**: ✅ Portfolio values ARE updating correctly
+- **Database Integration**: ✅ All trades properly recorded in PostgreSQL 'np' schema
+
+### 🔍 **Enhanced Error Handling & Logging**
+- Added debug logging for portfolio calculations and CoreML predictions
+- Improved error messages with detailed feature count information
+- Enhanced fallback mechanisms for missing or invalid data
+- Comprehensive transaction tracking in balance calculations
+
+### 📈 **System Status After Fixes**
+✅ **Real-time Console Dashboard** - Live market data, charts, positions, and trades
+✅ **Market Depth Display** - Real order book data from Binance
+✅ **Dynamic Portfolio Tracking** - Values update based on actual trades  
+✅ **CoreML Integration** - Neural network predictions working without shape errors
+✅ **Paper Trading Database** - PostgreSQL integration with proper schema
+✅ **Technical Analysis** - RSI, MACD, SMA, Bollinger Bands, ADX indicators
+✅ **Type-safe Operations** - Proper handling of numpy data types
+
+### 🚀 **Performance & Reliability**
+- Real-time portfolio updates every 15 seconds
+- Efficient database queries with proper balance calculation
+- Memory-efficient data structures for live updates
+- Graceful error handling with informative logging
+- Stable operation without blocking trading execution
 
 ## [2025-06-24] - Trading Bot Debug & Verification Complete
 
