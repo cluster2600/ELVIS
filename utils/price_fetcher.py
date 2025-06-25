@@ -16,6 +16,13 @@ import time
 import json
 from datetime import datetime, timedelta
 
+try:
+    from binance.um_futures import UMFutures
+    from binance.error import ClientError
+    FUTURES_AVAILABLE = True
+except ImportError:
+    FUTURES_AVAILABLE = False
+
 from binance.client import Client
 import websocket
 
@@ -45,16 +52,34 @@ class PriceFetcher:
         if client is None:
             try:
                 from config import API_CONFIG
-                api_key = API_CONFIG.get('API_KEY')
-                api_secret = API_CONFIG.get('API_SECRET')
-                if api_key and api_secret:
-                    self.client = Client(api_key, api_secret)
+                # Use futures testnet keys first for better compatibility
+                api_key = API_CONFIG.get('BINANCE_FUTURES_TESTNET_API_KEY') or API_CONFIG.get('API_KEY')
+                api_secret = API_CONFIG.get('BINANCE_FUTURES_TESTNET_API_SECRET') or API_CONFIG.get('API_SECRET')
+                
+                # Check if we have valid API keys (not placeholder values)
+                if (api_key and api_secret and 
+                    api_key != 'your_binance_api_key_here' and 
+                    api_secret != 'your_binance_api_secret_here'):
+                    
+                    # Try to use futures connector first, fallback to spot
+                    if FUTURES_AVAILABLE:
+                        try:
+                            self.client = UMFutures(key=api_key, secret=api_secret)
+                            self.logger.info("Using authenticated Binance Futures client")
+                        except Exception as e:
+                            self.logger.warning(f"Futures client failed, using spot client: {e}")
+                            self.client = Client(api_key, api_secret)
+                            self.logger.info("Using authenticated Binance spot client")
+                    else:
+                        self.client = Client(api_key, api_secret)
+                        self.logger.info("Using authenticated Binance spot client")
                 else:
                     # Use public client for price data (no trading)
                     self.client = Client()
-                    self.logger.info("Using public Binance client for price data")
+                    self.logger.info("Using public Binance client for price data (no API keys)")
             except Exception as e:
                 self.logger.warning(f"Could not initialize Binance client: {e}")
+                self.logger.info("Continuing without Binance client - will use mock data")
                 self.client = None
         else:
             self.client = client
@@ -66,9 +91,13 @@ class PriceFetcher:
         self.candles = {symbol: [] for symbol in symbols}
         self.running = False
         self.lock = threading.Lock()
-        self.cache = get_cache()
-        self.cache_ttl = 60  # 1 minute cache for prices
-        self.indicator_cache_ttl = 30  # 30 seconds for indicators
+        try:
+            self.cache = get_cache()
+        except Exception as e:
+            self.logger.warning(f"Redis cache not available: {e}, using memory cache")
+            self.cache = {}  # Simple dict as fallback
+        self.cache_ttl = 10  # 10 seconds cache for prices (more live updates)
+        self.indicator_cache_ttl = 5  # 5 seconds for indicators (very fresh)
 
     def get_historical_data(self):
         """
@@ -102,7 +131,7 @@ class PriceFetcher:
 
             # Check cache for indicators
             indicators_cache_key = f"indicators:{symbol}:all"
-            cached_indicators = self.cache.get(indicators_cache_key)
+            cached_indicators = self._cache_get(indicators_cache_key)
             
             if cached_indicators:
                 # Use cached values
@@ -130,11 +159,11 @@ class PriceFetcher:
                     'ema_long': ema_long,
                     'timestamp': time.time()
                 }
-                self.cache.set(indicators_cache_key, indicators_data, ttl=self.indicator_cache_ttl)
+                self._cache_set(indicators_cache_key, indicators_data, ttl=self.indicator_cache_ttl)
                 
                 # Also cache individual indicators for specific queries
-                self.cache.set(make_indicator_key(symbol, 'rsi', 14), rsi, ttl=self.indicator_cache_ttl)
-                self.cache.set(make_indicator_key(symbol, 'sma', 20), sma, ttl=self.indicator_cache_ttl)
+                self._cache_set(make_indicator_key(symbol, 'rsi', 14), rsi, ttl=self.indicator_cache_ttl)
+                self._cache_set(make_indicator_key(symbol, 'sma', 20), sma, ttl=self.indicator_cache_ttl)
 
             # Update Prometheus Gauges
             CURRENT_PRICE.labels(symbol).set(current_price)
@@ -146,7 +175,7 @@ class PriceFetcher:
             EMA_LONG_GAUGE.labels(symbol).set(ema_long)
             
             # Cache current price
-            self.cache.set(make_price_key(symbol), current_price, ttl=self.cache_ttl)
+            self._cache_set(make_price_key(symbol), current_price, ttl=self.cache_ttl)
             
         except Exception as e:
             self.logger.error(f"Error calculating indicators for {symbol}: {e}")
@@ -239,7 +268,7 @@ class PriceFetcher:
         """Get current price with Redis caching"""
         # Try to get from cache first
         cache_key = make_price_key(symbol)
-        cached_price = self.cache.get(cache_key)
+        cached_price = self._cache_get(cache_key)
         
         if cached_price is not None:
             return cached_price
@@ -249,7 +278,7 @@ class PriceFetcher:
             if self.candles[symbol]:
                 price = float(self.candles[symbol][-1][4])  # Close price
                 # Cache the price
-                self.cache.set(cache_key, price, ttl=self.cache_ttl)
+                self._cache_set(cache_key, price, ttl=self.cache_ttl)
                 return price
             return None
 
@@ -268,15 +297,20 @@ class PriceFetcher:
         Fetch order book data for a specific symbol with caching.
         """
         cache_key = f"order_book:{symbol}:{limit}"
-        cached_data = self.cache.get(cache_key)
+        cached_data = self._cache_get(cache_key)
         if cached_data:
             self.logger.debug(f"Returning cached order book for {symbol}")
             return cached_data
 
         if self.client:
             try:
-                order_book = self.client.get_order_book(symbol=symbol, limit=limit)
-                self.cache.set(cache_key, order_book, ttl=self.indicator_cache_ttl) # Use indicator TTL
+                if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                    # Use futures depth endpoint
+                    order_book = self.client.depth(symbol=symbol, limit=limit)
+                else:
+                    # Use spot order book endpoint
+                    order_book = self.client.get_order_book(symbol=symbol, limit=limit)
+                self._cache_set(cache_key, order_book, ttl=self.indicator_cache_ttl) # Use indicator TTL
                 self.logger.info(f"Fetched and cached order book for {symbol}.")
                 return order_book
             except Exception as e:
@@ -291,15 +325,30 @@ class PriceFetcher:
         Fetch historical kline data for a specific symbol and interval with caching.
         """
         cache_key = f"historical_klines:{symbol}:{interval}:{limit}"
-        cached_data = self.cache.get(cache_key)
+        cached_data = self._cache_get(cache_key)
         if cached_data:
             self.logger.debug(f"Returning cached klines for {symbol} {interval}")
-            return pd.DataFrame(cached_data)
+            # Ensure cached data has proper column structure
+            df = pd.DataFrame(cached_data)
+            if not df.empty and 'close' not in df.columns:
+                # Reconstruct with proper column names if needed
+                if len(df.columns) >= 6:
+                    df.columns = [
+                        'open_time', 'open', 'high', 'low', 'close', 'volume',
+                        'close_time', 'quote_asset_volume', 'number_of_trades',
+                        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+                    ][:len(df.columns)]
+            return df
 
         if self.client:
             try:
-                klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
-                self.cache.set(cache_key, klines, ttl=self.cache_ttl)
+                if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                    # Use futures klines endpoint
+                    klines = self.client.klines(symbol=symbol, interval=interval, limit=limit)
+                else:
+                    # Use spot klines endpoint
+                    klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
+                self._cache_set(cache_key, klines, ttl=self.cache_ttl)
                 self.logger.info(f"Fetched and cached {len(klines)} klines for {symbol} {interval}.")
                 
                 # Create DataFrame with proper column names
@@ -321,7 +370,33 @@ class PriceFetcher:
                 return df
             except Exception as e:
                 self.logger.error(f"Error fetching historical klines for {symbol} {interval}: {e}")
-                return pd.DataFrame()
+                # Return empty DataFrame with proper columns for consistency
+                return pd.DataFrame(columns=[
+                    'open_time', 'open', 'high', 'low', 'close', 'volume',
+                    'close_time', 'quote_asset_volume', 'number_of_trades',
+                    'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+                ])
         else:
             self.logger.error("Client not initialized.")
-            return pd.DataFrame()
+            # Return empty DataFrame with proper columns for consistency
+            return pd.DataFrame(columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ])
+    
+    def _cache_get(self, key):
+        """Get from cache with fallback for dict cache"""
+        if hasattr(self.cache, 'get'):
+            return self.cache.get(key)
+        else:
+            # Simple dict fallback
+            return self.cache.get(key)
+    
+    def _cache_set(self, key, value, ttl=None):
+        """Set in cache with fallback for dict cache"""
+        if hasattr(self.cache, 'set'):
+            return self.cache.set(key, value, ttl=ttl)
+        else:
+            # Simple dict fallback (ignore TTL)
+            self.cache[key] = value
