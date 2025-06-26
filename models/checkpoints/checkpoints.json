@@ -1966,11 +1966,25 @@
       "epoch": 10,
       "is_final": false,
       "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250626_070434.pt",
+      "timestamp": "20250626_070434",
+      "epoch": 5,
+      "is_final": false,
+      "is_best": false
+    },
+    {
+      "path": "models/checkpoints/checkpoint_20250626_070434.pt",
+      "timestamp": "20250626_070434",
+      "epoch": 10,
+      "is_final": false,
+      "is_best": false
     }
   ],
   "latest_checkpoint": {
-    "path": "models/checkpoints/checkpoint_20250613_172603.pt",
-    "timestamp": "20250613_172603",
+    "path": "models/checkpoints/checkpoint_20250626_070434.pt",
+    "timestamp": "20250626_070434",
     "epoch": 10,
     "is_final": false,
     "is_best": false

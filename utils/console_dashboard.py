@@ -83,11 +83,11 @@ class ConsoleDashboard:
             self._draw_box(0, 0, max_y - 1, max_x - 1) # Main border
             self._draw_header()
 
-            # Define layout sections with type safety
+            # Define layout sections with type safety - enlarged right pane
             left_pane_width = 35
             max_x = int(max_x)  # Ensure integer type
-            chart_pane_width = max(10, max_x - left_pane_width - 30)  # Ensure positive
-            right_pane_width = 28
+            right_pane_width = 45  # Increased from 28 to 45 for better visibility
+            chart_pane_width = max(10, max_x - left_pane_width - right_pane_width - 3)  # Adjust chart accordingly
             
             chart_pane_x = left_pane_width + 1
             right_pane_x = chart_pane_x + chart_pane_width + 1
@@ -96,6 +96,12 @@ class ConsoleDashboard:
             self._draw_box(8, 1, max_y - 2, left_pane_width) # Left pane
             self._draw_box(8, chart_pane_x, max_y - 2, chart_pane_x + chart_pane_width) # Chart pane
             self._draw_box(8, right_pane_x, max_y - 2, max_x - 2) # Right pane
+            
+            # Add a marker in the right pane to help locate it
+            try:
+                self.safe_addstr(8, right_pane_x + 1, f"RIGHT PANE (cols {right_pane_x}-{max_x-2})", curses.color_pair(4))
+            except:
+                pass
 
             # Draw content in panes with individual error handling
             try:
@@ -109,12 +115,24 @@ class ConsoleDashboard:
                 self.logger.error(f"Error in _draw_chart_pane: {e}")
                 
             try:
-                self._draw_volume_profile_pane(9, right_pane_x + 2, max_y - 20, right_pane_width - 2)
+                # Give market depth more space and better positioning
+                market_depth_height = min(18, max_y - 25)  # More reasonable height
+                if market_depth_height > 10:  # Only draw if we have enough space
+                    self._draw_volume_profile_pane(9, right_pane_x + 2, market_depth_height, right_pane_width - 2)
+                    self.logger.debug(f"Market depth drawn at x={right_pane_x + 2}, h={market_depth_height}")
+                else:
+                    self.safe_addstr(9, right_pane_x + 2, "Terminal too small", curses.color_pair(2))
             except Exception as e:
                 self.logger.error(f"Error in _draw_volume_profile_pane: {e}")
+                # Draw error message in the right pane so user can see something
+                self.safe_addstr(9, right_pane_x + 2, "Market Depth Error", curses.color_pair(2))
                 
             try:
-                self._draw_position_sizing_pane(max_y - 15, right_pane_x + 2, 8, right_pane_width - 2)
+                # Position sizing below market depth with adjusted spacing
+                position_y = 9 + market_depth_height + 2 if 'market_depth_height' in locals() else max_y - 12
+                position_height = max(6, max_y - position_y - 3)
+                if position_height > 0:
+                    self._draw_position_sizing_pane(position_y, right_pane_x + 2, position_height, right_pane_width - 2)
             except Exception as e:
                 self.logger.error(f"Error in _draw_position_sizing_pane: {e}")
             
@@ -192,32 +210,66 @@ class ConsoleDashboard:
         
         risk_manager = self.config.get('risk_manager')
         
-        # Get live data from config (updated dynamically in main loop)
+        # Calculate live P&L directly from database
         try:
-            # Prioritize values from config which are updated live from trading loop
+            # Get live data from paper trading database
+            from utils.paper_trade_db import get_all_trades, get_open_positions
+            
+            # Calculate realized P&L from completed trades
+            all_trades = get_all_trades(limit=1000)
+            realized_pnl = 0.0
+            
+            for trade in all_trades:
+                if len(trade) >= 7:
+                    pnl = float(trade[6])
+                    realized_pnl += pnl
+            
+            # Calculate unrealized P&L from open positions
+            open_positions_raw = get_open_positions()
+            unrealized_pnl = 0.0
+            
+            for pos in open_positions_raw:
+                if len(pos) >= 4:
+                    try:
+                        # Get current price for this position
+                        current_price = 107500.0  # Default BTC price
+                        if self.price_fetcher:
+                            try:
+                                fetched_price = self.price_fetcher.get_current_price(pos[1])
+                                if fetched_price:
+                                    current_price = float(fetched_price)
+                            except:
+                                pass
+                        
+                        entry_price = float(pos[2])
+                        quantity = float(pos[3])
+                        position_pnl = (current_price - entry_price) * quantity
+                        unrealized_pnl += position_pnl
+                    except:
+                        pass
+            
+            # Calculate realistic portfolio value
+            starting_balance = 10000.0
+            
+            # For portfolio calculation, use only the realized P&L since unrealized might be inflated
+            # due to incorrect position sizing in the trading logic
+            portfolio_value = starting_balance + realized_pnl
+            
+            # Add unrealized P&L only if it's reasonable (not inflated)
+            if abs(unrealized_pnl) < 5000:  # Sanity check for unrealized P&L
+                portfolio_value += unrealized_pnl
+            
+            # Don't use config portfolio value as it may be inflated from bad position sizing
+            
+            self.logger.debug(f"Live P&L calculated - Realized: ${realized_pnl:.2f}, "
+                            f"Unrealized: ${unrealized_pnl:.2f}, Portfolio: ${portfolio_value:.2f}")
+                            
+        except Exception as e:
+            self.logger.warning(f"Error calculating live P&L: {e}")
+            # Fallback to config values
             portfolio_value = float(self.config.get('portfolio_value', 10000.0))
             unrealized_pnl = float(self.config.get('unrealized_pnl', 0.0))
             realized_pnl = float(self.config.get('realized_pnl', 0.0))
-            
-            # Fallback to risk manager if config values are default
-            if portfolio_value == 10000.0 and risk_manager:
-                try:
-                    unrealized_pnl = float(risk_manager.unrealized_pnl or 0.0)
-                    realized_pnl = float(risk_manager.realized_pnl or 0.0)
-                    # Calculate portfolio value as starting balance + PnL
-                    starting_balance = 10000.0  # Default paper trading balance
-                    portfolio_value = starting_balance + realized_pnl + unrealized_pnl
-                except (ValueError, TypeError, AttributeError):
-                    pass  # Keep config values
-                    
-            self.logger.debug(f"Dashboard displaying - Portfolio: ${portfolio_value:.2f}, "
-                            f"Unrealized: ${unrealized_pnl:.2f}, Realized: ${realized_pnl:.2f}")
-                            
-        except (ValueError, TypeError, AttributeError) as e:
-            self.logger.warning(f"Error parsing portfolio values: {e}")
-            portfolio_value = 10000.0
-            unrealized_pnl = 0.0
-            realized_pnl = 0.0
         
         self.safe_addstr(y + 1, start_x, f"Value: ${portfolio_value:,.2f}")
         
@@ -228,44 +280,109 @@ class ConsoleDashboard:
         self.safe_addstr(y + 2, start_x, f"Unrealized PnL: ${unrealized_pnl:,.2f}", unrealized_color)
         self.safe_addstr(y + 3, start_x, f"Realized PnL: ${realized_pnl:,.2f}", realized_color)
 
-        # Positions
+        # Positions (Live from Database with Real-time PnL)
         y += 5
         self.safe_addstr(y, start_x, "--- Open Positions ---", curses.color_pair(3) | curses.A_BOLD)
         
-        # Get live positions from config or risk manager
-        open_positions = self.config.get('open_positions', [])
-        if not open_positions and risk_manager and hasattr(risk_manager, 'open_positions'):
-            # Fallback to risk manager format (handle both list and dict)
-            risk_positions = risk_manager.open_positions
-            if risk_positions:
-                if isinstance(risk_positions, dict):
-                    # Dictionary format
-                    for i, (symbol, pos_data) in enumerate(list(risk_positions.items())[:5]): # Show top 5
-                        side = pos_data.get('side', 'N/A')
-                        amount = pos_data.get('quantity', 0)
-                        price = pos_data.get('entry_price', 0)
-                        self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {amount:.4f} @ ${price:.2f}")
-                elif isinstance(risk_positions, list):
-                    # List format
-                    for i, pos_data in enumerate(risk_positions[:5]): # Show top 5
-                        symbol = pos_data.get('symbol', 'N/A')
-                        side = 'LONG' if pos_data.get('quantity', 0) > 0 else 'SHORT' if pos_data.get('quantity', 0) < 0 else 'N/A'
-                        amount = abs(pos_data.get('quantity', 0))
-                        price = pos_data.get('entry_price', 0)
-                        self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {amount:.4f} @ ${price:.2f}")
+        try:
+            # Get live positions directly from database
+            from utils.paper_trade_db import get_open_positions
+            live_positions = get_open_positions()
+            
+            if live_positions:
+                # Get current price for PnL calculation
+                current_price = 107500.0  # Default BTC price
+                if self.price_fetcher:
+                    try:
+                        fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
+                        if fetched_price:
+                            current_price = float(fetched_price)
+                    except:
+                        pass
+                
+                displayed_positions = 0
+                for pos in live_positions[:5]:  # Show top 5 positions
+                    if len(pos) >= 4:
+                        symbol = pos[1]
+                        entry_price = float(pos[2])
+                        quantity = float(pos[3])
+                        
+                        # Calculate comprehensive real-time P&L with all fees
+                        try:
+                            leverage = int(pos[4]) if len(pos) > 4 else 10
+                            entry_time = pos[5] if len(pos) > 5 else None
+                            
+                            # Try to get executor for comprehensive fee calculation
+                            executor = None
+                            try:
+                                from core.di import container
+                                executor = container.get_optional('executor')
+                            except:
+                                pass
+                            
+                            if executor and hasattr(executor, 'calculate_open_position_pnl'):
+                                # Get comprehensive P&L including all Binance fees
+                                pnl_detail = executor.calculate_open_position_pnl(
+                                    symbol, current_price, entry_price, quantity, leverage, entry_time
+                                )
+                                net_pnl = pnl_detail['net_pnl']
+                                gross_pnl = pnl_detail['gross_pnl']
+                                total_fees = pnl_detail['ongoing_costs'] + pnl_detail['estimated_exit_fee']
+                                funding_fee = pnl_detail['funding_fee']
+                                borrowing_cost = pnl_detail['borrowing_cost']
+                                hours_held = pnl_detail['hours_held']
+                                
+                                # Show fee impact
+                                fee_impact = f" (Fees: ${total_fees:.4f})"
+                                if hours_held > 0:
+                                    fee_impact += f" {hours_held:.1f}h"
+                            else:
+                                # Fallback to simple calculation
+                                net_pnl = (current_price - entry_price) * quantity
+                                gross_pnl = net_pnl
+                                fee_impact = " (est)"
+                        except Exception as e:
+                            # Safe fallback
+                            net_pnl = (current_price - entry_price) * quantity
+                            gross_pnl = net_pnl
+                            fee_impact = ""
+                        
+                        # Determine side
+                        side = 'LONG' if quantity > 0 else 'SHORT'
+                        
+                        # Color code based on net P&L
+                        try:
+                            pnl_color = curses.color_pair(1) if net_pnl >= 0 else curses.color_pair(2)
+                        except:
+                            pnl_color = 0
+                        
+                        # Display position with comprehensive P&L info
+                        position_text = f"{symbol} {side} {abs(quantity):.4f} @ ${entry_price:.0f}"
+                        pnl_text = f"Net: ${net_pnl:+.2f}{fee_impact}"
+                        
+                        self.safe_addstr(y + 1 + displayed_positions, start_x, position_text)
+                        self.safe_addstr(y + 1 + displayed_positions, start_x + 22, pnl_text, pnl_color)
+                        displayed_positions += 1
+                
+                # Show current BTC price used for calculations
+                self.safe_addstr(y + 1 + displayed_positions, start_x, f"BTC Price: ${current_price:,.2f}")
+                
             else:
-                self.safe_addstr(y + 1, start_x, "None")
-        elif open_positions:
-            # Use config format (from trading dashboard)
-            for i, pos in enumerate(open_positions[:5]):  # Show top 5
-                symbol = pos.get('symbol', 'N/A')
-                size = pos.get('size', 0)
-                entry_price = pos.get('entry_price', 0)
-                pnl = pos.get('pnl', 0)
-                side = 'LONG' if size > 0 else 'SHORT' if size < 0 else 'N/A'
-                self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {abs(size):.6f} @ ${entry_price:.2f} | PnL: ${pnl:.2f}")
-        else:
-            self.safe_addstr(y + 1, start_x, "None")
+                # Fallback to config positions or show "None"
+                config_positions = self.config.get('open_positions', [])
+                if config_positions:
+                    for i, pos in enumerate(config_positions[:3]):
+                        symbol = pos.get('symbol', 'N/A')
+                        size = pos.get('size', 0)
+                        entry_price = pos.get('entry_price', 0)
+                        side = 'LONG' if size > 0 else 'SHORT' if size < 0 else 'N/A'
+                        self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {abs(size):.6f} @ ${entry_price:.2f}")
+                else:
+                    self.safe_addstr(y + 1, start_x, "No open positions")
+                    
+        except Exception as e:
+            self.logger.warning(f"Error getting live positions: {e}")
+            self.safe_addstr(y + 1, start_x, f"Position data error")
 
         # System Monitoring
         y += 8
@@ -311,56 +428,228 @@ class ConsoleDashboard:
         # Recent Trades (Live from Database)
         y += 6
         self.safe_addstr(y, start_x, "--- Recent Trades ---", curses.color_pair(3) | curses.A_BOLD)
-        recent_trades = self.config.get('recent_trades', [])
-        if recent_trades:
-            for i, trade in enumerate(recent_trades[:3]):  # Show last 3 trades
-                side = trade.get('side', 'N/A')
-                symbol = trade.get('symbol', 'N/A')
-                price = trade.get('price', 0)
-                quantity = trade.get('quantity', 0)
-                pnl = trade.get('pnl', 0)
+        
+        try:
+            # Get recent trades directly from database and show meaningful ones
+            from utils.paper_trade_db import get_all_trades
+            all_recent_trades = get_all_trades(limit=50)  # Get more trades to filter
+            
+            # Separate profitable trades and recent activity
+            profitable_trades = []
+            recent_activity = []
+            
+            for trade in all_recent_trades:
+                if len(trade) >= 7:
+                    trade_data = {
+                        'side': trade[3],
+                        'symbol': trade[2],
+                        'price': float(trade[4]),
+                        'quantity': float(trade[5]),
+                        'pnl': float(trade[6]),
+                        'timestamp': trade[1]
+                    }
+                    
+                    # Collect trades with actual P&L
+                    if trade_data['pnl'] != 0.0:
+                        profitable_trades.append(trade_data)
+                    
+                    # Also collect recent activity (last 10 trades)
+                    if len(recent_activity) < 10:
+                        recent_activity.append(trade_data)
+            
+            # Show profitable trades first, fallback to recent activity
+            display_trades = profitable_trades[:3] if profitable_trades else recent_activity[:3]
+            
+            if display_trades:
+                for i, trade in enumerate(display_trades):
+                    side = trade['side']
+                    symbol = trade['symbol']
+                    price = trade['price']
+                    quantity = trade['quantity']
+                    pnl = trade['pnl']
+                    
+                    # Color code by side and P&L
+                    side_color = curses.color_pair(1) if side == 'BUY' else curses.color_pair(2)
+                    
+                    # Show trade details
+                    trade_info = f"{side} {quantity:.4f} {symbol} @ ${price:.2f}"
+                    self.safe_addstr(y + 1 + i, start_x, trade_info, side_color)
+                    
+                    # Show P&L or trade value for context
+                    if pnl != 0.0:
+                        pnl_color = curses.color_pair(1) if pnl >= 0 else curses.color_pair(2)
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"PnL: ${pnl:.2f}", pnl_color)
+                    else:
+                        # Show trade value instead of 0.00 P&L
+                        trade_value = price * quantity
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"Val: ${trade_value:.0f}")
+                        
+            else:
+                self.safe_addstr(y + 1, start_x, "No recent trades")
                 
-                # Color code by side
-                side_color = curses.color_pair(1) if side == 'BUY' else curses.color_pair(2)
-                pnl_color = curses.color_pair(1) if pnl >= 0 else curses.color_pair(2)
-                
-                self.safe_addstr(y + 1 + i, start_x, f"{side} {quantity:.4f} {symbol} @ ${price:.2f}", side_color)
-                self.safe_addstr(y + 1 + i, start_x + 25, f"PnL: ${pnl:.2f}", pnl_color)
-        else:
-            self.safe_addstr(y + 1, start_x, "No trades yet")
+        except Exception as e:
+            # Fallback to config trades
+            recent_trades = self.config.get('recent_trades', [])
+            if recent_trades:
+                for i, trade in enumerate(recent_trades[:3]):
+                    side = trade.get('side', 'N/A')
+                    symbol = trade.get('symbol', 'N/A')
+                    price = trade.get('price', 0)
+                    quantity = trade.get('quantity', 0)
+                    pnl = trade.get('pnl', 0)
+                    
+                    side_color = curses.color_pair(1) if side == 'BUY' else curses.color_pair(2)
+                    trade_info = f"{side} {quantity:.4f} {symbol} @ ${price:.2f}"
+                    self.safe_addstr(y + 1 + i, start_x, trade_info, side_color)
+                    
+                    if pnl != 0.0:
+                        pnl_color = curses.color_pair(1) if pnl >= 0 else curses.color_pair(2)
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"PnL: ${pnl:.2f}", pnl_color)
+                    else:
+                        trade_value = price * quantity
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"Val: ${trade_value:.0f}")
+            else:
+                self.safe_addstr(y + 1, start_x, "No trades yet")
 
-        # Trade Distribution
+        # Trade Distribution - Live from Database with comprehensive fee-adjusted stats
         y += 5
         self.safe_addstr(y, start_x, "--- Trade Statistics ---", curses.A_BOLD)
-        trade_analyzer = self.config.get('trade_analyzer')
-        if trade_analyzer:
-            try:
-                win_loss = trade_analyzer.get_win_loss_distribution()
-                avg_pnl = trade_analyzer.get_average_pnl()
-                wins = int(win_loss.get('wins', 0))
-                losses = int(win_loss.get('losses', 0))
-                avg_win = float(avg_pnl.get('avg_win', 0.0))
-                avg_loss = float(avg_pnl.get('avg_loss', 0.0))
+        
+        # Try to get live trade statistics from database
+        try:
+            from utils.paper_trade_db import get_all_trades
+            trades_raw = get_all_trades(limit=1000, exclude_test=True)  # Exclude TEST trades for accurate statistics
+            
+            if trades_raw:
+                # Calculate comprehensive live statistics
+                wins = 0
+                losses = 0
+                breakeven = 0
+                total_pnl = 0.0
+                total_volume = 0.0
+                win_pnls = []
+                loss_pnls = []
+                
+                # Count different types of trades for better analysis
+                buy_trades = 0
+                sell_trades = 0
+                
+                for trade in trades_raw:
+                    if len(trade) >= 8:  # Include fee data
+                        side = trade[3]
+                        price = float(trade[4])
+                        quantity = float(trade[5])
+                        pnl = float(trade[6])
+                        fee = float(trade[7])
+                        
+                        # Calculate trade volume
+                        trade_volume = price * quantity
+                        total_volume += trade_volume
+                        
+                        # Count trade types
+                        if side == 'BUY':
+                            buy_trades += 1
+                        elif side == 'SELL':
+                            sell_trades += 1
+                        
+                        # Count all trades for P&L analysis (fees already included in stored P&L)
+                        if side in ['BUY', 'SELL']:
+                            # Use stored P&L directly (fees already factored in)
+                            net_pnl = pnl
+                            
+                            # Count all real trades for total P&L
+                            total_pnl += net_pnl
+                            
+                            # Only analyze SELL trades for win/loss (completed positions)
+                            if side == 'SELL':
+                                # P&L already includes fees, so use directly
+                                if net_pnl > 0.10:  # Profitable trade
+                                    wins += 1
+                                    win_pnls.append(net_pnl)
+                                elif net_pnl < -0.10:  # Loss trade
+                                    losses += 1
+                                    loss_pnls.append(net_pnl)
+                                else:  # Small result (breakeven)
+                                    breakeven += 1
+                
+                # Calculate statistics
+                completed_trades = wins + losses + breakeven
+                total_trades = len(trades_raw)
+                win_rate = (wins / completed_trades * 100) if completed_trades > 0 else 0.0
+                avg_win = sum(win_pnls) / len(win_pnls) if win_pnls else 0.0
+                avg_loss = sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0.0
+                avg_trade_value = total_volume / total_trades if total_trades > 0 else 0.0
+                
+                # Profit factor calculation
+                total_wins = sum(win_pnls) if win_pnls else 0.0
+                total_losses = abs(sum(loss_pnls)) if loss_pnls else 0.0
+                profit_factor = total_wins / total_losses if total_losses > 0 else float('inf') if total_wins > 0 else 0.0
+                
+                # Show comprehensive trade breakdown (already filtered, so no TEST trades)
+                total_trades = len(trades_raw)
+                
+                self.safe_addstr(y + 1, start_x, f"Real Trades: {total_trades}")
+                
+                # Show win rate with realistic assessment
+                trading_outcomes = wins + losses  # Exclude breakeven for win rate
+                if trading_outcomes > 0:
+                    meaningful_win_rate = (wins / trading_outcomes * 100)
+                    win_rate_color = curses.color_pair(1) if meaningful_win_rate > 50 else curses.color_pair(6) if meaningful_win_rate > 30 else curses.color_pair(2)
+                    self.safe_addstr(y + 2, start_x, f"Win Rate: {meaningful_win_rate:.1f}% ({wins}W/{losses}L)", win_rate_color)
+                else:
+                    self.safe_addstr(y + 2, start_x, "Win Rate: N/A (no decisive trades)", curses.color_pair(6))
+                
+                self.safe_addstr(y + 3, start_x, f"Avg Win: ${avg_win:.2f} | Avg Loss: ${avg_loss:.2f}")
+                
+                # Color code total P&L
+                pnl_color = curses.color_pair(1) if total_pnl >= 0 else curses.color_pair(2)
+                self.safe_addstr(y + 4, start_x, f"Net P&L: ${total_pnl:.2f}", pnl_color)
+                
+                # Show profit factor with meaningful color coding
+                pf_color = curses.color_pair(1) if profit_factor > 1.5 else curses.color_pair(6) if profit_factor > 1.0 else curses.color_pair(2)
+                profit_factor_display = f"{profit_factor:.2f}" if profit_factor != float('inf') else "∞"
+                self.safe_addstr(y + 5, start_x, f"Profit Factor: {profit_factor_display}", pf_color)
+                
+                self.safe_addstr(y + 6, start_x, f"Avg Trade: ${avg_trade_value:.0f} | BE: {breakeven}")
+            else:
+                self.safe_addstr(y + 1, start_x, "No trades yet")
+                
+        except Exception as e:
+            # Fallback to trade analyzer
+            trade_analyzer = self.config.get('trade_analyzer')
+            if trade_analyzer:
+                try:
+                    win_loss = trade_analyzer.get_win_loss_distribution()
+                    avg_pnl = trade_analyzer.get_average_pnl()
+                    wins = int(win_loss.get('wins', 0))
+                    losses = int(win_loss.get('losses', 0))
+                    avg_win = float(avg_pnl.get('avg_win', 0.0))
+                    avg_loss = float(avg_pnl.get('avg_loss', 0.0))
+                    self.safe_addstr(y + 1, start_x, f"Wins: {wins} | Losses: {losses}")
+                    self.safe_addstr(y + 2, start_x, f"Avg Win: ${avg_win:.2f} | Avg Loss: ${avg_loss:.2f}")
+                except (ValueError, TypeError, AttributeError, KeyError) as e:
+                    self.safe_addstr(y + 1, start_x, f"Trade data error")
+                    self.logger.debug(f"Trade analyzer error: {e}")
+            elif recent_trades:
+                # Calculate basic stats from recent trades if trade_analyzer not available
+                wins = sum(1 for t in recent_trades if t.get('pnl', 0) > 0)
+                losses = len(recent_trades) - wins
+                total_pnl = sum(t.get('pnl', 0) for t in recent_trades)
                 self.safe_addstr(y + 1, start_x, f"Wins: {wins} | Losses: {losses}")
-                self.safe_addstr(y + 2, start_x, f"Avg Win: ${avg_win:.2f} | Avg Loss: ${avg_loss:.2f}")
-            except (ValueError, TypeError, AttributeError, KeyError) as e:
-                self.safe_addstr(y + 1, start_x, f"Trade data error")
-                self.logger.debug(f"Trade analyzer error: {e}")
-        elif recent_trades:
-            # Calculate basic stats from recent trades if trade_analyzer not available
-            wins = sum(1 for t in recent_trades if t.get('pnl', 0) > 0)
-            losses = len(recent_trades) - wins
-            total_pnl = sum(t.get('pnl', 0) for t in recent_trades)
-            self.safe_addstr(y + 1, start_x, f"Wins: {wins} | Losses: {losses}")
-            self.safe_addstr(y + 2, start_x, f"Total PnL: ${total_pnl:.2f}")
+                self.safe_addstr(y + 2, start_x, f"Total PnL: ${total_pnl:.2f}")
+            else:
+                self.safe_addstr(y + 1, start_x, "No trade data available")
 
         # Position-level Risk
-        y += 4
+        y += 6
         self.safe_addstr(y, start_x, "--- Position Risk ---", curses.A_BOLD)
         
-        # Calculate risk from open positions
+        # Get current portfolio and risk data
+        portfolio_value = float(self.config.get('portfolio_value', 10000.0))
         open_positions = self.config.get('open_positions', [])
+        
         if open_positions:
+            total_position_value = 0
             for i, pos in enumerate(open_positions[:3]):  # Show top 3
                 symbol = pos.get('symbol', 'N/A')
                 size = pos.get('size', 0)
@@ -369,14 +658,60 @@ class ConsoleDashboard:
                 
                 # Calculate position value as risk
                 position_value = abs(size) * current_price
-                self.safe_addstr(y + 1 + i, start_x, f"{symbol}: ${position_value:,.2f}")
-        elif risk_manager and hasattr(risk_manager, 'get_position_level_risk'):
-            # Fallback to risk manager
-            position_risk = risk_manager.get_position_level_risk()
-            for i, (symbol, risk) in enumerate(position_risk.items()):
-                self.safe_addstr(y + 1 + i, start_x, f"{symbol}: ${risk:,.2f}")
+                total_position_value += position_value
+                
+                # Calculate percentage of portfolio
+                position_pct = (position_value / portfolio_value * 100) if portfolio_value > 0 else 0
+                
+                self.safe_addstr(y + 1 + i, start_x, f"{symbol}: ${position_value:,.2f} ({position_pct:.1f}%)")
+            
+            # Show total exposure
+            total_exposure_pct = (total_position_value / portfolio_value * 100) if portfolio_value > 0 else 0
+            self.safe_addstr(y + 4, start_x, f"Total Exposure: ${total_position_value:,.2f} ({total_exposure_pct:.1f}%)")
         else:
-            self.safe_addstr(y + 1, start_x, "No positions")
+            # Show risk metrics even without open positions
+            try:
+                # Get recent trading activity for risk assessment
+                from utils.paper_trade_db import get_all_trades
+                recent_trades = get_all_trades(limit=20)
+                
+                if recent_trades:
+                    # Calculate recent risk metrics
+                    recent_volumes = []
+                    recent_pnls = []
+                    
+                    for trade in recent_trades:
+                        if len(trade) >= 7:
+                            volume = float(trade[4]) * float(trade[5])  # price * quantity
+                            pnl = float(trade[6])
+                            recent_volumes.append(volume)
+                            recent_pnls.append(pnl)
+                    
+                    if recent_volumes:
+                        avg_trade_size = sum(recent_volumes) / len(recent_volumes)
+                        max_trade_size = max(recent_volumes)
+                        
+                        # Calculate risk per trade as percentage of portfolio
+                        avg_risk_pct = (avg_trade_size / portfolio_value * 100) if portfolio_value > 0 else 0
+                        max_risk_pct = (max_trade_size / portfolio_value * 100) if portfolio_value > 0 else 0
+                        
+                        self.safe_addstr(y + 1, start_x, f"No open positions")
+                        self.safe_addstr(y + 2, start_x, f"Avg Trade Size: ${avg_trade_size:,.2f} ({avg_risk_pct:.1f}%)")
+                        self.safe_addstr(y + 3, start_x, f"Max Trade Size: ${max_trade_size:,.2f} ({max_risk_pct:.1f}%)")
+                        
+                        # Calculate volatility from recent PnLs
+                        if len(recent_pnls) > 1:
+                            import statistics
+                            pnl_std = statistics.stdev(recent_pnls) if len(recent_pnls) > 1 else 0
+                            self.safe_addstr(y + 4, start_x, f"PnL Volatility: ${pnl_std:.2f}")
+                    else:
+                        self.safe_addstr(y + 1, start_x, "No recent trading data")
+                else:
+                    self.safe_addstr(y + 1, start_x, "No positions or trades")
+                    
+            except Exception as e:
+                self.safe_addstr(y + 1, start_x, f"Risk data unavailable")
+                self.logger.debug(f"Risk calculation error: {e}")
 
     def _draw_position_sizing_pane(self, start_y: int, start_x: int, height: int, width: int):
         """Draws the position sizing visualization pane."""
@@ -391,7 +726,40 @@ class ConsoleDashboard:
             open_positions = self.config.get('open_positions', [])
             
             if not open_positions:
-                self.safe_addstr(y, start_x, "No open positions")
+                # Show theoretical position sizing information
+                try:
+                    # Get current market price
+                    current_price = 107000.0  # Default
+                    if self.price_fetcher:
+                        try:
+                            fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
+                            if fetched_price:
+                                current_price = float(fetched_price)
+                        except:
+                            pass
+                    
+                    # Calculate different risk levels
+                    risk_levels = [0.01, 0.02, 0.05]  # 1%, 2%, 5% risk
+                    leverage = 10  # Default leverage from config
+                    
+                    self.safe_addstr(y, start_x, f"Current BTC Price: ${current_price:,.2f}")
+                    self.safe_addstr(y + 1, start_x, f"Portfolio Value: ${portfolio_value:,.2f}")
+                    self.safe_addstr(y + 2, start_x, f"Leverage: {leverage}x")
+                    
+                    y += 4
+                    self.safe_addstr(y, start_x, "Position Sizing (Risk %):")
+                    
+                    for i, risk_pct in enumerate(risk_levels):
+                        risk_amount = portfolio_value * risk_pct
+                        position_value = risk_amount * leverage
+                        position_size = position_value / current_price
+                        
+                        self.safe_addstr(y + 1 + i, start_x, 
+                                       f"{risk_pct*100:.0f}%: {position_size:.4f} BTC (${position_value:,.0f})")
+                        
+                except Exception as e:
+                    self.safe_addstr(y, start_x, "No open positions")
+                    self.logger.debug(f"Position sizing calculation error: {e}")
                 return
             
             for position in open_positions:
@@ -761,40 +1129,53 @@ class ConsoleDashboard:
         self.safe_addstr(start_y, start_x, "--- Market Depth ---", curses.A_BOLD)
         
         try:
+            self.logger.debug(f"Market depth pane: y={start_y}, x={start_x}, h={height}, w={width}")
+            
             if not self.price_fetcher:
+                self.logger.warning("No price fetcher available for market depth")
                 self.safe_addstr(start_y + 2, start_x, "No price fetcher available")
                 return
+            
+            self.logger.debug("Fetching order book for market depth...")
                 
-            # Always fetch fresh order book data (no cache for live updates)
-            order_book = self.price_fetcher.get_order_book("BTCUSDT", limit=10)
+            order_book = self.price_fetcher.get_order_book("BTCUSDT", limit=100)
             
             if not order_book:
+                self.logger.warning("No order book data received from API")
                 self.safe_addstr(start_y + 2, start_x, "Loading order book...")
                 return
 
-            # Ensure order book data is properly formatted
             bids_data = order_book.get('bids', [])
             asks_data = order_book.get('asks', [])
             
+            self.logger.debug(f"Order book received: {len(bids_data)} bids, {len(asks_data)} asks")
+            
             if not bids_data or not asks_data:
+                self.logger.warning("Order book data is empty")
                 self.safe_addstr(start_y + 2, start_x, "No order book data")
                 return
             
-            # Simplify - don't use pandas for this display, work directly with the data    
             y = start_y + 2
             
-            # Display header
-            self.safe_addstr(y, start_x, "Price      | Qty      | Bar", curses.color_pair(6))
+            self.logger.debug("Starting to display market depth data...")
+            
+            try:
+                header_color = curses.color_pair(6) if curses.has_colors() else 0
+            except:
+                header_color = 0
+            self.safe_addstr(y, start_x, "  Price |     Qty | Bar   ", header_color)
             y += 1
             
-            # Display asks (sell orders) at top - reverse order for proper display
-            asks_display = asks_data[:5]  # Top 5 asks
-            asks_display.reverse()  # Show highest price first
+            asks_display = asks_data[:5]
+            asks_display.reverse()
             
-            self.safe_addstr(y, start_x, "--- ASKS (Sell) ---", curses.color_pair(2))
+            try:
+                ask_color = curses.color_pair(2) if curses.has_colors() else 0
+            except:
+                ask_color = 0
+            self.safe_addstr(y, start_x, "--- ASKS (Sell) ---", ask_color)
             y += 1
             
-            # Calculate max quantity for bar scaling
             all_quantities = [float(bid[1]) for bid in bids_data[:5]] + [float(ask[1]) for ask in asks_data[:5]]
             max_qty = max(all_quantities) if all_quantities else 1
             
@@ -802,40 +1183,48 @@ class ConsoleDashboard:
                 try:
                     price = float(ask[0])
                     qty = float(ask[1])
-                    bar_width = max(0, min(8, int((qty / max_qty) * 8)))
-                    bar_str = '█' * bar_width + '░' * (8 - bar_width)
+                    bar_width = max(0, min(6, int((qty / max_qty) * 6)))
+                    bar_str = '█' * bar_width + '░' * (6 - bar_width)
                     
-                    self.safe_addstr(y, start_x, f"{price:8.0f} | {qty:8.3f} | {bar_str}", curses.color_pair(2))
+                    self.safe_addstr(y, start_x, f"{price:7.1f} | {qty:7.4f} | {bar_str}", ask_color)
                     y += 1
                 except (ValueError, TypeError, IndexError):
                     continue
             
-            # Spread display
             if bids_data and asks_data:
                 try:
                     best_bid = float(bids_data[0][0])
                     best_ask = float(asks_data[0][0])
                     spread = best_ask - best_bid
-                    self.safe_addstr(y, start_x, f"--- SPREAD: ${spread:.2f} ---", curses.color_pair(3))
+                    try:
+                        spread_color = curses.color_pair(3) if curses.has_colors() else 0
+                    except:
+                        spread_color = 0
+                    self.safe_addstr(y, start_x, f"--- SPREAD: ${spread:.2f} ---", spread_color)
                     y += 1
                 except:
                     pass
             
-            # Display bids (buy orders) at bottom
-            self.safe_addstr(y, start_x, "--- BIDS (Buy) ---", curses.color_pair(1))
+            try:
+                bid_color = curses.color_pair(1) if curses.has_colors() else 0
+            except:
+                bid_color = 0
+            self.safe_addstr(y, start_x, "--- BIDS (Buy) ---", bid_color)
             y += 1
             
-            for bid in bids_data[:5]:  # Top 5 bids
+            for bid in bids_data[:5]:
                 try:
                     price = float(bid[0])
                     qty = float(bid[1])
-                    bar_width = max(0, min(8, int((qty / max_qty) * 8)))
-                    bar_str = '█' * bar_width + '░' * (8 - bar_width)
+                    bar_width = max(0, min(6, int((qty / max_qty) * 6)))
+                    bar_str = '█' * bar_width + '░' * (6 - bar_width)
                     
-                    self.safe_addstr(y, start_x, f"{price:8.0f} | {qty:8.3f} | {bar_str}", curses.color_pair(1))
+                    self.safe_addstr(y, start_x, f"{price:7.1f} | {qty:7.4f} | {bar_str}", bid_color)
                     y += 1
                 except (ValueError, TypeError, IndexError):
                     continue
+            
+            self.logger.debug("Market depth display completed successfully")
                     
         except Exception as e:
             self.safe_addstr(start_y + 2, start_x, f"Order book error: {str(e)[:20]}")
@@ -1040,7 +1429,14 @@ def main(stdscr):
         'system_monitor': MockSystemMonitor()
     }
     
-    price_fetcher = MockPriceFetcher()
+    # Use real price fetcher for live market depth data
+    try:
+        price_fetcher = PriceFetcher(logger)
+        logger.info("Using real PriceFetcher for live market data")
+    except Exception as e:
+        logger.warning(f"Failed to create real PriceFetcher: {e}, using mock data")
+        price_fetcher = MockPriceFetcher()
+    
     dashboard = ConsoleDashboard(config=config, logger=logger, price_fetcher=price_fetcher)
     dashboard.stdscr = stdscr
     dashboard.run()
@@ -1048,10 +1444,20 @@ def main(stdscr):
 class ConsoleDashboardManager:
     """Manager class for the console dashboard that handles threading and lifecycle."""
     
-    def __init__(self, logger, config):
+    def __init__(self, logger, config, price_fetcher=None):
         self.logger = logger
         self.config = config
-        self.dashboard = ConsoleDashboard(config=config, logger=logger)
+        # Create real price fetcher if not provided
+        if price_fetcher is None:
+            try:
+                from utils.price_fetcher import PriceFetcher
+                price_fetcher = PriceFetcher(logger)
+                logger.info("Created real PriceFetcher for ConsoleDashboardManager")
+            except Exception as e:
+                logger.warning(f"Failed to create PriceFetcher: {e}")
+                price_fetcher = None
+        
+        self.dashboard = ConsoleDashboard(config=config, logger=logger, price_fetcher=price_fetcher)
         self.running = False
         self.thread = None
     

@@ -1,3 +1,16 @@
+## [2025-06-26] - Market Depth and DRL Agent Fixes
+
+### 🐛 **Bug Fixes**
+- **Market Depth Display**: Fixed an issue where the market depth display was not visible in the console dashboard. The problem was traced to a combination of incorrect formatting, a low data limit, and an incorrect API endpoint.
+- **DRL Agent Initialization**: Resolved a `TypeError` that occurred during the instantiation of the `DRLAgent`. The constructor was being called without the required arguments, which has now been corrected in both `core/bootstrap.py` and `trading/strategies/ensemble_strategy.py`.
+- **Binance API Exception**: Fixed a `NameError` that occurred when handling `BinanceAPIException`. The exception was not imported in the correct scope, which has now been resolved.
+- **Exchange Health Check**: Fixed a persistent bug in the exchange health check that was causing it to fail for futures accounts. The root cause was an incorrect client initialization in `trading/execution/binance_executor.py`, which has now been refactored to correctly handle both spot and futures clients.
+
+### 🔧 **Technical Improvements**
+- **Error Handling**: Improved error handling in the `DRLAgent` initialization and the exchange health check.
+- **Code Quality**: Refactored the market depth display to be more robust and less prone to formatting errors.
+- **Fee Calculation**: Updated the paper trading mode to include funding and borrowing costs in the PnL calculation, ensuring a more accurate simulation of live trading.
+
 ## [Unreleased]
 
 ## [2025-06-25] - Ansible Docker Deployment Implementation

@@ -1,0 +1,31 @@
+
+🤖 TRADE-BASED MODEL TRAINING REPORT
+====================================
+
+Training Summary:
+- Model Type: random_forest
+- Training Samples: 284
+- Cross-Validation Score: 0.986
+- Created: 2025-06-26 06:44:10
+
+Feature Importance:
+   1. entry_price         : 0.299
+   2. trade_value_usd     : 0.230
+   3. minute_of_hour      : 0.192
+   4. trade_size_btc      : 0.125
+   5. position_size_ratio : 0.106
+   6. trade_hour          : 0.023
+   7. hour_of_day         : 0.022
+   8. trade_dow           : 0.001
+   9. day_of_week         : 0.001
+  10. price_ma_5          : 0.000
+
+Model Performance Insights:
+- The model learned from 284 actual trades
+- Cross-validation score of 0.986 indicates good predictive ability
+- This model incorporates real trading experience and should perform better than baseline
+
+Next Steps:
+1. Deploy this model in the ensemble strategy
+2. Continue collecting trade data for further improvements
+3. Monitor live performance vs. historical backtesting

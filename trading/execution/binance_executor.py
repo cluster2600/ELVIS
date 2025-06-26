@@ -1,5 +1,7 @@
 import logging
 import time
+from binance.exceptions import BinanceAPIException
+
 try:
     from binance.um_futures import UMFutures
     from binance.error import ClientError
@@ -14,14 +16,20 @@ from config import API_CONFIG
 from trading.execution.base_executor import BaseExecutor
 from typing import Dict, Any
 from utils.paper_trade_db import record_trade, add_open_position, close_open_position, get_open_positions
+from trading.fees.binance_fee_calculator import BinanceFeeCalculator
 
 class BinanceExecutor(BaseExecutor):
-    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, **kwargs):
+    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, use_futures: bool = False, default_leverage: int = 10, **kwargs):
         super().__init__(logger, **kwargs)
         self.client = None
         self.api_key = api_key
         self.api_secret = api_secret
         self.is_testnet = is_testnet
+        self.use_futures = use_futures
+        self.default_leverage = default_leverage
+        
+        # Initialize fee calculator for comprehensive cost tracking
+        self.fee_calculator = BinanceFeeCalculator(logger)
         
         # Initialize database for paper trading
         self.db_available = False  # Default to false
@@ -30,75 +38,98 @@ class BinanceExecutor(BaseExecutor):
 
     def initialize(self) -> bool:
         try:
-            # Use passed parameters or fallback to config based on testnet mode
-            if self.is_testnet:
-                # Use futures testnet keys for paper trading
-                api_key = self.api_key or API_CONFIG.get('BINANCE_FUTURES_TESTNET_API_KEY')
-                api_secret = self.api_secret or API_CONFIG.get('BINANCE_FUTURES_TESTNET_API_SECRET')
-            else:
-                # Use regular keys for live trading
-                api_key = self.api_key or API_CONFIG.get('API_KEY')
-                api_secret = self.api_secret or API_CONFIG.get('API_SECRET')
-            
-            # Check for placeholder values
-            if (not api_key or not api_secret or 
-                api_key == 'your_binance_api_key_here' or 
-                api_secret == 'your_binance_api_secret_here'):
-                
-                if self.is_testnet:
-                    # For paper trading, we don't need real API keys
-                    self.logger.info("Paper trading mode - no API keys required")
-                    self.client = None  # Will use mock trading
-                    return True
-                else:
-                    raise KeyError("Valid API_KEY and API_SECRET required for live trading")
-            
-            # Initialize client with futures connector if available
-            if FUTURES_AVAILABLE:
+            # For pure paper trading (not futures testnet), no client is needed.
+            if self.is_testnet and not self.use_futures:
+                self.logger.info("Paper trading mode (spot) - no API keys required, using mock execution.")
+                self.client = None
+                return True
+
+            # Determine API keys based on mode
+            if self.use_futures:
+                api_key = self.api_key or getattr(API_CONFIG, 'BINANCE_FUTURES_TESTNET_API_KEY' if self.is_testnet else 'BINANCE_API_KEY')
+                api_secret = self.api_secret or getattr(API_CONFIG, 'BINANCE_FUTURES_TESTNET_API_SECRET' if self.is_testnet else 'BINANCE_API_SECRET')
+            else: # Spot (live or testnet)
+                api_key = self.api_key or getattr(API_CONFIG, 'BINANCE_API_KEY')
+                api_secret = self.api_secret or getattr(API_CONFIG, 'BINANCE_API_SECRET')
+
+            # Validate keys
+            if not api_key or not api_secret or 'your_' in api_key or 'your_' in api_secret:
+                raise KeyError("Valid API_KEY and API_SECRET are required for this mode.")
+
+            # Initialize client based on use_futures flag
+            if FUTURES_AVAILABLE and self.use_futures:
                 base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
                 self.client = UMFutures(key=api_key, secret=api_secret, base_url=base_url)
                 self.logger.info(f"BinanceExecutor initialized with Futures connector ({'testnet' if self.is_testnet else 'live'} mode).")
+                
+                # Set default leverage
+                try:
+                    self.set_leverage('BTCUSDT', self.default_leverage)
+                except Exception as e:
+                    self.logger.warning(f"Could not set leverage for 'BTCUSDT': {e}")
             else:
-                # Fallback to spot client
                 self.client = Client(api_key, api_secret, testnet=self.is_testnet)
-                self.logger.info(f"BinanceExecutor initialized with spot client ({'testnet' if self.is_testnet else 'live'} mode).")
+                self.logger.info(f"BinanceExecutor initialized with Spot client ({'testnet' if self.is_testnet else 'live'} mode).")
             
             return True
-                
+
         except KeyError as e:
             self.logger.error(f"API configuration error: {e}")
-            if not self.is_testnet:
-                raise
             return False
         except Exception as e:
             self.logger.error(f"Failed to initialize BinanceExecutor: {e}")
             return False
 
     def get_balance(self) -> Dict[str, float]:
-        if self.client is None or self.is_testnet:  # Paper trading mode
+        if self.client is None or (self.is_testnet and not self.use_futures):  # Paper trading mode
             # Calculate dynamic balance based on trades
             return self._calculate_paper_balance()
         try:
-            account = self.client.get_account()
-            balances = {item['asset']: float(item['free']) for item in account['balances']}
-            return balances
-        except BinanceAPIException as e:
+            if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                # For futures, get account balance
+                account = self.client.balance()
+                balances = {}
+                for item in account:
+                    if float(item['balance']) > 0:
+                        balances[item['asset']] = float(item['balance'])
+                
+                # Get account info for wallet balance
+                account_info = self.client.account()
+                wallet_balance = float(account_info['totalWalletBalance'])
+                
+                self.logger.info(f"Futures account - Wallet Balance: ${wallet_balance:.2f}")
+                return {'USDT': wallet_balance, 'BTC': 0.0}
+            else:
+                # Spot trading
+                account = self.client.get_account()
+                balances = {item['asset']: float(item['free']) for item in account['balances']}
+                return balances
+        except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting balance: {e}")
             return {'USDT': 10000.0, 'BTC': 0.0}  # Fallback mock balance
 
     def get_position(self, symbol: str) -> Dict[str, Any]:
         try:
-            positions = self.client.get_account()['positions']
-            position = next((p for p in positions if p['symbol'] == symbol), None)
-            return position
-        except BinanceAPIException as e:
+            if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                # For futures, get positions
+                positions = self.client.get_position_risk(symbol=symbol)
+                if positions:
+                    return positions[0]  # Return first position for the symbol
+                return {}
+            else:
+                # Spot trading doesn't have positions
+                return {}
+        except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting position for {symbol}: {e}")
             return {}
 
     def get_current_price(self, symbol: str) -> float:
         try:
-            return float(self.client.get_symbol_ticker(symbol=symbol)['price'])
-        except BinanceAPIException as e:
+            if self.use_futures:
+                return float(self.client.ticker_price(symbol=symbol)['price'])
+            else:
+                return float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+        except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting current price for {symbol}: {e}")
             return 0.0
 
@@ -110,11 +141,12 @@ class BinanceExecutor(BaseExecutor):
             self.logger.error(f"Error setting leverage for {symbol}: {e}")
 
     def execute_buy(self, symbol: str, quantity: float, price: float = None, **kwargs) -> Dict[str, Any]:
-        if self.client is None or self.is_testnet:  # Paper trading mode (no client OR testnet mode)
+        if self.client is None or (self.is_testnet and not self.use_futures):  # Paper trading mode
             try:
                 # Record trade in PostgreSQL
                 current_price = price if price else self._get_mock_price(symbol)
-                fee = quantity * current_price * 0.0004  # Binance taker fee
+                # Calculate comprehensive trading fee
+                fee = self.fee_calculator.calculate_trading_fee(current_price, quantity, is_maker=False, is_futures=self.use_futures)
                 
                 self.logger.info(f"[PAPER TRADE] Executing BUY: {quantity:.6f} {symbol} at ${current_price:.2f}")
                 
@@ -122,8 +154,8 @@ class BinanceExecutor(BaseExecutor):
                 try:
                     if self.db_available:
                         record_trade(symbol, 'BUY', current_price, quantity, 0.0, fee)
-                        add_open_position(symbol, current_price, quantity, 1.0)  # Default leverage 1x
-                        self.logger.info("Trade recorded in database")
+                        add_open_position(symbol, current_price, quantity, self.default_leverage)
+                        self.logger.info(f"Trade recorded in database with {self.default_leverage}x leverage")
                     else:
                         self.logger.info("Database not available, trade executed but not recorded")
                 except Exception as e:
@@ -136,9 +168,10 @@ class BinanceExecutor(BaseExecutor):
                     'quantity': str(quantity),
                     'price': str(current_price),
                     'status': 'FILLED',
-                    'type': 'LIMIT' if price else 'MARKET'
+                    'type': 'LIMIT' if price else 'MARKET',
+                    'leverage': self.default_leverage
                 }
-                self.logger.info(f"[PAPER TRADE] BUY order completed successfully: {mock_order}")
+                self.logger.info(f"[PAPER TRADE] BUY order completed successfully with {self.default_leverage}x leverage: {mock_order}")
                 return mock_order
             except Exception as e:
                 self.logger.error(f"[PAPER TRADE] Error executing BUY order: {e}")
@@ -178,15 +211,16 @@ class BinanceExecutor(BaseExecutor):
             return {}
 
     def execute_sell(self, symbol: str, quantity: float, price: float = None, **kwargs) -> Dict[str, Any]:
-        if self.client is None or self.is_testnet:  # Paper trading mode (no client OR testnet mode)
+        if self.client is None or (self.is_testnet and not self.use_futures):  # Paper trading mode
             try:
                 # Record trade in PostgreSQL
                 current_price = price if price else self._get_mock_price(symbol)
-                fee = quantity * current_price * 0.0004  # Binance taker fee
+                # Calculate comprehensive trading fee
+                fee = self.fee_calculator.calculate_trading_fee(current_price, quantity, is_maker=False, is_futures=self.use_futures)
                 
                 self.logger.info(f"[PAPER TRADE] Executing SELL: {quantity:.6f} {symbol} at ${current_price:.2f}")
                 
-                # Calculate PnL from open positions
+                # Calculate PnL from open positions with leverage
                 pnl = self._calculate_position_pnl(symbol, current_price, quantity)
                 
                 # Try to record in database, but continue even if it fails
@@ -194,7 +228,7 @@ class BinanceExecutor(BaseExecutor):
                     if self.db_available:
                         record_trade(symbol, 'SELL', current_price, quantity, pnl, fee)
                         close_open_position(symbol)  # Close the position
-                        self.logger.info("Trade recorded in database")
+                        self.logger.info(f"Trade recorded in database with PnL: ${pnl:.2f}")
                     else:
                         self.logger.info("Database not available, trade executed but not recorded")
                         pnl = 10.0  # Mock PnL for testing
@@ -209,9 +243,10 @@ class BinanceExecutor(BaseExecutor):
                     'quantity': str(quantity),
                     'price': str(current_price),
                     'status': 'FILLED',
-                    'type': 'LIMIT' if price else 'MARKET'
+                    'type': 'LIMIT' if price else 'MARKET',
+                    'leverage': self.default_leverage
                 }
-                self.logger.info(f"[PAPER TRADE] SELL order completed successfully: {mock_order} | PnL: ${pnl:.2f}")
+                self.logger.info(f"[PAPER TRADE] SELL order completed successfully with {self.default_leverage}x leverage: {mock_order} | PnL: ${pnl:.2f}")
                 return mock_order
             except Exception as e:
                 self.logger.error(f"[PAPER TRADE] Error executing SELL order: {e}")
@@ -366,21 +401,128 @@ class BinanceExecutor(BaseExecutor):
             return 100.0    # Default mock price
 
     def _calculate_position_pnl(self, symbol: str, current_price: float, quantity: float) -> float:
-        """Calculate PnL for a position being closed."""
+        """Calculate comprehensive P&L for a position being closed, including all Binance fees."""
         try:
             positions = get_open_positions()
             position = next((p for p in positions if p[1] == symbol), None)
             if position:
-                # position structure: (id, symbol, entry_price, quantity, leverage, entry_time)
-                entry_price = position[2]
-                position_quantity = position[3]
-                # Calculate PnL: (exit_price - entry_price) * quantity
-                pnl = (current_price - entry_price) * min(quantity, position_quantity)
-                return pnl
+                entry_price = float(position[2])
+                position_quantity = float(position[3])
+                leverage = int(position[4]) if len(position) > 4 else self.default_leverage
+                entry_time = position[5] if len(position) > 5 else datetime.now()
+                
+                from datetime import datetime
+                if isinstance(entry_time, str):
+                    try:
+                        entry_datetime = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                    except:
+                        entry_datetime = datetime.now()
+                else:
+                    entry_datetime = entry_time
+                
+                hours_held = (datetime.now() - entry_datetime).total_seconds() / 3600
+                
+                trade_quantity = min(quantity, position_quantity)
+                fee_calculation = self.fee_calculator.calculate_total_position_cost(
+                    entry_price=entry_price,
+                    exit_price=current_price,
+                    quantity=trade_quantity,
+                    leverage=leverage,
+                    hours_held=hours_held
+                )
+                
+                net_pnl = fee_calculation['net_pnl']
+                
+                self.logger.info(f"Comprehensive P&L calculation for {symbol}:")
+                self.logger.info(f"  Gross P&L: ${fee_calculation['gross_pnl']:+.2f}")
+                self.logger.info(f"  Total Fees: ${fee_calculation['total_fees']:.6f}")
+                self.logger.info(f"  - Entry Fee: ${fee_calculation['entry_fee']:.6f}")
+                self.logger.info(f"  - Exit Fee: ${fee_calculation['exit_fee']:.6f}")
+                self.logger.info(f"  - Funding Fee: ${fee_calculation['funding_fee']:.6f}")
+                self.logger.info(f"  - Borrowing Cost: ${fee_calculation['borrowing_cost']:.6f}")
+                self.logger.info(f"  Net P&L: ${net_pnl:+.2f}")
+                
+                return net_pnl
             return 0.0
         except Exception as e:
-            self.logger.error(f"Error calculating PnL: {e}")
+            self.logger.error(f"Error calculating comprehensive PnL: {e}")
+            try:
+                positions = get_open_positions()
+                position = next((p for p in positions if p[1] == symbol), None)
+                if position:
+                    entry_price = float(position[2])
+                    position_quantity = float(position[3])
+                    simple_pnl = (current_price - entry_price) * min(quantity, position_quantity)
+                    return simple_pnl
+            except:
+                pass
             return 0.0
+    
+    def calculate_open_position_pnl(self, symbol: str, current_price: float, entry_price: float, quantity: float, leverage: int, entry_time) -> Dict[str, float]:
+        """Calculate real-time P&L for open position including all fees."""
+        try:
+            from datetime import datetime
+            
+            # Calculate hours held
+            if isinstance(entry_time, str):
+                try:
+                    entry_datetime = datetime.fromisoformat(entry_time.replace('Z', '+00:00'))
+                except:
+                    entry_datetime = datetime.now()
+            else:
+                entry_datetime = entry_time if entry_time else datetime.now()
+            
+            hours_held = (datetime.now() - entry_datetime).total_seconds() / 3600
+            
+            # Calculate gross P&L
+            gross_pnl = (current_price - entry_price) * quantity
+            
+            # Calculate ongoing costs (but not exit fee since position is still open)
+            position_value = quantity * entry_price
+            
+            # Entry fee (already paid)
+            entry_fee = self.fee_calculator.calculate_trading_fee(entry_price, quantity, is_maker=False, is_futures=self.use_futures)
+            
+            # Ongoing funding fees
+            funding_fee = self.fee_calculator.calculate_funding_fee(position_value, hours_held)
+            
+            # Ongoing borrowing costs for leverage
+            margin_used = position_value / leverage
+            borrowed_amount = position_value - margin_used
+            borrowing_cost = self.fee_calculator.calculate_borrowing_cost(borrowed_amount, hours_held)
+            
+            # Total ongoing costs (not including exit fee)
+            ongoing_costs = entry_fee + funding_fee + borrowing_cost
+            
+            # Net P&L (what you'd get if you closed now, minus exit fee)
+            estimated_exit_fee = self.fee_calculator.calculate_trading_fee(current_price, quantity, is_maker=False, is_futures=self.use_futures)
+            net_pnl = gross_pnl - ongoing_costs - estimated_exit_fee
+            
+            return {
+                'gross_pnl': gross_pnl,
+                'net_pnl': net_pnl,
+                'ongoing_costs': ongoing_costs,
+                'entry_fee': entry_fee,
+                'funding_fee': funding_fee,
+                'borrowing_cost': borrowing_cost,
+                'estimated_exit_fee': estimated_exit_fee,
+                'hours_held': hours_held
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating open position P&L: {e}")
+            # Fallback to simple calculation
+            simple_pnl = (current_price - entry_price) * quantity
+            return {
+                'gross_pnl': simple_pnl,
+                'net_pnl': simple_pnl * 0.999,  # Rough 0.1% fee estimate
+                'ongoing_costs': simple_pnl * 0.001,
+                'entry_fee': 0,
+                'funding_fee': 0,
+                'borrowing_cost': 0,
+                'estimated_exit_fee': 0,
+                'hours_held': 0
+            }
     
     def _init_paper_trading_db(self):
         """Initialize the paper trading database."""
@@ -414,8 +556,8 @@ class BinanceExecutor(BaseExecutor):
             usdt_balance = 10000.0
             btc_balance = 0.0
             
-            # Get all trades and calculate balance changes
-            trades = get_all_trades(limit=1000)  # Get all trades
+            # Get all trades and calculate balance changes (exclude TEST trades)
+            trades = get_all_trades(limit=1000, exclude_test=True)  # Get real trades only
             trade_count = 0
             
             for trade in trades:
