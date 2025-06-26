@@ -309,7 +309,7 @@ class PriceFetcher:
                     order_book = self.client.depth(symbol=symbol, limit=limit)
                 else:
                     # Use spot order book endpoint
-                    order_book = self.client.get_order_book(symbol=symbol, limit=limit)
+                    order_book = self.client.depth(symbol=symbol, limit=limit)
                 self._cache_set(cache_key, order_book, ttl=self.indicator_cache_ttl) # Use indicator TTL
                 self.logger.info(f"Fetched and cached order book for {symbol}.")
                 return order_book

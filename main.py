@@ -153,6 +153,7 @@ def main(mode: str, log_level: str):
         logger.info(f"Using ensemble strategy: {type(ensemble_strategy).__name__}")
         
         # Initialize the console dashboard
+        price_fetcher = container.get('price_fetcher')
         dashboard = ConsoleDashboard(
             config={
                 'portfolio_value': 10520.30,
@@ -309,13 +310,43 @@ def main(mode: str, log_level: str):
                                                 except:
                                                     current_price = float(pos[2])  # Use entry price as fallback
                                                 
-                                                pnl = (current_price - float(pos[2])) * float(pos[3]) if current_price and current_price > 0 else 0
+                                                # Calculate comprehensive P&L including all Binance fees
+                                                try:
+                                                    leverage = int(pos[4]) if len(pos) > 4 else 10
+                                                    entry_time = pos[5] if len(pos) > 5 else None
+                                                    
+                                                    if hasattr(executor, 'calculate_open_position_pnl'):
+                                                        pnl_detail = executor.calculate_open_position_pnl(
+                                                            pos[1], current_price, float(pos[2]), 
+                                                            float(pos[3]), leverage, entry_time
+                                                        )
+                                                        net_pnl = pnl_detail['net_pnl']
+                                                        gross_pnl = pnl_detail['gross_pnl']
+                                                        fees_info = {
+                                                            'total_fees': pnl_detail['ongoing_costs'] + pnl_detail['estimated_exit_fee'],
+                                                            'funding_fee': pnl_detail['funding_fee'],
+                                                            'borrowing_cost': pnl_detail['borrowing_cost'],
+                                                            'hours_held': pnl_detail['hours_held']
+                                                        }
+                                                    else:
+                                                        # Fallback to simple calculation
+                                                        net_pnl = (current_price - float(pos[2])) * float(pos[3]) if current_price and current_price > 0 else 0
+                                                        gross_pnl = net_pnl
+                                                        fees_info = {'total_fees': 0}
+                                                except Exception as e:
+                                                    logger.warning(f"Could not calculate comprehensive P&L: {e}")
+                                                    net_pnl = (current_price - float(pos[2])) * float(pos[3]) if current_price and current_price > 0 else 0
+                                                    gross_pnl = net_pnl
+                                                    fees_info = {'total_fees': 0}
                                                 
                                                 open_positions.append({
                                                     'symbol': pos[1],
                                                     'size': float(pos[3]),
                                                     'entry_price': float(pos[2]),
-                                                    'pnl': pnl,
+                                                    'pnl': net_pnl,  # Net P&L after all fees
+                                                    'gross_pnl': gross_pnl,  # Gross P&L before fees
+                                                    'fees_info': fees_info,
+                                                    'leverage': leverage,
                                                     'entry_time': pos[5] if len(pos) > 5 else 'N/A'
                                                 })
                                         
@@ -339,10 +370,10 @@ def main(mode: str, log_level: str):
                                             total_unrealized_pnl = sum(pos['pnl'] for pos in open_positions)
                                             dashboard.config['unrealized_pnl'] = total_unrealized_pnl
                                             
-                                            # Calculate realized PnL from trade history
+                                            # Calculate realized PnL from trade history (exclude TEST trades)
                                             try:
                                                 from utils.paper_trade_db import get_all_trades
-                                                all_trades = get_all_trades(limit=1000)
+                                                all_trades = get_all_trades(limit=1000, exclude_test=True)
                                                 total_realized_pnl = sum(float(trade[6]) for trade in all_trades if len(trade) >= 7)
                                                 dashboard.config['realized_pnl'] = total_realized_pnl
                                             except Exception:
@@ -358,10 +389,10 @@ def main(mode: str, log_level: str):
                                             # Fallback to static values
                                             dashboard.config['portfolio_value'] = 10000.0
                                         
-                                        # Update recent trades from database
+                                        # Update recent trades from database (exclude TEST trades)
                                         try:
                                             from utils.paper_trade_db import get_all_trades
-                                            recent_trades_raw = get_all_trades(limit=10)
+                                            recent_trades_raw = get_all_trades(limit=10, exclude_test=True)
                                             recent_trades = []
                                             for trade in recent_trades_raw:
                                                 # trade is tuple: (id, timestamp, symbol, side, price, quantity, pnl, fee)
@@ -428,13 +459,14 @@ def main(mode: str, log_level: str):
                                     if signal in ['BUY', 'SELL'] and confidence > 0.05:  # Very low threshold for testing
                                         current_price = data.iloc[-1]['close']
                                         
-                                        # Calculate position size
+                                        # Calculate position size with leverage
                                         available_balance = executor.get_account_balance()
+                                        leverage = getattr(executor, 'default_leverage', 10)  # Get leverage from executor
                                         position_size = active_strategy.calculate_position_size(
-                                            data, current_price, available_balance
+                                            data, current_price, available_balance, leverage
                                         )
                                         
-                                        logger.info(f"Executing {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}")
+                                        logger.info(f"Executing {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
                                         
                                         # Place order
                                         if signal == 'BUY':
@@ -509,14 +541,17 @@ def main(mode: str, log_level: str):
         import os
         
         # Check if we can run a curses dashboard
-        if not sys.stdout.isatty() or not os.getenv('TERM'):
-            logger.info("No TTY or TERM not set - running in headless mode")
+        # Modified to be less restrictive - only require TERM to be set
+        if not os.getenv('TERM'):
+            logger.info("TERM not set - running in headless mode")
             logger.info("Check logs for trading activity")
             # Keep the main thread alive in headless mode
             signal.pause()
         else:
             try:
                 logger.info("Starting console dashboard...")
+                logger.info(f"Dashboard has price_fetcher: {dashboard.price_fetcher is not None}")
+                logger.info("🎯 Look for Market Depth in the RIGHT PANE (columns 94-120)")
                 curses.wrapper(dashboard.run)
             except curses.error as e:
                 logger.warning(f"Curses terminal UI not available: {e}")

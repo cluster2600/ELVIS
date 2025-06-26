@@ -171,53 +171,76 @@ def get_open_positions():
     finally:
         conn.close()
 
-def get_all_trades(limit=100):
+def get_all_trades(limit=100, exclude_test=False):
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute("""
-                    SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
-                    FROM trades
-                    ORDER BY timestamp DESC
-                    LIMIT %s
-                """, (limit,))
+                if exclude_test:
+                    c.execute("""
+                        SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
+                        FROM trades
+                        WHERE side != 'TEST'
+                        ORDER BY timestamp DESC
+                        LIMIT %s
+                    """, (limit,))
+                else:
+                    c.execute("""
+                        SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
+                        FROM trades
+                        ORDER BY timestamp DESC
+                        LIMIT %s
+                    """, (limit,))
                 trades = c.fetchall()
         return trades
     except Exception as e:
         print(f"[ERROR] Fetching trades failed: {e}")
         return []
 
-def get_trade_count():
+def get_trade_count(exclude_test=False):
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute("SELECT COUNT(*) FROM trades")
+                if exclude_test:
+                    c.execute("SELECT COUNT(*) FROM trades WHERE side != 'TEST'")
+                else:
+                    c.execute("SELECT COUNT(*) FROM trades")
                 count = c.fetchone()[0]
                 return count
     except Exception as e:
         print(f"[ERROR] Fetching trade count failed: {e}")
         return 0
 
-def get_total_fees():
+def get_total_fees(exclude_test=False):
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute("SELECT SUM(fee) FROM trades")
+                if exclude_test:
+                    c.execute("SELECT SUM(fee) FROM trades WHERE side != 'TEST'")
+                else:
+                    c.execute("SELECT SUM(fee) FROM trades")
                 total = c.fetchone()[0]
                 return total if total is not None else 0.0
     except Exception as e:
         print(f"[ERROR] Fetching total fees failed: {e}")
         return 0.0
 
-def get_pnl_breakdown():
+def get_pnl_breakdown(exclude_test=False):
     try:
         with get_conn() as conn:
             with conn.cursor() as c:
-                c.execute("""
-                    SELECT symbol, SUM(pnl) as total_pnl, COUNT(*) as trade_count
-                    FROM trades
-                    GROUP BY symbol
-                """)
+                if exclude_test:
+                    c.execute("""
+                        SELECT symbol, SUM(pnl) as total_pnl, COUNT(*) as trade_count
+                        FROM trades
+                        WHERE side != 'TEST'
+                        GROUP BY symbol
+                    """)
+                else:
+                    c.execute("""
+                        SELECT symbol, SUM(pnl) as total_pnl, COUNT(*) as trade_count
+                        FROM trades
+                        GROUP BY symbol
+                    """)
                 breakdown = c.fetchall()
                 return {row[0]: {'total_pnl': row[1], 'trade_count': row[2]} for row in breakdown}
     except Exception as e:

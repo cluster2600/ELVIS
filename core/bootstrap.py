@@ -135,15 +135,46 @@ class ApplicationBootstrapper:
         # Trade Analyzer
         from utils.trade_analyzer import TradeAnalyzer
         def create_trade_analyzer():
-            # Initialize with sample trades for demonstration (replace with real trades in production)
-            sample_trades = [
-                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.001, 'price': 95000, 'pnl': 50.0, 'timestamp': '2024-06-23 10:00:00'},
-                {'symbol': 'BTCUSDT', 'side': 'sell', 'quantity': 0.001, 'price': 96000, 'pnl': 100.0, 'timestamp': '2024-06-23 11:00:00'},
-                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.002, 'price': 94000, 'pnl': -25.0, 'timestamp': '2024-06-23 12:00:00'},
-                {'symbol': 'BTCUSDT', 'side': 'sell', 'quantity': 0.0015, 'price': 97000, 'pnl': 150.0, 'timestamp': '2024-06-23 13:00:00'},
-                {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.0005, 'price': 93000, 'pnl': -10.0, 'timestamp': '2024-06-23 14:00:00'},
-            ]
-            return TradeAnalyzer(sample_trades)
+            # Initialize with live trades from paper trading database
+            try:
+                from utils.paper_trade_db import get_all_trades
+                trades_raw = get_all_trades(limit=1000)  # Get last 1000 trades
+                
+                # Convert database format to trade analyzer format
+                live_trades = []
+                for trade in trades_raw:
+                    # trade = (id, timestamp, symbol, side, price, quantity, pnl, fee)
+                    if len(trade) >= 7:
+                        live_trades.append({
+                            'symbol': trade[2],
+                            'side': trade[3].lower(),
+                            'quantity': float(trade[5]),
+                            'price': float(trade[4]),
+                            'pnl': float(trade[6]),
+                            'timestamp': trade[1]
+                        })
+                
+                logger = container.get('logger')
+                logger.info(f"TradeAnalyzer initialized with {len(live_trades)} live trades from database")
+                
+                # If no live trades, provide minimal sample data
+                if not live_trades:
+                    logger.info("No live trades found, using minimal sample data")
+                    live_trades = [
+                        {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.001, 'price': 107000, 'pnl': 0.0, 'timestamp': '2025-06-25 00:00:00'}
+                    ]
+                
+                return TradeAnalyzer(live_trades)
+                
+            except Exception as e:
+                logger = container.get('logger')
+                logger.warning(f"Failed to load live trades for TradeAnalyzer: {e}")
+                # Fallback to minimal sample data
+                sample_trades = [
+                    {'symbol': 'BTCUSDT', 'side': 'buy', 'quantity': 0.001, 'price': 107000, 'pnl': 0.0, 'timestamp': '2025-06-25 00:00:00'}
+                ]
+                return TradeAnalyzer(sample_trades)
+        
         container.register_singleton('trade_analyzer', create_trade_analyzer)
 
         # System Monitor
@@ -300,25 +331,32 @@ class ApplicationBootstrapper:
         
         # Binance Executor (for backward compatibility)
         def create_executor():
-            exchange_manager = container.get('exchange_manager')
-            executor = exchange_manager.get_exchange('binance')
+            logger = container.get('logger')
+            app_config = container.get('app_config')
+            api_config = container.get('api_config')
+            trading_config = container.get('trading_config')
             
-            # If Binance failed, try to get any available exchange
-            if executor is None:
-                logger = container.get('logger')
-                logger.warning("Binance executor not available, trying to use any available exchange")
-                
-                available_exchanges = list(exchange_manager.exchanges.keys())
-                if available_exchanges:
-                    executor = exchange_manager.get_exchange(available_exchanges[0])
-                    logger.info(f"Using {available_exchanges[0]} executor as fallback")
-                else:
-                    logger.error("No exchanges available - creating mock executor for paper trading")
-                    # Create a mock executor for paper trading
-                    from trading.execution.binance_executor import BinanceExecutor
-                    mock_executor = BinanceExecutor(logger=logger, is_testnet=True)
-                    mock_executor.initialize()
-                    return mock_executor
+            # Check if we should use futures testnet
+            use_futures = app_config['mode'] == 'futures_testnet' or trading_config.get('DEFAULT_MODE') == 'futures_testnet'
+            is_testnet = app_config['mode'] in ['paper', 'futures_testnet']
+            
+            logger.info(f"Creating executor with mode: {app_config['mode']}, use_futures: {use_futures}, is_testnet: {is_testnet}")
+            
+            # Create a Binance executor with futures support
+            from trading.execution.binance_executor import BinanceExecutor
+            executor = BinanceExecutor(
+                logger=logger, 
+                is_testnet=is_testnet,
+                use_futures=use_futures,
+                default_leverage=trading_config.get('DEFAULT_LEVERAGE', 10)
+            )
+            
+            success = executor.initialize()
+            if not success:
+                logger.warning("Failed to initialize executor with futures, falling back to paper trading")
+                # Fallback to paper trading executor
+                executor = BinanceExecutor(logger=logger, is_testnet=True, use_futures=False)
+                executor.initialize()
             
             return executor
         
@@ -389,7 +427,20 @@ class ApplicationBootstrapper:
         def create_drl_agent():
             try:
                 from drl_agents.elegantrl_models import DRLAgent
-                return DRLAgent()
+                from core.models.reinforcement_learning_model import TradingEnv
+                
+                # These should be properly initialized or fetched
+                price_array = []  # Replace with actual data
+                tech_array = []   # Replace with actual data
+                env_params = {}   # Replace with actual params
+                
+                return DRLAgent(
+                    env=TradingEnv,
+                    price_array=price_array,
+                    tech_array=tech_array,
+                    env_params=env_params,
+                    if_log=True
+                )
             except Exception as e:
                 logger = container.get('logger')
                 logger.warning(f"Failed to create DRL agent: {e}")

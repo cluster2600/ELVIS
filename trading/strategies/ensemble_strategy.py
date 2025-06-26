@@ -23,15 +23,18 @@ class EnsembleStrategy(BaseStrategy):
     EnsembleStrategy combines predictions from multiple models:
     - YDF Random Forest model
     - CoreML Neural Network model
+    - Trade-learned model (trained on actual trading history)
     - (optional) MLX Large Language Model for additional decision support
     
     This strategy averages model outputs to determine a consensus BUY, SELL, or HOLD signal.
+    The trade-learned model provides adaptive learning from actual trading experience.
     """
 
     def __init__(self, logger: logging.Logger, 
                  symbols: List[str] = ['BTCUSDT'],
                  ydf_model_path: str = "models/model_rf.ydf",
                  coreml_model_path: str = "models/NNModel.mlpackage",
+                 trade_learned_model_path: str = "training/models/trade_learned_model.pkl",
                  mlx_url: str = None,
                  risk_per_trade: float = 0.01,
                  min_position_size: float = 0.001,
@@ -79,6 +82,7 @@ class EnsembleStrategy(BaseStrategy):
         # self.ydf_model = self._load_ydf_model(ydf_model_path)
         self.ydf_model = None
         self.nn_model = self._load_coreml_model(coreml_model_path)
+        self.trade_learned_model = self._load_trade_learned_model(trade_learned_model_path)
         self._check_mlx_connectivity()
         
         # Initialize DRL agent
@@ -108,6 +112,25 @@ class EnsembleStrategy(BaseStrategy):
             self.logger.error(f"Failed to load CoreML model: {e}")
             return None
 
+    def _load_trade_learned_model(self, model_path: str):
+        """Load the trade-learned model from disk."""
+        try:
+            import joblib
+            if not os.path.exists(model_path):
+                self.logger.warning(f"Trade-learned model file not found at {model_path}")
+                return None
+            
+            model_data = joblib.load(model_path)
+            self.logger.info(f"Trade-learned model loaded from {model_path}")
+            self.logger.info(f"Model type: {model_data.get('model_type', 'unknown')}")
+            self.logger.info(f"Training samples: {model_data.get('training_samples', 'unknown')}")
+            self.logger.info(f"CV score: {model_data.get('cv_score', 'unknown')}")
+            
+            return model_data
+        except Exception as e:
+            self.logger.error(f"Failed to load trade-learned model: {e}")
+            return None
+
     def _check_mlx_connectivity(self):
         """Check if MLX server is available."""
         if not self.mlx_url:
@@ -123,7 +146,6 @@ class EnsembleStrategy(BaseStrategy):
     def _initialize_drl_agent(self):
         """Initialize DRL agent if available."""
         try:
-            # Try to get DRL agent from dependency injection container first
             from core.di import container
             try:
                 agent = container.get('drl_agent')
@@ -133,14 +155,22 @@ class EnsembleStrategy(BaseStrategy):
             except Exception:
                 pass
             
-            # Fallback to direct initialization
             from drl_agents.elegantrl_models import DRLAgent
-            
-            # Check for saved DRL model
+            from core.models.reinforcement_learning_model import TradingEnv
+
             drl_model_path = "models/checkpoints"
             if os.path.exists(drl_model_path):
-                # Initialize DRL agent with saved model
-                agent = DRLAgent()
+                price_array = []  # Replace with actual data
+                tech_array = []   # Replace with actual data
+                env_params = {}   # Replace with actual params
+                
+                agent = DRLAgent(
+                    env=TradingEnv,
+                    price_array=price_array,
+                    tech_array=tech_array,
+                    env_params=env_params,
+                    if_log=True
+                )
                 self.logger.info("DRL agent initialized successfully")
                 return agent
             else:
@@ -281,6 +311,36 @@ class EnsembleStrategy(BaseStrategy):
                 self.logger.debug(f"Current REQUIRED_FEATURES count: {len(self.REQUIRED_FEATURES)}")
                 self.logger.debug(f"Features list: {self.REQUIRED_FEATURES}")
         
+        # Try trade-learned model if available
+        if self.trade_learned_model is not None:
+            try:
+                model_data = self.trade_learned_model
+                model = model_data['model']
+                feature_names = model_data['feature_names']
+                
+                # Extract features for the trade-learned model
+                trade_features = self._extract_trade_learned_features(features)
+                
+                # Create feature array in the correct order
+                feature_array = np.array([[trade_features.get(name, 0.0) for name in feature_names]])
+                
+                # Get prediction probabilities
+                probabilities = model.predict_proba(feature_array)[0]
+                
+                # Convert to [BUY, HOLD, SELL] format
+                # Model was trained with 0=loss, 1=profit
+                # Map: profit->BUY, loss->SELL, neutral->HOLD
+                if len(probabilities) == 2:  # Binary classifier
+                    # probabilities[0] = loss, probabilities[1] = profit
+                    buy_prob = probabilities[1]   # Profit probability -> BUY
+                    sell_prob = probabilities[0]  # Loss probability -> SELL
+                    hold_prob = 1.0 - max(buy_prob, sell_prob)  # Neutral
+                    preds['trade_learned'] = np.array([buy_prob, hold_prob, sell_prob])
+                
+                self.logger.debug(f"Trade-learned model prediction successful")
+            except Exception as e:
+                self.logger.warning(f"Trade-learned model prediction failed: {e}")
+        
         # Try MLX if available
         if self.mlx_available:
             try:
@@ -302,10 +362,13 @@ class EnsembleStrategy(BaseStrategy):
             except Exception as e:
                 self.logger.warning(f"DRL agent prediction error: {e}")
         
-        # Technical analysis fallback if no models available
-        if not preds:
-            self.logger.info("Using technical analysis fallback")
+        # Technical analysis fallback if no models available or all failed
+        valid_preds = {k: v for k, v in preds.items() if v is not None and len(v) == 3 and not np.any(np.isnan(v))}
+        if not valid_preds:
+            self.logger.info("Using technical analysis fallback (no valid model predictions)")
             preds['technical'] = self._technical_analysis_prediction(features)
+        else:
+            self.logger.info(f"Using {len(valid_preds)} valid model predictions: {list(valid_preds.keys())}")
         
         return preds
 
@@ -333,15 +396,23 @@ class EnsembleStrategy(BaseStrategy):
                 preds = self._get_model_predictions(features)
                 
                 if preds:
-                    pred_arrays = [p for p in preds.values() if p is not None and len(p) == 3]
+                    # Filter out invalid predictions (None, wrong size, NaN values)
+                    pred_arrays = [p for p in preds.values() if p is not None and len(p) == 3 and not np.any(np.isnan(p))]
                     if pred_arrays:
                         pred_array = np.mean(pred_arrays, axis=0)
-                        best_idx = np.argmax(pred_array)
-                        decision = self.CLASSES[best_idx]
-                        confidence = float(pred_array[best_idx])
+                        # Ensure no NaN values in final prediction
+                        if not np.any(np.isnan(pred_array)):
+                            best_idx = np.argmax(pred_array)
+                            decision = self.CLASSES[best_idx]
+                            confidence = float(pred_array[best_idx])
+                        else:
+                            self.logger.warning("Final prediction array contains NaN values, defaulting to HOLD")
+                            decision, confidence = "HOLD", 0.0
                     else:
+                        self.logger.warning("No valid prediction arrays found, defaulting to HOLD")
                         decision, confidence = "HOLD", 0.0
                 else:
+                    self.logger.warning("No predictions received, defaulting to HOLD")
                     decision, confidence = "HOLD", 0.0
                 
                 self.logger.info(f"Ensemble decision for {symbol}: {decision} ({confidence:.4f})")
@@ -493,47 +564,59 @@ class EnsembleStrategy(BaseStrategy):
         atr = pd.Series(tr).rolling(window=period).mean().iloc[-1]
         return atr if pd.notna(atr) else 0.01
 
-    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float) -> float:
+    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float, leverage: float = 10.0) -> float:
         """
-        Calculate position size based on volatility (ATR) and risk per trade.
+        Calculate position size based on volatility (ATR), risk per trade, and leverage.
         
         Args:
             data (pd.DataFrame): The data to calculate position size from.
             current_price (float): The current price.
             available_capital (float): The available capital.
+            leverage (float): The leverage to use for the position.
             
         Returns:
             float: The position size in BTC.
         """
         try:
-            self.logger.info(f"Calculating position size - Price: {current_price}, Capital: {available_capital}")
+            self.logger.info(f"Calculating position size - Price: {current_price}, Capital: {available_capital}, Leverage: {leverage}x")
             
             # Simplified position sizing for testing
             if available_capital <= 0 or current_price <= 0:
                 self.logger.warning(f"Invalid inputs - Capital: {available_capital}, Price: {current_price}")
                 return self.min_position_size
             
-            # Simple percentage-based position sizing for testing
+            # Correct leverage-adjusted position sizing
             risk_percentage = 0.02  # Risk 2% of capital per trade
-            position_value = available_capital * risk_percentage
+            risk_amount = available_capital * risk_percentage  # Dollar amount we're willing to risk
+            
+            # With leverage, we can control a larger position while only risking the risk_amount
+            # The position value is the actual market exposure (leveraged)
+            position_value = risk_amount * leverage  # This is our market exposure
             position_size = position_value / current_price
             
-            # Clamp to min/max limits
+            # Clamp to min/max limits (without leverage multiplication)
             position_size = max(position_size, self.min_position_size)
             position_size = min(position_size, self.max_position_size)
             
-            # Ensure we don't exceed available capital
-            max_affordable = available_capital * 0.95 / current_price  # Use 95% to leave buffer
-            position_size = min(position_size, max_affordable)
+            # Ensure we don't exceed what we can afford with our margin
+            # With leverage, we only need to put up position_value / leverage as margin
+            required_margin = position_value / leverage
+            max_affordable_margin = available_capital * 0.95  # Use 95% to leave buffer
+            if required_margin > max_affordable_margin:
+                # Scale down position to fit available margin
+                max_position_value = max_affordable_margin * leverage
+                position_size = max_position_value / current_price
             
-            self.logger.info(f"Calculated position size: {position_size:.6f} BTC (${position_size * current_price:.2f})")
+            self.logger.info(f"Calculated position size: {position_size:.6f} BTC (${position_size * current_price:.2f}, {leverage}x leveraged)")
             
             return max(position_size, self.min_position_size)
             
         except Exception as e:
             self.logger.error(f"Error calculating position size: {e}")
-            # Return a safe fallback
-            fallback_size = min(0.001, available_capital / current_price * 0.01)  # 1% of capital
+            # Return a safe fallback - 1% of capital as market exposure
+            fallback_risk = available_capital * 0.01  # 1% of capital at risk
+            fallback_position_value = fallback_risk * leverage  # Market exposure with leverage
+            fallback_size = fallback_position_value / current_price if current_price > 0 else self.min_position_size
             self.logger.info(f"Using fallback position size: {fallback_size:.6f}")
             return max(fallback_size, self.min_position_size)
 
@@ -621,14 +704,96 @@ class EnsembleStrategy(BaseStrategy):
             self.logger.error(f"Error creating features: {e}")
             return {k: 0.0 for k in self.REQUIRED_FEATURES}
     
+    def _extract_trade_learned_features(self, features: dict) -> Dict[str, float]:
+        """
+        Extract features for the trade-learned model from market data
+        """
+        try:
+            # Get current time
+            now = datetime.now()
+            
+            # Get current price and volume data
+            current_price = features.get('price', 97000.0)
+            current_volume = features.get('volume', 1000.0)
+            
+            # Calculate trade characteristics (for simulation)
+            estimated_trade_size = 0.01  # Small default trade size
+            estimated_trade_value = estimated_trade_size * current_price
+            
+            # Extract the features that the model was trained on
+            trade_features = {
+                # Market timing features
+                'hour_of_day': now.hour,
+                'day_of_week': now.weekday(),
+                'minute_of_hour': now.minute,
+                
+                # Price and volatility features (simulated from current market data)
+                'price_ma_5': features.get('sma', current_price),
+                'price_ma_20': features.get('sma', current_price),
+                'price_momentum_short': 0.0,  # Would need historical data
+                'price_momentum_long': 0.0,   # Would need historical data
+                
+                # Technical indicators
+                'rsi': features.get('rsi', 50.0),
+                'macd': features.get('macd', 0.0),
+                'bollinger_position': 0.5,  # Default neutral position
+                
+                # Volume features
+                'volume_ma': features.get('volume_ma', current_volume),
+                'volume_ratio': 1.0,  # Default
+                
+                # Market structure
+                'volatility_estimate': features.get('atr', current_price * 0.02) / current_price,
+                'spread_estimate': 0.001,  # 0.1% default spread
+                
+                # Trade characteristics (estimated)
+                'trade_size_btc': estimated_trade_size,
+                'trade_value_usd': estimated_trade_value,
+                'entry_price': current_price,
+                'trade_hour': now.hour,
+                'trade_dow': now.weekday(),
+                'position_size_ratio': estimated_trade_value / 10000.0,  # Assume $10k portfolio
+            }
+            
+            return trade_features
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting trade-learned features: {e}")
+            # Return default features
+            now = datetime.now()
+            return {
+                'price_ma_5': 97000.0, 'price_ma_20': 97000.0, 'price_momentum_short': 0.0,
+                'price_momentum_long': 0.0, 'rsi': 50.0, 'macd': 0.0, 'bollinger_position': 0.5,
+                'volume_ma': 1000.0, 'volume_ratio': 1.0, 'hour_of_day': now.hour,
+                'day_of_week': now.weekday(), 'minute_of_hour': now.minute,
+                'volatility_estimate': 0.02, 'spread_estimate': 0.001, 'trade_size_btc': 0.01,
+                'trade_value_usd': 970.0, 'entry_price': 97000.0, 'trade_hour': now.hour,
+                'trade_dow': now.weekday(), 'position_size_ratio': 0.097
+            }
+    
     def _technical_analysis_prediction(self, features: dict) -> np.ndarray:
         """Simple technical analysis based prediction as fallback."""
         try:
+            # Get indicator values and handle NaN/None
             rsi = features.get('rsi', 50.0)
+            if pd.isna(rsi) or rsi is None:
+                rsi = 50.0
+                
             macd = features.get('macd', 0.0)
+            if pd.isna(macd) or macd is None:
+                macd = 0.0
+                
             signal_line = features.get('signal_line', 0.0)
+            if pd.isna(signal_line) or signal_line is None:
+                signal_line = 0.0
+                
             price = features.get('price', 0.0)
+            if pd.isna(price) or price is None:
+                price = 0.0
+                
             sma = features.get('sma', 0.0)
+            if pd.isna(sma) or sma is None:
+                sma = price  # Use price as fallback for SMA
             
             self.logger.info(f"Technical analysis - RSI: {rsi:.2f}, MACD: {macd:.4f}, Signal: {signal_line:.4f}, Price: {price:.2f}, SMA: {sma:.2f}")
             

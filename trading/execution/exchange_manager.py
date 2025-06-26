@@ -125,7 +125,20 @@ class ExchangeManager:
             
             executor = self.exchanges[name]
             
-            # Try to get current price as health check
+            # Check if this is paper trading mode
+            if hasattr(executor, 'is_testnet') and executor.is_testnet and getattr(executor, 'client', None) is None:
+                # For paper trading, just mark as healthy since no real API connection needed
+                self.exchange_health[name] = {
+                    'status': 'healthy',
+                    'last_check': datetime.now(),
+                    'error_count': 0,
+                    'last_error': None,
+                    'test_price': 97000.0,  # Mock price for paper trading
+                    'mode': 'paper_trading'
+                }
+                return self.exchange_health[name]
+            
+            # Try to get current price as health check for live trading
             price = executor.get_current_price('BTCUSDT')
             
             if price > 0:
@@ -167,6 +180,12 @@ class ExchangeManager:
             try:
                 if self.exchange_health.get(exchange_name, {}).get('status') != 'healthy':
                     return exchange_name, 0.0
+                
+                # Handle paper trading mode
+                if hasattr(executor, 'is_testnet') and executor.is_testnet and getattr(executor, 'client', None) is None:
+                    # Return mock price for paper trading
+                    mock_price = executor._get_mock_price(symbol) if hasattr(executor, '_get_mock_price') else 97000.0
+                    return exchange_name, mock_price
                 
                 price = executor.get_current_price(symbol)
                 return exchange_name, price
