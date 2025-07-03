@@ -33,10 +33,10 @@ class RiskManager:
         self.last_trade_time = None
         self.trades_today = 0
         self.daily_pnl = 0.0
-        self.daily_profit_target_usd = 1000.0
-        self.daily_loss_limit_usd = -500.0
-        self.cooldown_period = 3600.0
-        self.max_trades_per_day = 5
+        self.daily_profit_target_usd = 5000.0  # Keep reasonable daily profit target
+        self.daily_loss_limit_usd = -500.0  # Reduced loss limit for better capital preservation
+        self.cooldown_period = 3.0  # Reduced from 10s to 3s for crypto volatility
+        self.max_trades_per_day = 300  # Increased to allow for higher frequency trading
 
     def add_position(self, symbol: str, position_data: Dict[str, Any]):
         """
