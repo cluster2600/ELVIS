@@ -5,6 +5,7 @@ import signal
 import sys
 import time
 import curses
+import os
 
 from core.bootstrap import bootstrap_application
 from core.di import container
@@ -148,9 +149,59 @@ def main(mode: str, log_level: str):
         price_fetcher = container.get('price_fetcher')
         executor = container.get('executor')
         
-        # Force ensemble strategy for consistent behavior
-        ensemble_strategy = container.get('strategy')
-        logger.info(f"Using ensemble strategy: {type(ensemble_strategy).__name__}")
+        # Get the active strategy (ensemble or research-based)
+        active_strategy = container.get('strategy')
+        strategy_mode = os.getenv('STRATEGY_MODE', 'ensemble')
+        logger.info(f"🎯 Active strategy: {type(active_strategy).__name__} (mode: {strategy_mode})")
+        
+        if strategy_mode == 'research':
+            logger.info("🔬 Research-based strategy active - targeting 14.9% annual returns")
+            logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
+            logger.info("🎯 Following Bonenkamp (2021) research methodology")
+            
+            # Initial training for research strategy if a saved model is not loaded
+            if not active_strategy.is_trained:
+                logger.info("🧠 Research model not found or loaded. Initiating pre-training...")
+                try:
+                    # Fetch a good amount of historical data for robust initial training
+                    # The research uses 1 week of 5-min data, which is 2016 data points.
+                    logger.info("Fetching historical data for initial training...")
+                    initial_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
+                    
+                    if initial_data is not None and not initial_data.empty and len(initial_data) > 200:
+                        logger.info(f"✅ Fetched {len(initial_data)} records for initial training.")
+                        active_strategy.train_model(initial_data)
+                    else:
+                        logger.error(f"❌ Could not fetch sufficient initial data for training. Bot will not trade until trained.")
+                except Exception as e:
+                    logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
+        
+        # Initialize the console dashboard
+        price_fetcher = container.get('price_fetcher')
+        if strategy_mode == 'research':
+            logger.info("🔬 Research-based strategy active - targeting 14.9% annual returns")
+            logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
+            logger.info("🎯 Following Bonenkamp (2021) research methodology")
+            
+            # Initial training for research strategy if a saved model is not loaded
+            if not active_strategy.is_trained:
+                logger.info("🧠 Research model not found or loaded. Initiating pre-training...")
+                try:
+                    # Fetch a good amount of historical data for robust initial training
+                    # The research uses 1 week of 5-min data, which is 2016 data points.
+                    logger.info("Fetching historical data for initial training...")
+                    initial_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
+                    
+                    if initial_data is not None and not initial_data.empty and len(initial_data) > 200:
+                        logger.info(f"✅ Fetched {len(initial_data)} records for initial training.")
+                        active_strategy.train_model(initial_data)
+                    else:
+                        logger.error(f"❌ Could not fetch sufficient initial data for training. Bot will not trade until trained.")
+                except Exception as e:
+                    logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
+        
+        # Initialize the console dashboard
+        price_fetcher = container.get('price_fetcher')
         
         # Initialize the console dashboard
         price_fetcher = container.get('price_fetcher')
@@ -206,18 +257,18 @@ def main(mode: str, log_level: str):
                     logger.info("Attempting to fetch market data...")
                     try:
                         data = price_fetcher.get_historical_klines("BTCUSDT", "1m")
-                        logger.info(f"Fetched data shape: {data.shape if not data.empty else 'EMPTY'}")
+                        logger.debug(f"Fetched data shape: {data.shape if not data.empty else 'EMPTY'}")
                         if not data.empty:
-                            logger.info(f"Data columns: {list(data.columns)}")
+                            logger.debug(f"Data columns: {list(data.columns)}")
                             # Check if 'close' column exists before accessing it
                             if 'close' in data.columns:
-                                logger.info(f"Latest close price: {data.iloc[-1]['close']}")
+                                logger.debug(f"Latest close price: {data.iloc[-1]['close']}")
                             else:
                                 logger.warning(f"'close' column missing from data. Available columns: {list(data.columns)}")
                                 # Try to use a different column or create mock data
                                 if len(data.columns) >= 5:  # Assume standard OHLCV order
                                     data.columns = ['open_time', 'open', 'high', 'low', 'close', 'volume'] + list(data.columns[6:])
-                                    logger.info(f"Reassigned column names. Latest close price: {data.iloc[-1]['close']}")
+                                    logger.debug(f"Reassigned column names. Latest close price: {data.iloc[-1]['close']}")
                                 else:
                                     logger.warning("Insufficient columns, falling back to mock data")
                                     data = pd.DataFrame()  # Force fallback to mock data
@@ -259,10 +310,10 @@ def main(mode: str, log_level: str):
                     
                     if not data.empty:
                         # Calculate technical indicators for the data
-                        logger.info("Adding technical indicators...")
+                        logger.debug("Adding technical indicators...")
                         data = add_technical_indicators(data)
-                        logger.info(f"Data with indicators shape: {data.shape}")
-                        logger.info(f"Available columns: {list(data.columns)}")
+                        logger.debug(f"Data with indicators shape: {data.shape}")
+                        logger.debug(f"Available columns: {list(data.columns)}")
                         
                         # Update dashboard config with real OHLC data
                         try:
@@ -366,6 +417,15 @@ def main(mode: str, log_level: str):
                                             
                                             dashboard.config['portfolio_value'] = total_portfolio_value
                                             
+                                            # Add real-time price data
+                                            dashboard.config['current_btc_price'] = current_btc_price
+                                            
+                                            # Add real-time leverage from executor
+                                            if executor and hasattr(executor, 'default_leverage'):
+                                                dashboard.config['leverage'] = executor.default_leverage
+                                            else:
+                                                dashboard.config['leverage'] = 10  # Default fallback
+                                            
                                             # Calculate total unrealized PnL with live prices
                                             total_unrealized_pnl = sum(pos['pnl'] for pos in open_positions)
                                             dashboard.config['unrealized_pnl'] = total_unrealized_pnl
@@ -433,86 +493,137 @@ def main(mode: str, log_level: str):
                         
                         logger.info(f"Latest indicators - RSI: {rsi_str}, MACD: {macd_str}, SMA: {sma_str}")
                         
-                        # Use ensemble strategy directly for better debugging
-                        active_strategy = ensemble_strategy
+                        # Use the active strategy (ensemble or research-based)
                         logger.info(f"Using strategy: {type(active_strategy).__name__}")
                         
-                        # Generate signals using the strategy
-                        if hasattr(active_strategy, 'generate_signals'):
-                            # For ensemble strategy, pass data as dict
-                            if hasattr(active_strategy, 'symbols'):
-                                signal_data = {"BTCUSDT": data}
-                                logger.info(f"Calling generate_signals with data for BTCUSDT (shape: {data.shape})")
-                                signals = active_strategy.generate_signals(signal_data)
-                                logger.info(f"Generated signals: {signals}")
+                        # Generate signals using the NEW generate_signal method (singular) with anti-HOLD logic
+                        if hasattr(active_strategy, 'generate_signal'):
+                            # Get current market data for signal generation
+                            current_price = float(data.iloc[-1]['close'])
+                            market_data = {
+                                'close': current_price,
+                                'price': current_price,
+                                'high': float(data.iloc[-1].get('high', current_price)),
+                                'low': float(data.iloc[-1].get('low', current_price)),
+                                'volume': float(data.iloc[-1].get('volume', 1000)),
+                                'rsi': float(data.iloc[-1].get('rsi', 50.0)) if pd.notna(data.iloc[-1].get('rsi')) else 50.0,
+                                'macd': float(data.iloc[-1].get('macd', 0.0)) if pd.notna(data.iloc[-1].get('macd')) else 0.0,
+                                'macd_signal': float(data.iloc[-1].get('signal_line', 0.0)) if pd.notna(data.iloc[-1].get('signal_line')) else 0.0,
+                                'sma_20': float(data.iloc[-1].get('sma_20', current_price)) if pd.notna(data.iloc[-1].get('sma_20')) else current_price,
+                                'sma_50': float(data.iloc[-1].get('sma_50', current_price)) if pd.notna(data.iloc[-1].get('sma_50')) else current_price,
+                                'atr': float(data.iloc[-1].get('atr', current_price * 0.02)) if pd.notna(data.iloc[-1].get('atr')) else current_price * 0.02,
+                                'adx': float(data.iloc[-1].get('adx', 25.0)) if pd.notna(data.iloc[-1].get('adx')) else 25.0,
+                                'bb_upper': float(data.iloc[-1].get('upper_bb', current_price * 1.02)) if pd.notna(data.iloc[-1].get('upper_bb')) else current_price * 1.02,
+                                'bb_lower': float(data.iloc[-1].get('lower_bb', current_price * 0.98)) if pd.notna(data.iloc[-1].get('lower_bb')) else current_price * 0.98,
+                                'bb_middle': float(data.iloc[-1].get('sma_bb', current_price)) if pd.notna(data.iloc[-1].get('sma_bb')) else current_price
+                            }
+                            
+                            symbol = "BTCUSDT"
+                            logger.info(f"🎯 Calling NEW generate_signal method with market data for {symbol}")
+                            logger.info(f"📊 Market data: Price=${current_price:.2f}, RSI={market_data['rsi']:.1f}, MACD={market_data['macd']:.3f}")
+                            
+                            # Call the NEW method with anti-HOLD logic and research strategy integration
+                            signal, confidence = active_strategy.generate_signal(symbol, market_data)
+                            
+                            logger.info(f"🎉 NEW METHOD RESULT: {signal} with confidence {confidence:.3f}")
+                            
+                            # The new method should NEVER return HOLD - verify this
+                            if signal == 'HOLD':
+                                logger.error(f"🚨 CRITICAL ERROR: New generate_signal method returned HOLD! This should never happen!")
+                                logger.error(f"🚨 Signal: {signal}, Confidence: {confidence}")
+                                # Force it to BUY as emergency fallback
+                                signal = 'BUY'
+                                confidence = 0.65
+                                logger.warning(f"🚨 EMERGENCY OVERRIDE: Forced to {signal} with {confidence:.3f} confidence")
+                            
+                            logger.info(f"Strategy signal for {symbol}: {signal} (confidence: {confidence:.3f})")
+                            
+                            # Execute trades based on signals with reasonable threshold
+                            if signal in ['BUY', 'SELL'] and confidence >= 0.6:  # 60% threshold for quality trades
+                                current_price = data.iloc[-1]['close']
                                 
-                                logger.info(f"Processing {len(signals)} signals...")
-                                # Process signals for each symbol
+                                # Calculate position size with EMERGENCY FALLBACKS
+                                available_balance = executor.get_account_balance()
+                                leverage = getattr(executor, 'default_leverage', 10)  # Get leverage from executor
+                                
+                                try:
+                                    # Pass balances to the position size calculation
+                                    balance_info = executor.get_balance()
+                                    position_size = active_strategy.calculate_position_size(
+                                        data, 
+                                        current_price, 
+                                        available_capital=available_balance, 
+                                        leverage=leverage, 
+                                        signal_confidence=confidence
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error in position size calculation: {e}")
+                                    # Emergency fallback position size
+                                    position_size = min(0.001, available_balance / current_price * 0.1)
+                                    logger.warning(f"🚨 Using emergency position size: {position_size:.6f}")
+                                
+                                # Emergency check - force minimum position size if zero
+                                if position_size <= 0:
+                                    position_size = min(0.001, available_balance / current_price * 0.1)
+                                    logger.warning(f"🚨 Position size was zero, forced to: {position_size:.6f}")
+
+                                logger.info(f"🎯 NEW METHOD EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
+                                
+                                # Execute order with new method
+                                logger.info(f"🎯 ORDER ATTEMPT: {signal} | Size: {position_size:.6f} | Price: ${current_price:.2f}")
+                                
+                                if signal == 'BUY':
+                                    order_result = executor.place_order(symbol, 'buy', position_size, current_price)
+                                    if order_result:
+                                        logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                        # Small delay to ensure trade completion
+                                        time.sleep(0.5)
+                                    else:
+                                        logger.error(f"❌ [FAIL] Failed to execute BUY order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
+                                elif signal == 'SELL':
+                                    order_result = executor.place_order(symbol, 'sell', position_size, current_price)
+                                    if order_result:
+                                        logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                        # Small delay to ensure trade completion
+                                        time.sleep(0.5)
+                                    else:
+                                        logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
+                            else:
+                                logger.warning(f"⚠️ Signal filtered out - {symbol}: signal={signal}, confidence={confidence:.3f} (threshold=60%)")
+                                logger.info(f"💡 Consider lowering confidence threshold if you want more frequent trading")
+                        else:
+                            # Fallback for strategies without the new generate_signal method
+                            logger.warning(f"Strategy {type(active_strategy).__name__} doesn't have generate_signal method - using old approach")
+                            if hasattr(active_strategy, 'generate_signals'):
+                                signal_data = {"BTCUSDT": data}
+                                signals = active_strategy.generate_signals(signal_data)
+                                
                                 for symbol, signal_info in signals.items():
                                     signal = signal_info.get('signal', 'HOLD')
                                     confidence = signal_info.get('confidence', 0.0)
                                     
-                                    logger.info(f"Strategy signal for {symbol}: {signal} (confidence: {confidence:.3f})")
-                                    
-                                    # Execute trades based on signals - lowered threshold for testing
-                                    logger.info(f"Checking trade conditions: signal={signal}, confidence={confidence}, threshold=0.05")
-                                    if signal in ['BUY', 'SELL'] and confidence > 0.05:  # Very low threshold for testing
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.6:
                                         current_price = data.iloc[-1]['close']
-                                        
-                                        # Calculate position size with leverage
                                         available_balance = executor.get_account_balance()
-                                        leverage = getattr(executor, 'default_leverage', 10)  # Get leverage from executor
                                         position_size = active_strategy.calculate_position_size(
-                                            data, current_price, available_balance, leverage
+                                            data, current_price, available_balance
                                         )
                                         
-                                        logger.info(f"Executing {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
-                                        
-                                        # Place order
                                         if signal == 'BUY':
-                                            order_result = executor.place_order(symbol, 'buy', position_size, current_price)
-                                            if order_result:
-                                                logger.info(f"[PAPER TRADE] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                                # Small delay to ensure trade completion
-                                                time.sleep(0.5)
-                                            else:
-                                                logger.error(f"Failed to execute BUY order for {symbol}")
+                                            executor.place_order(symbol, 'buy', position_size, current_price)
+                                            logger.info(f"BUY signal executed: {position_size} BTC at {current_price}")
                                         elif signal == 'SELL':
-                                            order_result = executor.place_order(symbol, 'sell', position_size, current_price)
-                                            if order_result:
-                                                logger.info(f"[PAPER TRADE] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                                # Small delay to ensure trade completion
-                                                time.sleep(0.5)
-                                            else:
-                                                logger.error(f"Failed to execute SELL order for {symbol}")
-                                    else:
-                                        logger.info(f"Not trading {symbol}: signal={signal}, confidence={confidence:.3f} (threshold=0.3)")
-                            else:
-                                # For other strategies, use traditional approach
-                                buy_signal, sell_signal = active_strategy.generate_signals(data)
-                                
-                                if buy_signal or sell_signal:
-                                    current_price = data.iloc[-1]['close']
-                                    available_balance = executor.get_account_balance()
-                                    position_size = active_strategy.calculate_position_size(
-                                        data, current_price, available_balance
-                                    )
-                                    
-                                    if buy_signal:
-                                        executor.place_order("BTCUSDT", 'buy', position_size, current_price)
-                                        logger.info(f"BUY signal executed: {position_size} BTC at {current_price}")
-                                    elif sell_signal:
-                                        executor.place_order("BTCUSDT", 'sell', position_size, current_price)
-                                        logger.info(f"SELL signal executed: {position_size} BTC at {current_price}")
+                                            executor.place_order(symbol, 'sell', position_size, current_price)
+                                            logger.info(f"SELL signal executed: {position_size} BTC at {current_price}")
                     else:
                         logger.error("Data is empty even after mock data creation!")
                         
                     # Wait before next iteration - faster for live dashboard updates
-                    logger.info("=== TRADING LOOP ITERATION END ===\n")
-                    logger.info("Waiting 15 seconds before next iteration (faster for live updates)...")
+                    logger.debug("=== TRADING LOOP ITERATION END ===\n")
+                    logger.debug("Waiting 3 seconds before next iteration (faster for live updates)...")
                     
                     # Check for shutdown during sleep to enable faster shutdown
-                    for i in range(15):  # Reduced from 30 to 15 seconds for more frequent updates
+                    for i in range(3):  # Reduced to 3 seconds for much more frequent updates
                         if shutdown_requested:
                             logger.info("Shutdown requested during sleep, exiting trading loop...")
                             return
@@ -538,7 +649,6 @@ def main(mode: str, log_level: str):
         
         # The dashboard's run method is blocking, so it should be the last call
         import sys
-        import os
         
         # Check if we can run a curses dashboard
         # Modified to be less restrictive - only require TERM to be set
@@ -552,7 +662,18 @@ def main(mode: str, log_level: str):
                 logger.info("Starting console dashboard...")
                 logger.info(f"Dashboard has price_fetcher: {dashboard.price_fetcher is not None}")
                 logger.info("🎯 Look for Market Depth in the RIGHT PANE (columns 94-120)")
+                
+                # Temporarily disable console logging to prevent screen jumping
+                root_logger = logging.getLogger()
+                console_handlers = [h for h in root_logger.handlers if isinstance(h, logging.StreamHandler)]
+                for handler in console_handlers:
+                    root_logger.removeHandler(handler)
+                
                 curses.wrapper(dashboard.run)
+                
+                # Re-enable console logging after dashboard exits
+                for handler in console_handlers:
+                    root_logger.addHandler(handler)
             except curses.error as e:
                 logger.warning(f"Curses terminal UI not available: {e}")
                 logger.info("Running in headless mode - check logs for trading activity")
