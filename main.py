@@ -538,9 +538,85 @@ def main(mode: str, log_level: str):
                             
                             logger.info(f"Strategy signal for {symbol}: {signal} (confidence: {confidence:.3f})")
                             
-                            # Execute trades based on signals with reasonable threshold
-                            if signal in ['BUY', 'SELL'] and confidence >= 0.6:  # 60% threshold for quality trades
+                            # CRITICAL: Check for stop losses on open positions FIRST
+                            try:
+                                from utils.paper_trade_db import get_open_positions
+                                open_positions = get_open_positions()
+                                
+                                for position in open_positions:
+                                    try:
+                                        # position format: (id, symbol, entry_price, quantity, leverage, entry_time)
+                                        if len(position) < 4:
+                                            continue
+                                            
+                                        pos_symbol = position[1]
+                                        entry_price = float(position[2])
+                                        quantity = float(position[3])
+                                        
+                                        if quantity == 0 or entry_price <= 0:
+                                            continue
+                                        
+                                        # Get current price for this position
+                                        if pos_symbol == symbol:
+                                            position_current_price = current_price
+                                        else:
+                                            position_current_price = price_fetcher.get_current_price(pos_symbol)
+                                            if position_current_price is None:
+                                                continue
+                                                
+                                        # Calculate P&L percentage
+                                        if quantity > 0:  # LONG position
+                                            pnl_pct = ((position_current_price - entry_price) / entry_price) * 100
+                                        else:  # SHORT position
+                                            pnl_pct = ((entry_price - position_current_price) / entry_price) * 100
+                                        
+                                        # STOP LOSS: Close position if loss > 2%
+                                        if pnl_pct < -2.0:
+                                            logger.warning(f"🛑 STOP LOSS triggered for {pos_symbol}: {pnl_pct:.2f}% loss")
+                                            try:
+                                                close_signal = 'sell' if quantity > 0 else 'buy'
+                                                close_size = abs(quantity)
+                                                success = executor.place_order(pos_symbol, close_signal, close_size, position_current_price)
+                                                if success:
+                                                    logger.info(f"🛑 Stop loss executed: {close_signal.upper()} {close_size:.6f} {pos_symbol}")
+                                                else:
+                                                    logger.error(f"❌ Stop loss execution failed for {pos_symbol}")
+                                            except Exception as e:
+                                                logger.error(f"❌ Stop loss execution error: {e}")
+                                        
+                                        # TAKE PROFIT: Close position if profit > 3%
+                                        elif pnl_pct > 3.0:
+                                            logger.info(f"💰 TAKE PROFIT triggered for {pos_symbol}: {pnl_pct:.2f}% profit")
+                                            try:
+                                                close_signal = 'sell' if quantity > 0 else 'buy'
+                                                close_size = abs(quantity)
+                                                success = executor.place_order(pos_symbol, close_signal, close_size, position_current_price)
+                                                if success:
+                                                    logger.info(f"💰 Take profit executed: {close_signal.upper()} {close_size:.6f} {pos_symbol}")
+                                                else:
+                                                    logger.error(f"❌ Take profit execution failed for {pos_symbol}")
+                                            except Exception as e:
+                                                logger.error(f"❌ Take profit execution error: {e}")
+                                                
+                                    except Exception as e:
+                                        logger.error(f"❌ Position management error: {e}")
+                                        
+                            except Exception as e:
+                                logger.error(f"❌ Position management loop error: {e}")
+                            
+                            # Execute trades based on signals with CONSERVATIVE threshold
+                            if signal in ['BUY', 'SELL'] and confidence >= 0.75:  # INCREASED threshold from 60% to 75%
                                 current_price = data.iloc[-1]['close']
+                                
+                                # Check if we have too many open positions (limit to 2)
+                                try:
+                                    from utils.paper_trade_db import get_open_positions
+                                    open_positions = get_open_positions()
+                                    if len(open_positions) >= 2:
+                                        logger.warning(f"⚠️ Too many open positions ({len(open_positions)}), skipping new trade")
+                                        continue
+                                except Exception as e:
+                                    logger.error(f"Error checking open positions: {e}")
                                 
                                 # Calculate position size with EMERGENCY FALLBACKS
                                 available_balance = executor.get_account_balance()
@@ -559,15 +635,18 @@ def main(mode: str, log_level: str):
                                 except Exception as e:
                                     logger.error(f"Error in position size calculation: {e}")
                                     # Emergency fallback position size
-                                    position_size = min(0.001, available_balance / current_price * 0.1)
+                                    position_size = min(0.001, available_balance / current_price * 0.05)  # REDUCED from 0.1 to 0.05
                                     logger.warning(f"🚨 Using emergency position size: {position_size:.6f}")
+                                
+                                # REDUCE position size to be more conservative
+                                position_size = position_size * 0.5  # Use only half the calculated size
                                 
                                 # Emergency check - force minimum position size if zero
                                 if position_size <= 0:
-                                    position_size = min(0.001, available_balance / current_price * 0.1)
+                                    position_size = min(0.001, available_balance / current_price * 0.05)  # REDUCED
                                     logger.warning(f"🚨 Position size was zero, forced to: {position_size:.6f}")
 
-                                logger.info(f"🎯 NEW METHOD EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
+                                logger.info(f"🎯 CONSERVATIVE EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
                                 
                                 # Execute order with new method
                                 logger.info(f"🎯 ORDER ATTEMPT: {signal} | Size: {position_size:.6f} | Price: ${current_price:.2f}")
@@ -589,8 +668,7 @@ def main(mode: str, log_level: str):
                                     else:
                                         logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
                             else:
-                                logger.warning(f"⚠️ Signal filtered out - {symbol}: signal={signal}, confidence={confidence:.3f} (threshold=60%)")
-                                logger.info(f"💡 Consider lowering confidence threshold if you want more frequent trading")
+                                logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 75% threshold)")
                         else:
                             # Fallback for strategies without the new generate_signal method
                             logger.warning(f"Strategy {type(active_strategy).__name__} doesn't have generate_signal method - using old approach")

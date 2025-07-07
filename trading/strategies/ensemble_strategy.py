@@ -677,20 +677,9 @@ class EnsembleStrategy(BaseStrategy):
                 self.logger.info(f"🎯 Ensemble prediction: {final_prediction}")
                 self.logger.info(f"📊 Sources used: {dict(zip(prediction_sources, normalized_weights))}")
                 
-                # AGGRESSIVE ANTI-HOLD BIAS: NEVER allow HOLD signals
+                # CONSERVATIVE APPROACH: Allow HOLD signals for capital preservation
                 if signal == 'HOLD':
-                    # Choose BUY or SELL based on which has higher probability
-                    buy_prob = final_prediction[0]
-                    sell_prob = final_prediction[2]
-                    
-                    if buy_prob >= sell_prob:
-                        signal = 'BUY'
-                        confidence = max(0.6, buy_prob + 0.1)  # Minimum 60% confidence
-                    else:
-                        signal = 'SELL'
-                        confidence = max(0.6, sell_prob + 0.1)  # Minimum 60% confidence
-                    
-                    self.logger.info(f"🚫 AGGRESSIVE HOLD OVERRIDE: Changed {signal} ({confidence:.3f}) - HOLD signals eliminated")
+                    self.logger.info(f"� CONSERVATIVE HOLD: Preserving capital - no forced trades")
                 
             else:
                 # Fallback to technical analysis only
