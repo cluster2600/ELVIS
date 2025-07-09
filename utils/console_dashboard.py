@@ -1,3 +1,5 @@
+import sys
+import os
 import curses
 import logging
 import threading
@@ -8,6 +10,12 @@ from collections import deque
 import psutil
 import pandas as pd
 import ta
+
+# Add project root to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from utils.logging_utils import setup_logger
 import numpy as np
 
@@ -83,11 +91,11 @@ class ConsoleDashboard:
             self._draw_box(0, 0, max_y - 1, max_x - 1) # Main border
             self._draw_header()
 
-            # Define layout sections with type safety - enlarged right pane
-            left_pane_width = 35
+            # Define layout sections with larger sidebars and smaller chart
+            left_pane_width = 50  # Increased from original 35 to 50 for bigger sidebar
             max_x = int(max_x)  # Ensure integer type
-            right_pane_width = 45  # Increased from 28 to 45 for better visibility
-            chart_pane_width = max(10, max_x - left_pane_width - right_pane_width - 3)  # Adjust chart accordingly
+            right_pane_width = 55  # Increased from original 45 to 55 for bigger sidebar
+            chart_pane_width = max(15, max_x - left_pane_width - right_pane_width - 3)  # Smaller chart area
             
             chart_pane_x = left_pane_width + 1
             right_pane_x = chart_pane_x + chart_pane_width + 1
@@ -110,7 +118,7 @@ class ConsoleDashboard:
                 self.logger.error(f"Error in _draw_info_pane: {e}")
                 
             try:
-                self._draw_chart_pane(9, chart_pane_x + 2, max_y - 15, chart_pane_width - 2)
+                self._draw_chart_pane(9, chart_pane_x + 1, max_y - 15, chart_pane_width - 1)  # Reduced padding for wider chart
             except Exception as e:
                 self.logger.error(f"Error in _draw_chart_pane: {e}")
                 
@@ -231,29 +239,53 @@ class ConsoleDashboard:
             for pos in open_positions_raw:
                 if len(pos) >= 4:
                     try:
-                        # Get current price for this position
-                        current_price = 107500.0  # Default BTC price
-                        if self.price_fetcher:
-                            try:
-                                fetched_price = self.price_fetcher.get_current_price(pos[1])
-                                if fetched_price:
-                                    current_price = float(fetched_price)
-                            except:
-                                pass
-                        
+                        symbol = pos[1]
                         entry_price = float(pos[2])
                         quantity = float(pos[3])
+                        
+                        # Get live current price for this specific symbol
+                        current_price = entry_price  # Fallback to entry price
+                        if self.price_fetcher:
+                            try:
+                                # The symbol from the database is already in the correct format (e.g., 'BTCUSDT')
+                                if hasattr(self.price_fetcher, 'get_current_price'):
+                                    fetched_price = self.price_fetcher.get_current_price(symbol)
+                                    if fetched_price and fetched_price > 0:
+                                        current_price = float(fetched_price)
+                                        self.logger.debug(f"Portfolio P&L calc - {symbol}: Live ${current_price:.2f} vs Entry ${entry_price:.2f}")
+                                    else:
+                                        self.logger.debug(f"Price fetcher returned {fetched_price} for {symbol}, using entry price")
+                                else:
+                                    self.logger.debug(f"Price fetcher has no get_current_price method, using entry price")
+                            except Exception as e:
+                                self.logger.warning(f"Error fetching price for {symbol}: {e}")
+                        
                         position_pnl = (current_price - entry_price) * quantity
                         unrealized_pnl += position_pnl
-                    except:
+                        self.logger.debug(f"Position {symbol}: P&L = ${position_pnl:.2f} (qty: {quantity}, entry: ${entry_price:.2f}, current: ${current_price:.2f})")
+                    except Exception as e:
+                        self.logger.warning(f"Error calculating P&L for position: {e}")
                         pass
             
             # Calculate realistic portfolio value
-            starting_balance = 10000.0
+            starting_usdt = 1000.0
+            starting_btc = 0.01
             
-            # For portfolio calculation, use only the realized P&L since unrealized might be inflated
-            # due to incorrect position sizing in the trading logic
-            portfolio_value = starting_balance + realized_pnl
+            # Get current BTC price for portfolio calculation
+            btc_price = 107000.0  # Default
+            if self.price_fetcher:
+                try:
+                    fetched_price = self.price_fetcher.get_current_price('BTCUSDT') if hasattr(self.price_fetcher, 'get_current_price') else None
+                    if fetched_price:
+                        btc_price = float(fetched_price)
+                except:
+                    pass
+            
+            starting_btc_value = starting_btc * btc_price
+            total_starting_value = starting_usdt + starting_btc_value
+            
+            # For portfolio calculation, use starting value plus realized P&L
+            portfolio_value = total_starting_value + realized_pnl
             
             # Add unrealized P&L only if it's reasonable (not inflated)
             if abs(unrealized_pnl) < 5000:  # Sanity check for unrealized P&L
@@ -290,22 +322,30 @@ class ConsoleDashboard:
             live_positions = get_open_positions()
             
             if live_positions:
-                # Get current price for PnL calculation
-                current_price = 107500.0  # Default BTC price
-                if self.price_fetcher:
-                    try:
-                        fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
-                        if fetched_price:
-                            current_price = float(fetched_price)
-                    except:
-                        pass
-                
                 displayed_positions = 0
                 for pos in live_positions[:5]:  # Show top 5 positions
                     if len(pos) >= 4:
                         symbol = pos[1]
                         entry_price = float(pos[2])
                         quantity = float(pos[3])
+                        
+                        # Get live current price for this specific symbol
+                        current_price = entry_price  # Fallback to entry price
+                        if self.price_fetcher:
+                            try:
+                                # The symbol from the database is already in the correct format (e.g., 'BTCUSDT')
+                                if hasattr(self.price_fetcher, 'get_current_price'):
+                                    fetched_price = self.price_fetcher.get_current_price(symbol)
+                                    if fetched_price and fetched_price > 0:
+                                        current_price = float(fetched_price)
+                                        self.logger.debug(f"Live price for {symbol}: ${current_price:.2f}")
+                                    else:
+                                        self.logger.debug(f"Price fetcher returned {fetched_price} for {symbol}, using entry price")
+                                else:
+                                    self.logger.debug(f"Price fetcher has no get_current_price method, using entry price")
+                            except Exception as e:
+                                self.logger.warning(f"Error fetching live price for {symbol}: {e}")
+                                pass
                         
                         # Calculate comprehensive real-time P&L with all fees
                         try:
@@ -356,16 +396,15 @@ class ConsoleDashboard:
                         except:
                             pnl_color = 0
                         
-                        # Display position with comprehensive P&L info
+                        # Display position with live price and comprehensive P&L info
                         position_text = f"{symbol} {side} {abs(quantity):.4f} @ ${entry_price:.0f}"
-                        pnl_text = f"Net: ${net_pnl:+.2f}{fee_impact}"
+                        current_price_text = f"Live: ${current_price:.2f}"
+                        pnl_text = f"P&L: ${net_pnl:+.2f}{fee_impact}"
                         
                         self.safe_addstr(y + 1 + displayed_positions, start_x, position_text)
-                        self.safe_addstr(y + 1 + displayed_positions, start_x + 22, pnl_text, pnl_color)
-                        displayed_positions += 1
-                
-                # Show current BTC price used for calculations
-                self.safe_addstr(y + 1 + displayed_positions, start_x, f"BTC Price: ${current_price:,.2f}")
+                        self.safe_addstr(y + 1 + displayed_positions, start_x + 25, current_price_text, curses.color_pair(4))
+                        self.safe_addstr(y + 2 + displayed_positions, start_x, pnl_text, pnl_color)
+                        displayed_positions += 2  # Use 2 lines per position now
                 
             else:
                 # Fallback to config positions or show "None"
@@ -385,7 +424,7 @@ class ConsoleDashboard:
             self.safe_addstr(y + 1, start_x, f"Position data error")
 
         # System Monitoring
-        y += 8
+        y += 13
         self.safe_addstr(y, start_x, "--- System Health ---", curses.color_pair(3) | curses.A_BOLD)
         cpu_usage = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
@@ -588,7 +627,7 @@ class ConsoleDashboard:
                 # Show comprehensive trade breakdown (already filtered, so no TEST trades)
                 total_trades = len(trades_raw)
                 
-                self.safe_addstr(y + 1, start_x, f"Real Trades: {total_trades}")
+                self.safe_addstr(y + 1, start_x, f"Paper Trades: {total_trades}")
                 
                 # Show win rate with realistic assessment
                 trading_outcomes = wins + losses  # Exclude breakeven for win rate
@@ -728,23 +767,32 @@ class ConsoleDashboard:
             if not open_positions:
                 # Show theoretical position sizing information
                 try:
-                    # Get current market price
-                    current_price = 107000.0  # Default
+                    # Get real-time market price from trading system first
+                    current_price = float(self.config.get('current_btc_price', 107000.0))  # From trading system
+                    
+                    # Try to get even more recent price from price fetcher as backup
                     if self.price_fetcher:
                         try:
+                            # Use the correct symbol format 'BTCUSDT'
                             fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
-                            if fetched_price:
+                            if fetched_price and fetched_price > 0:
                                 current_price = float(fetched_price)
-                        except:
-                            pass
+                        except Exception as e:
+                            self.logger.debug(f"Price fetch error: {e}")
+                    
+                    # Get real-time portfolio value from config (updated by trading system)
+                    portfolio_value = float(self.config.get('portfolio_value', portfolio_value))
+                    
+                    # Get real-time leverage from config or trading system
+                    leverage = int(self.config.get('leverage', 10))  # Get from config
                     
                     # Calculate different risk levels
                     risk_levels = [0.01, 0.02, 0.05]  # 1%, 2%, 5% risk
-                    leverage = 10  # Default leverage from config
                     
-                    self.safe_addstr(y, start_x, f"Current BTC Price: ${current_price:,.2f}")
-                    self.safe_addstr(y + 1, start_x, f"Portfolio Value: ${portfolio_value:,.2f}")
-                    self.safe_addstr(y + 2, start_x, f"Leverage: {leverage}x")
+                    # Display real-time values with timestamps
+                    self.safe_addstr(y, start_x, f"Price: ${current_price:,.2f}", curses.color_pair(6))
+                    self.safe_addstr(y + 1, start_x, f"Portfolio Value: ${portfolio_value:,.2f}", curses.color_pair(6))
+                    self.safe_addstr(y + 2, start_x, f"Leverage: {leverage}x", curses.color_pair(6))
                     
                     y += 4
                     self.safe_addstr(y, start_x, "Position Sizing (Risk %):")
@@ -772,7 +820,8 @@ class ConsoleDashboard:
                     current_price = entry_price  # Default fallback
                     if self.price_fetcher:
                         try:
-                            fetched_price = self.price_fetcher.get_current_price(symbol)
+                            # The symbol from the database is already in the correct format (e.g., 'BTCUSDT')
+                            fetched_price = self.price_fetcher.get_price(symbol)
                             if fetched_price:
                                 current_price = float(fetched_price)
                         except:
@@ -880,7 +929,7 @@ class ConsoleDashboard:
 
         # Chart dimensions
         chart_height = height - 5
-        chart_width = min(width - 12, len(ohlc_data))  # Leave space for price scale
+        chart_width = min(width - 2, len(ohlc_data))  # Minimal margin for maximum chart width within pane
         
         # Use the most recent candles that fit
         candles = ohlc_data.tail(chart_width)
@@ -912,11 +961,11 @@ class ConsoleDashboard:
             self.safe_addstr(start_y + 2, start_x, f"Data error: {str(e)[:30]}", curses.color_pair(2))
             return
 
-        # Only redraw chart when data changes significantly - prevent flickering
+        # Update chart more frequently for real-time feel
         try:
             last_close = float(candles['close'].iloc[-1])
-            # Create a more stable price string that doesn't change every frame
-            stable_close = round(last_close, -1)  # Round to nearest 10
+            # Create a price string that updates every $1 change for more responsive chart
+            stable_close = round(last_close, 0)  # Round to nearest dollar (was nearest 10)
             price_str = f"{min_price:.0f}-{max_price:.0f}-{len(candles)}-{stable_close:.0f}"
         except (ValueError, TypeError) as e:
             self.logger.debug(f"Error creating price string: {e}")
@@ -1018,7 +1067,7 @@ class ConsoleDashboard:
                                 vol_height = max(1, min(3, int((volume / max_vol) * 3)))
                                 candle_x = start_x + 2 + i
                                 for h in range(vol_height):
-                                    self.safe_addch(volume_y + h, candle_x, '▁', curses.color_pair(4))
+                                    self.safe_addch(volume_y + h, candle_x, ' ', curses.color_pair(4))
                             except (ValueError, TypeError):
                                 continue
                 except (ValueError, TypeError):
@@ -1263,9 +1312,8 @@ class ConsoleDashboard:
 
             frame_count = 0
             while self.running:
-                # Only draw frame every few iterations to reduce flashing
-                if frame_count % 5 == 0:  # Draw every 5th iteration to reduce flicker more
-                    self._draw_frame()
+                # Draw frame every iteration for maximum responsiveness
+                self._draw_frame()  # Update every 0.5 seconds for smooth chart updates
                 
                 c = self.stdscr.getch()
                 if c == ord('q'):
@@ -1289,7 +1337,7 @@ class ConsoleDashboard:
                         pass
                 
                 frame_count += 1
-                time.sleep(0.5)  # Slower refresh rate to reduce flicker
+                time.sleep(0.2)  # More frequent updates for live P&L
         except Exception as e:
             self.logger.error(f"Error in run: {e}")
         finally:
@@ -1438,8 +1486,7 @@ def main(stdscr):
         price_fetcher = MockPriceFetcher()
     
     dashboard = ConsoleDashboard(config=config, logger=logger, price_fetcher=price_fetcher)
-    dashboard.stdscr = stdscr
-    dashboard.run()
+    dashboard.run(stdscr)
 
 class ConsoleDashboardManager:
     """Manager class for the console dashboard that handles threading and lifecycle."""
