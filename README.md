@@ -1,5 +1,7 @@
 # ELVIS Trading Bot - Comprehensive Project Overview
 
+**E**nhanced **L**everaged **V**irtual **I**nvestment **S**ystem
+
 ![Project Image](./images/elvis.png)
 
 ## Table of Contents
@@ -26,7 +28,7 @@
 
 ## Introduction
 
-The ELVIS Trading Bot is a sophisticated, modular algorithmic trading system that leverages machine learning models for automated cryptocurrency trading. The system integrates multiple ML architectures, real-time data processing, risk management, and execution modules to facilitate intelligent trading strategies with comprehensive monitoring and visualization capabilities.
+The **ELVIS** (**E**nhanced **L**everaged **V**irtual **I**nvestment **S**ystem) Trading Bot is a sophisticated, modular algorithmic trading system that leverages machine learning models for automated cryptocurrency trading. The system integrates multiple ML architectures, real-time data processing, risk management, and execution modules to facilitate intelligent trading strategies with comprehensive monitoring and visualization capabilities.
 
 ## 🚀 Current Status (July 2025)
 
