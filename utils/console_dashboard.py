@@ -10,6 +10,7 @@ from collections import deque
 import psutil
 import pandas as pd
 import ta
+from utils.api_connection_tester import get_api_tester
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from utils.logging_utils import setup_logger
+from config.config import TRADING_CONFIG
 import numpy as np
 
 class LogHandler(logging.Handler):
@@ -65,6 +67,25 @@ class ConsoleDashboard:
         self.log_messages = deque(maxlen=100)  # Store recent log messages
         self.last_chart_data = None  # Cache last chart to reduce flashing
         self.chart_buffer = {}  # Store chart display buffer
+        
+        # API Connection Tester - ensure Vault environment is set
+        import os
+        if not os.getenv('VAULT_ADDR'):
+            os.environ['VAULT_ADDR'] = 'http://127.0.0.1:8200'
+        if not os.getenv('VAULT_TOKEN'):
+            os.environ['VAULT_TOKEN'] = 'trading-bot-token'
+        
+        # Force a fresh API tester to pick up environment variables
+        from utils.api_connection_tester import APIConnectionTester
+        self.api_tester = APIConnectionTester(logger)
+        self.api_tester.start_monitoring()  # Start background monitoring
+        
+        # Force an immediate test of all APIs
+        try:
+            self.api_tester.test_all_apis()
+            logger.info("Initial API test completed")
+        except Exception as e:
+            logger.warning(f"Initial API test failed: {e}")
         
         # Set up log handler to capture logs
         self.log_handler = LogHandler(self)
@@ -136,9 +157,20 @@ class ConsoleDashboard:
                 self.safe_addstr(9, right_pane_x + 2, "Market Depth Error", curses.color_pair(2))
                 
             try:
-                # Position sizing below market depth with adjusted spacing
-                position_y = 9 + market_depth_height + 2 if 'market_depth_height' in locals() else max_y - 12
-                position_height = max(6, max_y - position_y - 3)
+                # API Status widget below market depth
+                api_status_y = 9 + market_depth_height + 2 if 'market_depth_height' in locals() else max_y - 20
+                api_status_height = 8  # Fixed height for API status
+                if api_status_y + api_status_height < max_y - 10:  # Ensure it fits
+                    self._draw_api_status_pane(api_status_y, right_pane_x + 2, api_status_height, right_pane_width - 2)
+                    
+                    # Position sizing below API status with adjusted spacing
+                    position_y = api_status_y + api_status_height + 1
+                    position_height = max(6, max_y - position_y - 3)
+                else:
+                    # Fallback: Position sizing only if no room for API status
+                    position_y = 9 + market_depth_height + 2 if 'market_depth_height' in locals() else max_y - 12
+                    position_height = max(6, max_y - position_y - 3)
+                
                 if position_height > 0:
                     self._draw_position_sizing_pane(position_y, right_pane_x + 2, position_height, right_pane_width - 2)
             except Exception as e:
@@ -207,7 +239,20 @@ class ConsoleDashboard:
         y = start_y
         
         # Time and Status - always live
-        current_time = datetime.now()
+        try:
+            current_time = datetime.now()
+        except NameError:
+            # Fallback if datetime import fails
+            import time
+            current_time = time.strftime('%H:%M:%S')
+            self.safe_addstr(y, start_x, f"Time: {current_time}", curses.color_pair(4))
+            self.safe_addstr(y + 1, start_x, f"Date: {time.strftime('%Y-%m-%d')}", curses.color_pair(6))
+            self.safe_addstr(y + 2, start_x, f"Status: LIVE TRADING", curses.color_pair(1) | curses.A_BOLD)
+            y += 3
+            self.safe_addstr(y, start_x, "--- Portfolio ---", curses.color_pair(3) | curses.A_BOLD)
+            return  # Exit early with fallback
+        
+        # Normal datetime handling
         self.safe_addstr(y, start_x, f"Time: {current_time.strftime('%H:%M:%S')}", curses.color_pair(4))
         self.safe_addstr(y + 1, start_x, f"Date: {current_time.strftime('%Y-%m-%d')}", curses.color_pair(6))
         self.safe_addstr(y + 2, start_x, f"Status: LIVE TRADING", curses.color_pair(1) | curses.A_BOLD)
@@ -237,11 +282,13 @@ class ConsoleDashboard:
             unrealized_pnl = 0.0
             
             for pos in open_positions_raw:
-                if len(pos) >= 4:
+                if len(pos) >= 5:
                     try:
+                        # Position format: (id, symbol, side, entry_price, quantity, leverage, entry_time)
                         symbol = pos[1]
-                        entry_price = float(pos[2])
-                        quantity = float(pos[3])
+                        side = pos[2]  # BUY or SELL
+                        entry_price = float(pos[3])
+                        quantity = float(pos[4])
                         
                         # Get live current price for this specific symbol
                         current_price = entry_price  # Fallback to entry price
@@ -260,32 +307,50 @@ class ConsoleDashboard:
                             except Exception as e:
                                 self.logger.warning(f"Error fetching price for {symbol}: {e}")
                         
-                        position_pnl = (current_price - entry_price) * quantity
+                        # Calculate P&L based on position side
+                        if side.upper() == 'BUY':  # LONG position
+                            position_pnl = (current_price - entry_price) * quantity
+                        else:  # SHORT position
+                            position_pnl = (entry_price - current_price) * quantity
                         unrealized_pnl += position_pnl
                         self.logger.debug(f"Position {symbol}: P&L = ${position_pnl:.2f} (qty: {quantity}, entry: ${entry_price:.2f}, current: ${current_price:.2f})")
                     except Exception as e:
                         self.logger.warning(f"Error calculating P&L for position: {e}")
                         pass
             
-            # Calculate realistic portfolio value
-            starting_usdt = 1000.0
-            starting_btc = 0.01
+            # LIVE PORTFOLIO CALCULATION - Get actual balance from executor
+            portfolio_value = 1000.0  # Fallback
+            btc_price = 107000.0  # Fallback
             
-            # Get current BTC price for portfolio calculation
-            btc_price = 107000.0  # Default
-            if self.price_fetcher:
-                try:
-                    fetched_price = self.price_fetcher.get_current_price('BTCUSDT') if hasattr(self.price_fetcher, 'get_current_price') else None
-                    if fetched_price:
-                        btc_price = float(fetched_price)
-                except:
-                    pass
-            
-            starting_btc_value = starting_btc * btc_price
-            total_starting_value = starting_usdt + starting_btc_value
-            
-            # For portfolio calculation, use starting value plus realized P&L
-            portfolio_value = total_starting_value + realized_pnl
+            try:
+                # Get LIVE executor balance
+                from core.di import container
+                executor = container.get_optional('executor')
+                if executor and hasattr(executor, 'get_balance'):
+                    balance_info = executor.get_balance()
+                    usdt_balance = float(balance_info.get('USDT', 1000.0))
+                    btc_balance = float(balance_info.get('BTC', 0.0))
+                    
+                    # Get LIVE BTC price from API
+                    if self.price_fetcher and hasattr(self.price_fetcher, 'get_current_price'):
+                        fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
+                        if fetched_price:
+                            btc_price = float(fetched_price)
+                    
+                    # Calculate total portfolio value from LIVE balances
+                    btc_value_in_usdt = btc_balance * btc_price
+                    portfolio_value = usdt_balance + btc_value_in_usdt
+                    
+                    self.logger.debug(f"LIVE Portfolio - USDT: ${usdt_balance:.2f}, BTC: {btc_balance:.6f}, "
+                                    f"BTC Value: ${btc_value_in_usdt:.2f}, Total: ${portfolio_value:.2f}")
+                else:
+                    # Fallback: use starting value plus realized P&L
+                    portfolio_value = 1000.0 + realized_pnl
+                    
+            except Exception as balance_error:
+                self.logger.warning(f"Could not get live balance: {balance_error}")
+                # Fallback: use starting value plus realized P&L
+                portfolio_value = 1000.0 + realized_pnl
             
             # Add unrealized P&L only if it's reasonable (not inflated)
             if abs(unrealized_pnl) < 5000:  # Sanity check for unrealized P&L
@@ -298,10 +363,10 @@ class ConsoleDashboard:
                             
         except Exception as e:
             self.logger.warning(f"Error calculating live P&L: {e}")
-            # Fallback to config values
-            portfolio_value = float(self.config.get('portfolio_value', 10000.0))
-            unrealized_pnl = float(self.config.get('unrealized_pnl', 0.0))
-            realized_pnl = float(self.config.get('realized_pnl', 0.0))
+            # Use minimal fallback values - avoid stale config data
+            portfolio_value = 1000.0  # Starting amount
+            unrealized_pnl = 0.0
+            realized_pnl = 0.0
         
         self.safe_addstr(y + 1, start_x, f"Value: ${portfolio_value:,.2f}")
         
@@ -321,13 +386,18 @@ class ConsoleDashboard:
             from utils.paper_trade_db import get_open_positions
             live_positions = get_open_positions()
             
+            # Debug logging for dashboard
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            self.logger.debug(f"Dashboard {timestamp}: Found {len(live_positions) if live_positions else 0} positions")
+            
             if live_positions:
                 displayed_positions = 0
                 for pos in live_positions[:5]:  # Show top 5 positions
-                    if len(pos) >= 4:
+                    if len(pos) >= 5:  # Need at least 5 fields: id, symbol, side, entry_price, quantity
                         symbol = pos[1]
-                        entry_price = float(pos[2])
-                        quantity = float(pos[3])
+                        side = pos[2]  # BUY or SELL
+                        entry_price = float(pos[3])
+                        quantity = float(pos[4])
                         
                         # Get live current price for this specific symbol
                         current_price = entry_price  # Fallback to entry price
@@ -349,8 +419,8 @@ class ConsoleDashboard:
                         
                         # Calculate comprehensive real-time P&L with all fees
                         try:
-                            leverage = int(pos[4]) if len(pos) > 4 else 10
-                            entry_time = pos[5] if len(pos) > 5 else None
+                            leverage = int(pos[5]) if len(pos) > 5 else TRADING_CONFIG.get('DEFAULT_LEVERAGE', 50)
+                            entry_time = pos[6] if len(pos) > 6 else None
                             
                             # Try to get executor for comprehensive fee calculation
                             executor = None
@@ -363,7 +433,7 @@ class ConsoleDashboard:
                             if executor and hasattr(executor, 'calculate_open_position_pnl'):
                                 # Get comprehensive P&L including all Binance fees
                                 pnl_detail = executor.calculate_open_position_pnl(
-                                    symbol, current_price, entry_price, quantity, leverage, entry_time
+                                    symbol, side, current_price, entry_price, quantity, leverage, entry_time
                                 )
                                 net_pnl = pnl_detail['net_pnl']
                                 gross_pnl = pnl_detail['gross_pnl']
@@ -378,17 +448,19 @@ class ConsoleDashboard:
                                     fee_impact += f" {hours_held:.1f}h"
                             else:
                                 # Fallback to simple calculation
-                                net_pnl = (current_price - entry_price) * quantity
+                                pnl_multiplier = 1 if side.upper() == 'BUY' else -1
+                                net_pnl = (current_price - entry_price) * quantity * pnl_multiplier
                                 gross_pnl = net_pnl
                                 fee_impact = " (est)"
                         except Exception as e:
                             # Safe fallback
-                            net_pnl = (current_price - entry_price) * quantity
+                            pnl_multiplier = 1 if side.upper() == 'BUY' else -1
+                            net_pnl = (current_price - entry_price) * quantity * pnl_multiplier
                             gross_pnl = net_pnl
                             fee_impact = ""
                         
-                        # Determine side
-                        side = 'LONG' if quantity > 0 else 'SHORT'
+                        # Display side as received from database
+                        display_side = side.upper()
                         
                         # Color code based on net P&L
                         try:
@@ -397,7 +469,15 @@ class ConsoleDashboard:
                             pnl_color = 0
                         
                         # Display position with live price and comprehensive P&L info
-                        position_text = f"{symbol} {side} {abs(quantity):.4f} @ ${entry_price:.0f}"
+                        # Format quantity based on size for better readability
+                        if abs(quantity) >= 1.0:
+                            qty_display = f"{abs(quantity):.3f}"
+                        elif abs(quantity) >= 0.1:
+                            qty_display = f"{abs(quantity):.3f}"
+                        else:
+                            qty_display = f"{abs(quantity):.6f}"
+                        
+                        position_text = f"{symbol} {display_side} {qty_display} @ ${entry_price:.0f}"
                         current_price_text = f"Live: ${current_price:.2f}"
                         pnl_text = f"P&L: ${net_pnl:+.2f}{fee_impact}"
                         
@@ -407,17 +487,28 @@ class ConsoleDashboard:
                         displayed_positions += 2  # Use 2 lines per position now
                 
             else:
-                # Fallback to config positions or show "None"
+                # Check config positions as fallback
                 config_positions = self.config.get('open_positions', [])
                 if config_positions:
+                    self.safe_addstr(y + 1, start_x, f"Config positions: {len(config_positions)}")
                     for i, pos in enumerate(config_positions[:3]):
                         symbol = pos.get('symbol', 'N/A')
                         size = pos.get('size', 0)
                         entry_price = pos.get('entry_price', 0)
                         side = 'LONG' if size > 0 else 'SHORT' if size < 0 else 'N/A'
-                        self.safe_addstr(y + 1 + i, start_x, f"{symbol} {side} {abs(size):.6f} @ ${entry_price:.2f}")
+                        # Format size for better readability
+                        if abs(size) >= 1.0:
+                            size_display = f"{abs(size):.3f}"
+                        elif abs(size) >= 0.1:
+                            size_display = f"{abs(size):.3f}"
+                        else:
+                            size_display = f"{abs(size):.6f}"
+                        self.safe_addstr(y + 2 + i, start_x, f"{symbol} {side} {size_display} @ ${entry_price:.2f}")
                 else:
-                    self.safe_addstr(y + 1, start_x, "No open positions")
+                    # Show diagnostic info
+                    timestamp = datetime.now().strftime('%H:%M:%S')
+                    self.safe_addstr(y + 1, start_x, f"No positions at {timestamp}")
+                    self.safe_addstr(y + 2, start_x, "Checking database...")
                     
         except Exception as e:
             self.logger.warning(f"Error getting live positions: {e}")
@@ -527,28 +618,8 @@ class ConsoleDashboard:
                 self.safe_addstr(y + 1, start_x, "No recent trades")
                 
         except Exception as e:
-            # Fallback to config trades
-            recent_trades = self.config.get('recent_trades', [])
-            if recent_trades:
-                for i, trade in enumerate(recent_trades[:3]):
-                    side = trade.get('side', 'N/A')
-                    symbol = trade.get('symbol', 'N/A')
-                    price = trade.get('price', 0)
-                    quantity = trade.get('quantity', 0)
-                    pnl = trade.get('pnl', 0)
-                    
-                    side_color = curses.color_pair(1) if side == 'BUY' else curses.color_pair(2)
-                    trade_info = f"{side} {quantity:.4f} {symbol} @ ${price:.2f}"
-                    self.safe_addstr(y + 1 + i, start_x, trade_info, side_color)
-                    
-                    if pnl != 0.0:
-                        pnl_color = curses.color_pair(1) if pnl >= 0 else curses.color_pair(2)
-                        self.safe_addstr(y + 1 + i, start_x + 25, f"PnL: ${pnl:.2f}", pnl_color)
-                    else:
-                        trade_value = price * quantity
-                        self.safe_addstr(y + 1 + i, start_x + 25, f"Val: ${trade_value:.0f}")
-            else:
-                self.safe_addstr(y + 1, start_x, "No trades yet")
+            self.logger.warning(f"Error getting live recent trades: {e}")
+            self.safe_addstr(y + 1, start_x, "Trade data error")
 
         # Trade Distribution - Live from Database with comprehensive fee-adjusted stats
         y += 5
@@ -599,16 +670,17 @@ class ConsoleDashboard:
                             # Count all real trades for total P&L
                             total_pnl += net_pnl
                             
-                            # Only analyze SELL trades for win/loss (completed positions)
-                            if side == 'SELL':
+                            # Analyze both BUY and SELL trades for win/loss (scalping strategy)
+                            if side in ['BUY', 'SELL']:
                                 # P&L already includes fees, so use directly
-                                if net_pnl > 0.10:  # Profitable trade
+                                # FIXED: Lower thresholds for smaller position sizes and include non-zero trades
+                                if net_pnl > 0.01:  # Profitable trade (lowered from 0.10 to 0.01)
                                     wins += 1
                                     win_pnls.append(net_pnl)
-                                elif net_pnl < -0.10:  # Loss trade
+                                elif net_pnl < -0.01:  # Loss trade (lowered from -0.10 to -0.01)
                                     losses += 1
                                     loss_pnls.append(net_pnl)
-                                else:  # Small result (breakeven)
+                                else:  # Small result (breakeven or zero P&L opening trades)
                                     breakeven += 1
                 
                 # Calculate statistics
@@ -636,7 +708,11 @@ class ConsoleDashboard:
                     win_rate_color = curses.color_pair(1) if meaningful_win_rate > 50 else curses.color_pair(6) if meaningful_win_rate > 30 else curses.color_pair(2)
                     self.safe_addstr(y + 2, start_x, f"Win Rate: {meaningful_win_rate:.1f}% ({wins}W/{losses}L)", win_rate_color)
                 else:
-                    self.safe_addstr(y + 2, start_x, "Win Rate: N/A (no decisive trades)", curses.color_pair(6))
+                    # More informative message about why winrate is N/A
+                    if total_trades > 0:
+                        self.safe_addstr(y + 2, start_x, f"Win Rate: N/A ({total_trades} opens, 0 closed)", curses.color_pair(6))
+                    else:
+                        self.safe_addstr(y + 2, start_x, "Win Rate: N/A (no trades yet)", curses.color_pair(6))
                 
                 self.safe_addstr(y + 3, start_x, f"Avg Win: ${avg_win:.2f} | Avg Loss: ${avg_loss:.2f}")
                 
@@ -752,112 +828,360 @@ class ConsoleDashboard:
                 self.safe_addstr(y + 1, start_x, f"Risk data unavailable")
                 self.logger.debug(f"Risk calculation error: {e}")
 
-    def _draw_position_sizing_pane(self, start_y: int, start_x: int, height: int, width: int):
-        """Draws the position sizing visualization pane."""
-        self.safe_addstr(start_y, start_x, "--- Position Sizing ---", curses.A_BOLD)
+    def _draw_api_status_pane(self, start_y: int, start_x: int, height: int, width: int):
+        """Draws the API connection status widget with visual indicators."""
+        self.safe_addstr(start_y, start_x, "--- API Status ---", curses.A_BOLD)
         
         try:
-            portfolio_value = float(self.config.get('portfolio_value', 10000.0))
+            y = start_y + 1
             
-            y = start_y + 2
-            
-            # Get positions from config (updated from paper trading database)
-            open_positions = self.config.get('open_positions', [])
-            
-            if not open_positions:
-                # Show theoretical position sizing information
-                try:
-                    # Get real-time market price from trading system first
-                    current_price = float(self.config.get('current_btc_price', 107000.0))  # From trading system
-                    
-                    # Try to get even more recent price from price fetcher as backup
-                    if self.price_fetcher:
-                        try:
-                            # Use the correct symbol format 'BTCUSDT'
-                            fetched_price = self.price_fetcher.get_current_price('BTCUSDT')
-                            if fetched_price and fetched_price > 0:
-                                current_price = float(fetched_price)
-                        except Exception as e:
-                            self.logger.debug(f"Price fetch error: {e}")
-                    
-                    # Get real-time portfolio value from config (updated by trading system)
-                    portfolio_value = float(self.config.get('portfolio_value', portfolio_value))
-                    
-                    # Get real-time leverage from config or trading system
-                    leverage = int(self.config.get('leverage', 10))  # Get from config
-                    
-                    # Calculate different risk levels
-                    risk_levels = [0.01, 0.02, 0.05]  # 1%, 2%, 5% risk
-                    
-                    # Display real-time values with timestamps
-                    self.safe_addstr(y, start_x, f"Price: ${current_price:,.2f}", curses.color_pair(6))
-                    self.safe_addstr(y + 1, start_x, f"Portfolio Value: ${portfolio_value:,.2f}", curses.color_pair(6))
-                    self.safe_addstr(y + 2, start_x, f"Leverage: {leverage}x", curses.color_pair(6))
-                    
-                    y += 4
-                    self.safe_addstr(y, start_x, "Position Sizing (Risk %):")
-                    
-                    for i, risk_pct in enumerate(risk_levels):
-                        risk_amount = portfolio_value * risk_pct
-                        position_value = risk_amount * leverage
-                        position_size = position_value / current_price
-                        
-                        self.safe_addstr(y + 1 + i, start_x, 
-                                       f"{risk_pct*100:.0f}%: {position_size:.4f} BTC (${position_value:,.0f})")
-                        
-                except Exception as e:
-                    self.safe_addstr(y, start_x, "No open positions")
-                    self.logger.debug(f"Position sizing calculation error: {e}")
+            # Check if API tester exists and is properly initialized
+            if not hasattr(self, 'api_tester') or self.api_tester is None:
+                self.safe_addstr(y, start_x, "API tester not initialized", curses.color_pair(2))
                 return
             
-            for position in open_positions:
+            # Get current API statuses with safety checks
+            try:
+                api_statuses = getattr(self.api_tester, 'api_statuses', None)
+                if api_statuses is None:
+                    self.safe_addstr(y, start_x, "API statuses None", curses.color_pair(2))
+                    return
+                
+                overall_health = self.api_tester.get_overall_health()
+                if overall_health is None:
+                    self.safe_addstr(y, start_x, "Health data None", curses.color_pair(2))
+                    return
+                    
+            except AttributeError as e:
+                self.safe_addstr(y, start_x, f"Missing attribute: {str(e)[:10]}", curses.color_pair(2))
+                return
+            except Exception as e:
+                self.safe_addstr(y, start_x, f"API error: {str(e)[:10]}", curses.color_pair(2))
+                return
+            
+            # Check if statuses are valid
+            if not api_statuses or not isinstance(api_statuses, dict):
+                self.safe_addstr(y, start_x, "No API status data", curses.color_pair(6))
+                return
+            
+            # Debug: Log Vault status if it's not connected
+            vault_status = api_statuses.get('vault')
+            if vault_status and vault_status.status.value != 'connected':
+                self.logger.debug(f"Vault status in dashboard: {vault_status.status.value}, error: {vault_status.error_message}")
+            
+            # Show overall health first
+            if overall_health and isinstance(overall_health, dict):
+                health_status = overall_health.get('overall_status', 'unknown')
+                health_percentage = overall_health.get('health_percentage', 0)
+                
+                if health_status == 'healthy':
+                    health_color = curses.color_pair(1)  # Green
+                    health_icon = "✅"
+                elif health_status == 'warning':
+                    health_color = curses.color_pair(3)  # Yellow
+                    health_icon = "⚠️"
+                else:
+                    health_color = curses.color_pair(2)  # Red
+                    health_icon = "❌"
+                
+                self.safe_addstr(y, start_x, f"{health_icon} Overall: {health_percentage:.0f}%", health_color)
+            else:
+                self.safe_addstr(y, start_x, "❓ Overall: Calculating...", curses.color_pair(6))
+            y += 1
+            
+            # Show critical services status
+            critical_apis = ['binance_spot', 'binance_futures', 'postgres', 'vault']
+            
+            for api_name in critical_apis:
+                if y >= start_y + height - 2:  # Prevent overflow
+                    break
+                    
                 try:
-                    symbol = position.get('symbol', 'UNKNOWN')
-                    size = float(position.get('size', 0))
-                    entry_price = float(position.get('entry_price', 0))
+                    if api_name in api_statuses:
+                        status = api_statuses[api_name]
+                        
+                        # Check if status object is valid
+                        if not status or not hasattr(status, 'status') or not hasattr(status.status, 'value'):
+                            indicator = "❓"
+                            color = curses.color_pair(6)
+                            display_name = api_name.replace('_', ' ').title()[:12]
+                            response_time = ""
+                        else:
+                            # Visual indicator based on status
+                            status_value = getattr(status.status, 'value', 'unknown')
+                            if status_value == 'connected':
+                                indicator = "✅"
+                                color = curses.color_pair(1)  # Green
+                            elif status_value == 'testing':
+                                indicator = "⏳"
+                                color = curses.color_pair(3)  # Yellow
+                            elif status_value == 'error':
+                                indicator = "❌"
+                                color = curses.color_pair(2)  # Red
+                            else:
+                                indicator = "❌"
+                                color = curses.color_pair(6)  # White
+                            
+                            # Format API name for display
+                            display_name = api_name.replace('_', ' ').title()
+                            if len(display_name) > 12:
+                                display_name = display_name[:12]
+                            
+                            # Show response time if available
+                            response_time = ""
+                            if hasattr(status, 'response_time') and status.response_time and status.response_time > 0:
+                                try:
+                                    response_time = f"{status.response_time*1000:.0f}ms"
+                                except (TypeError, ValueError):
+                                    response_time = ""
+                        
+                        self.safe_addstr(y, start_x, f"{indicator} {display_name:<12}", color)
+                        if response_time and len(response_time) < 8:
+                            self.safe_addstr(y, start_x + 15, response_time, curses.color_pair(6))
+                    else:
+                        # API not found in statuses
+                        display_name = api_name.replace('_', ' ').title()[:12]
+                        self.safe_addstr(y, start_x, f"❓ {display_name:<12}", curses.color_pair(6))
                     
-                    # Get current price for accurate position value
-                    current_price = entry_price  # Default fallback
-                    if self.price_fetcher:
+                    y += 1
+                    
+                except Exception as api_error:
+                    # Log individual API errors but continue
+                    self.logger.debug(f"Error displaying {api_name}: {api_error}")
+                    self.safe_addstr(y, start_x, f"❌ {api_name[:12]:<12}", curses.color_pair(2))
+                    y += 1
+            
+            # Show secondary services in compact format
+            y += 1
+            secondary_apis = ['binance_testnet', 'redis', 'telegram', 'prometheus']
+            secondary_status = []
+            
+            for api_name in secondary_apis:
+                if api_name in api_statuses:
+                    status = api_statuses[api_name]
+                    if not status or not hasattr(status, 'status'):
+                        secondary_status.append(f"{api_name[:3].upper()}❓")
+                    elif status.status.value == 'connected':
+                        secondary_status.append(f"{api_name[:3].upper()}✅")
+                    elif status.status.value == 'testing':
+                        secondary_status.append(f"{api_name[:3].upper()}⏳")
+                    else:
+                        secondary_status.append(f"{api_name[:3].upper()}❌")
+            
+            if secondary_status:
+                compact_status = " ".join(secondary_status)
+                self.safe_addstr(y, start_x, f"Other: {compact_status}", curses.color_pair(6))
+                y += 1
+            
+            # Show last update time
+            if api_statuses:
+                valid_statuses = [s for s in api_statuses.values() if s and s.last_checked]
+                if valid_statuses:
+                    last_checked = max(valid_statuses, key=lambda x: x.last_checked).last_checked
+                    time_str = last_checked.strftime('%H:%M:%S')
+                    self.safe_addstr(y, start_x, f"Updated: {time_str}", curses.color_pair(6))
+                else:
+                    self.safe_addstr(y, start_x, "Initializing...", curses.color_pair(6))
+            
+        except Exception as e:
+            self.safe_addstr(start_y + 1, start_x, f"API status error: {str(e)[:20]}")
+            self.logger.debug(f"API status widget error: {e}")
+
+    def _draw_position_sizing_pane(self, start_y: int, start_x: int, height: int, width: int):
+        """Draws the live position sizing visualization pane with real-time data."""
+        self.safe_addstr(start_y, start_x, "--- Live Position Sizing ---", curses.A_BOLD)
+        
+        try:
+            y = start_y + 2
+            
+            # Get live market data
+            current_price = 107000.0  # Default fallback
+            if self.price_fetcher:
+                try:
+                    live_price = self.price_fetcher.get_current_price('BTCUSDT')
+                    if live_price and live_price > 0:
+                        current_price = float(live_price)
+                except Exception as e:
+                    self.logger.debug(f"Live price fetch error: {e}")
+            
+            # Get live portfolio value from database
+            try:
+                from utils.paper_trade_db import get_all_trades
+                trades = get_all_trades(limit=1000)
+                realized_pnl = sum(float(trade[6]) for trade in trades if len(trade) >= 7)
+                
+                # Calculate live portfolio value from LIVE executor balance
+                try:
+                    from core.di import container
+                    executor = container.get_optional('executor')
+                    if executor and hasattr(executor, 'get_balance'):
+                        balance_info = executor.get_balance()
+                        starting_value = float(balance_info.get('USDT', 1000.0))
+                    else:
+                        starting_value = 1000.0  # Fallback if no executor
+                except:
+                    starting_value = 1000.0  # Fallback
+                portfolio_value = starting_value + realized_pnl
+                
+                # Add unrealized PnL from open positions
+                from utils.paper_trade_db import get_open_positions
+                open_positions_raw = get_open_positions()
+                
+                unrealized_pnl = 0.0
+                total_position_value = 0.0
+                
+                for pos in open_positions_raw:
+                    if len(pos) >= 5:  # Need at least 5 fields: id, symbol, side, entry_price, quantity
                         try:
-                            # The symbol from the database is already in the correct format (e.g., 'BTCUSDT')
-                            fetched_price = self.price_fetcher.get_price(symbol)
-                            if fetched_price:
-                                current_price = float(fetched_price)
-                        except:
-                            pass  # Use entry price fallback
-                        
-                    position_value = abs(size) * current_price
-                    size_percentage = (position_value / portfolio_value) * 100 if portfolio_value > 0 else 0
+                            symbol = pos[1]
+                            side = pos[2]  # BUY or SELL
+                            entry_price = float(pos[3])  # Correct index for entry_price
+                            quantity = float(pos[4])     # Correct index for quantity
+                            
+                            # Get live price for this position
+                            live_pos_price = entry_price  # Fallback
+                            if self.price_fetcher:
+                                try:
+                                    fetched_price = self.price_fetcher.get_current_price(symbol)
+                                    if fetched_price and fetched_price > 0:
+                                        live_pos_price = float(fetched_price)
+                                except:
+                                    pass
+                            
+                            # Calculate position value and P&L
+                            position_value = abs(quantity) * live_pos_price
+                            total_position_value += position_value
+                            
+                            # Calculate P&L based on position side
+                            if side.upper() == 'BUY':  # LONG position
+                                position_pnl = (live_pos_price - entry_price) * quantity
+                            else:  # SHORT position  
+                                position_pnl = (entry_price - live_pos_price) * quantity
+                            unrealized_pnl += position_pnl
+                            
+                        except Exception as e:
+                            self.logger.debug(f"Position value calculation error: {e}")
+                
+                # Add unrealized P&L to portfolio value
+                portfolio_value += unrealized_pnl
+                
+            except Exception as e:
+                # Use minimal fallback - avoid stale config data
+                portfolio_value = 1000.0  # Starting amount
+                total_position_value = 0.0
+                self.logger.debug(f"Live portfolio calculation error: {e}")
+            
+            # Get aggressive leverage settings (50x or higher)
+            leverage = int(self.config.get('leverage', 50))  # Default to 50x leverage
+            
+            # Calculate live market volatility (simple estimate)
+            volatility = 0.02  # Default 2%
+            if self.price_fetcher:
+                try:
+                    # Get recent price data for volatility calculation
+                    klines = self.price_fetcher.get_historical_klines('BTCUSDT', '1m', limit=20)
+                    if not klines.empty and 'close' in klines.columns:
+                        closes = klines['close'].astype(float)
+                        if len(closes) > 1:
+                            returns = closes.pct_change().dropna()
+                            volatility = returns.std() * (60**0.5)  # Annualized hourly volatility
+                except Exception as e:
+                    self.logger.debug(f"Volatility calculation error: {e}")
+            
+            # Display live market data with aggressive parameters
+            time_str = datetime.now().strftime('%H:%M:%S')
+            self.safe_addstr(y, start_x, f"Live Price: ${current_price:,.2f} [{time_str}]", curses.color_pair(4))
+            self.safe_addstr(y + 1, start_x, f"Portfolio: ${portfolio_value:,.2f}", curses.color_pair(6))
+            self.safe_addstr(y + 2, start_x, f"Leverage: {leverage}x | Vol: {volatility*100:.1f}%", curses.color_pair(6))
+            
+            y += 4
+            
+            # Show live position utilization with higher risk tolerance
+            if total_position_value > 0:
+                utilization = (total_position_value / portfolio_value) * 100 if portfolio_value > 0 else 0
+                util_color = curses.color_pair(1) if utilization < 70 else curses.color_pair(3) if utilization < 90 else curses.color_pair(2)
+                self.safe_addstr(y, start_x, f"Position Utilization: {utilization:.1f}%", util_color)
+                
+                # Create utilization bar
+                max_bar_width = width - 20
+                bar_width = max(0, min(max_bar_width, int(utilization / 100 * max_bar_width)))
+                remaining_width = max(0, max_bar_width - bar_width)
+                bar_str = '█' * bar_width + '░' * remaining_width
+                self.safe_addstr(y + 1, start_x, f"[{bar_str}]", util_color)
+                y += 3
+            else:
+                self.safe_addstr(y, start_x, "No active positions", curses.color_pair(6))
+                y += 2
+            
+            # Aggressive risk-based position sizing with high leverage
+            self.safe_addstr(y, start_x, "Aggressive Position Sizing:", curses.A_BOLD)
+            y += 1
+            
+            # More aggressive risk levels for high leverage trading
+            base_risks = [0.02, 0.05, 0.10]  # 2%, 5%, 10% risk levels
+            
+            for i, base_risk in enumerate(base_risks):
+                # Use full risk without volatility adjustment for aggressive trading
+                risk_amount = portfolio_value * base_risk
+                position_value = risk_amount * leverage
+                position_size = position_value / current_price
+                
+                # Color code based on risk level (more tolerant for aggressive trading)
+                risk_color = curses.color_pair(1) if base_risk < 0.05 else curses.color_pair(3) if base_risk < 0.08 else curses.color_pair(2)
+                
+                self.safe_addstr(y, start_x, f"{base_risk*100:.1f}%: {position_size:.4f} BTC", risk_color)
+                self.safe_addstr(y, start_x + 25, f"(${position_value:,.0f})", risk_color)
+                y += 1
+            
+            y += 1
+            
+            # Fixed take-profit at 1.5% as requested
+            self.safe_addstr(y, start_x, "Risk Management (Fixed):", curses.A_BOLD)
+            y += 1
+            
+            # Fixed 1.5% take profit and aggressive stop loss
+            take_profit_pct = 0.015  # Fixed 1.5% take profit
+            stop_loss_pct = 0.01  # Aggressive 1% stop loss
+            
+            stop_loss_price = current_price * (1 - stop_loss_pct)
+            take_profit_price = current_price * (1 + take_profit_pct)
+            
+            self.safe_addstr(y, start_x, f"Stop Loss: ${stop_loss_price:,.0f} (-{stop_loss_pct*100:.1f}%)", curses.color_pair(2))
+            self.safe_addstr(y + 1, start_x, f"Take Profit: ${take_profit_price:,.0f} (+{take_profit_pct*100:.1f}%)", curses.color_pair(1))
+            
+            y += 3
+            
+            # High leverage margin and liquidation info
+            if leverage > 1:
+                self.safe_addstr(y, start_x, "High Leverage Margin:", curses.A_BOLD)
+                y += 1
+                
+                # Calculate liquidation price for high leverage
+                margin_ratio = 1 / leverage
+                liquidation_distance = margin_ratio * 0.9  # 90% of margin before liquidation
+                liquidation_price = current_price * (1 - liquidation_distance)
+                
+                # Color code based on liquidation risk (more aggressive thresholds)
+                liq_color = curses.color_pair(1) if liquidation_distance > 0.02 else curses.color_pair(3) if liquidation_distance > 0.01 else curses.color_pair(2)
+                
+                self.safe_addstr(y, start_x, f"Liquidation: ${liquidation_price:,.0f}", liq_color)
+                self.safe_addstr(y, start_x + 25, f"(-{liquidation_distance*100:.2f}%)", liq_color)
+                
+                # Show margin usage with high leverage tolerance
+                if total_position_value > 0:
+                    margin_used = total_position_value / leverage
+                    margin_available = portfolio_value - margin_used
+                    margin_usage_pct = (margin_used / portfolio_value) * 100 if portfolio_value > 0 else 0
                     
-                    # Create visualization bar
-                    max_bar_width = width - 15  # Leave space for text
-                    bar_width = max(0, min(max_bar_width, int(size_percentage / 100 * max_bar_width)))
-                    remaining_width = max(0, max_bar_width - bar_width)
-                    
-                    # Display position info
-                    side = "LONG" if size > 0 else "SHORT"
-                    self.safe_addstr(y, start_x, f"{symbol} {side}: {size_percentage:.1f}%")
-                    self.safe_addstr(y + 1, start_x, f"${position_value:,.0f} / ${portfolio_value:,.0f}")
-                    
-                    # Draw sizing bar
-                    bar_color = curses.color_pair(1) if size > 0 else curses.color_pair(2)
-                    bar_str = '█' * bar_width + '░' * remaining_width
-                    self.safe_addstr(y + 2, start_x, f"[{bar_str}]", bar_color)
-                    
-                    y += 4
-                    
-                    # Prevent overflow
-                    if y >= start_y + height - 2:
-                        break
-                        
-                except (ValueError, TypeError) as e:
-                    self.logger.debug(f"Position sizing error for position {position}: {e}")
-                    continue
+                    margin_color = curses.color_pair(1) if margin_usage_pct < 50 else curses.color_pair(3) if margin_usage_pct < 80 else curses.color_pair(2)
+                    self.safe_addstr(y + 1, start_x, f"Margin Used: {margin_usage_pct:.1f}%", margin_color)
+                    self.safe_addstr(y + 2, start_x, f"Available: ${margin_available:,.0f}", margin_color)
                     
         except Exception as e:
-            self.safe_addstr(start_y + 2, start_x, f"Sizing error: {str(e)[:15]}")
-            self.logger.debug(f"Position sizing pane error: {e}")
+            self.safe_addstr(start_y + 2, start_x, f"Live sizing error: {str(e)[:20]}")
+            self.logger.debug(f"Live position sizing pane error: {e}")
+            import traceback
+            self.logger.debug(f"Traceback: {traceback.format_exc()}")
         
     def _draw_chart_pane(self, start_y: int, start_x: int, height: int, width: int):
         """Draws the candlestick chart pane with OHLC data and technical indicators."""
@@ -1346,6 +1670,10 @@ class ConsoleDashboard:
                 if self.stdscr:
                     self.stdscr.keypad(False)
                 curses.echo()
+                
+                # Stop API monitoring
+                if hasattr(self, 'api_tester'):
+                    self.api_tester.stop_monitoring()
                 
                 # Remove log handler to prevent memory leaks
                 if hasattr(self, 'log_handler'):

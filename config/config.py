@@ -1,25 +1,27 @@
 # Configuration file for ELVIS trading bot
 
 import os
-
-import os
+from utils.secrets_manager import get_enhanced_secrets_manager
 
 class APIConfig:
+    def __init__(self):
+        self._secrets = get_enhanced_secrets_manager()
+    
     @property
     def BINANCE_API_KEY(self):
-        return os.getenv('BINANCE_API_KEY', 'your_binance_api_key_here')
+        return self._secrets.get_secret('BINANCE_API_KEY', 'api_keys') or os.getenv('BINANCE_API_KEY', 'your_binance_api_key_here')
 
     @property
     def BINANCE_API_SECRET(self):
-        return os.getenv('BINANCE_API_SECRET', 'your_binance_api_secret_here')
+        return self._secrets.get_secret('BINANCE_API_SECRET', 'api_keys') or os.getenv('BINANCE_API_SECRET', 'your_binance_api_secret_here')
     
     @property
     def BINANCE_FUTURES_TESTNET_API_KEY(self):
-        return os.getenv('BINANCE_FUTURES_TESTNET_API_KEY', 'your_futures_testnet_api_key_here')
+        return self._secrets.get_secret('BINANCE_FUTURES_TESTNET_API_KEY', 'api_keys') or os.getenv('BINANCE_FUTURES_TESTNET_API_KEY', 'your_futures_testnet_api_key_here')
 
     @property
     def BINANCE_FUTURES_TESTNET_API_SECRET(self):
-        return os.getenv('BINANCE_FUTURES_TESTNET_API_SECRET', 'your_futures_testnet_api_secret_here')
+        return self._secrets.get_secret('BINANCE_FUTURES_TESTNET_API_SECRET', 'api_keys') or os.getenv('BINANCE_FUTURES_TESTNET_API_SECRET', 'your_futures_testnet_api_secret_here')
 
 API_CONFIG = APIConfig()
 
@@ -36,12 +38,12 @@ TRADING_CONFIG = {
     'TAKE_PROFIT_PCT': 0.02,  # Added to fix the current error; adjust as needed
     'LEVERAGE_MAX': 125,      # Maximum leverage for futures
     'LEVERAGE_MIN': 1,        # Minimum leverage for futures
-    'DEFAULT_LEVERAGE': 10,   # Default leverage for new positions
+    'DEFAULT_LEVERAGE': 100,  # Default leverage for maximum trading power
     'MAX_TRADES_PER_DAY': 10,  # Added to fix MAX_TRADES_PER_DAY error
     'DAILY_PROFIT_TARGET_USD': 100,  # Added to fix DAILY_PROFIT_TARGET_USD error
     'DAILY_LOSS_LIMIT_USD': 100,     # Added to fix DAILY_LOSS_LIMIT_USD error
     'MIN_CAPITAL_USD': 1000,         # Added to fix MIN_CAPITAL_USD error
-    'COOLDOWN': 60                   # Added to fix COOLDOWN error (seconds)
+    'COOLDOWN': 0                    # No cooldown - maximum trading speed
 }
 
 LOGGING_CONFIG = {

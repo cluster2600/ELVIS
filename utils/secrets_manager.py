@@ -1,6 +1,6 @@
 """
-Secrets Manager for ELVIS Trading Bot
-Provides secure handling of sensitive configuration data
+Enhanced Secrets Manager for ELVIS Trading Bot
+Provides secure handling with HashiCorp Vault integration and fallback support
 """
 
 import os
@@ -10,23 +10,48 @@ import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import keyring
 import getpass
+
+# Import Vault client if available
+try:
+    from .vault_client import get_vault_client, VaultClient
+    VAULT_AVAILABLE = True
+except ImportError:
+    VAULT_AVAILABLE = False
+    VaultClient = None
 
 logger = logging.getLogger(__name__)
 
 
-class SecretsManager:
-    """Manage secrets securely using encryption and OS keyring"""
+class EnhancedSecretsManager:
+    """Enhanced secrets manager with Vault integration and fallback support"""
     
-    def __init__(self, app_name: str = "ELVIS_TRADING_BOT"):
+    def __init__(self, app_name: str = "ELVIS_TRADING_BOT", use_vault: bool = True):
         self.app_name = app_name
         self.secrets_file = Path.home() / ".elvis" / "secrets.enc"
         self.secrets_file.parent.mkdir(parents=True, exist_ok=True)
         self._cipher = None
         self._secrets_cache = {}
+        
+        # Vault integration
+        self.use_vault = use_vault and VAULT_AVAILABLE and os.getenv('VAULT_ENABLED', 'true').lower() == 'true'
+        self.vault_client = None
+        
+        if self.use_vault:
+            try:
+                self.vault_client = get_vault_client(logger=logger)
+                if not self.vault_client.health_check():
+                    logger.warning("Vault health check failed, using local storage")
+                    self.vault_client = None
+                else:
+                    logger.info("Using HashiCorp Vault for secrets management")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vault, using local storage: {e}")
+                self.vault_client = None
+        
+        if not self.vault_client:
+            logger.info("Using local encrypted storage for secrets management")
     
     def _get_or_create_key(self) -> bytes:
         """Get or create encryption key from OS keyring"""
@@ -58,40 +83,16 @@ class SecretsManager:
             self._cipher = Fernet(key)
         return self._cipher
     
-    def set_secret(self, name: str, value: str, category: str = "default") -> None:
-        """
-        Store a secret securely
-        
-        Args:
-            name: Secret name (e.g., 'BINANCE_API_KEY')
-            value: Secret value
-            category: Category for organization (e.g., 'api_keys', 'passwords')
-        """
-        # Load existing secrets
-        secrets = self._load_secrets()
-        
-        # Update secret
-        if category not in secrets:
-            secrets[category] = {}
-        secrets[category][name] = value
-        
-        # Save encrypted
-        self._save_secrets(secrets)
-        
-        # Update cache
-        self._secrets_cache[f"{category}.{name}"] = value
-        
-        logger.info(f"Secret '{name}' stored in category '{category}'")
-    
     def get_secret(self, name: str, category: str = "default", 
-                   default: Optional[str] = None) -> Optional[str]:
+                   default: Optional[str] = None, warn_if_missing: bool = True) -> Optional[str]:
         """
-        Retrieve a secret
+        Retrieve a secret with Vault and local fallback
         
         Args:
             name: Secret name
             category: Category name
             default: Default value if secret not found
+            warn_if_missing: Whether to log warning if secret is missing
             
         Returns:
             Secret value or default
@@ -101,6 +102,19 @@ class SecretsManager:
         # Check cache first
         if cache_key in self._secrets_cache:
             return self._secrets_cache[cache_key]
+        
+        # Try Vault first if available
+        if self.vault_client:
+            try:
+                vault_path = self._category_to_vault_path(category)
+                field_name = name.lower().replace('_', '-')
+                value = self.vault_client.get_secret(vault_path, field_name)
+                if value:
+                    self._secrets_cache[cache_key] = str(value)
+                    logger.debug(f"Retrieved {name} from Vault")
+                    return str(value)
+            except Exception as e:
+                logger.warning(f"Failed to get {name} from Vault: {e}")
         
         # Load from encrypted file
         secrets = self._load_secrets()
@@ -113,38 +127,242 @@ class SecretsManager:
         # Check environment variable as fallback
         env_value = os.getenv(name)
         if env_value:
+            logger.debug(f"Retrieved {name} from environment")
             return env_value
         
+        if warn_if_missing:
+            logger.warning(f"Secret {name} not found in any source")
         return default
     
-    def delete_secret(self, name: str, category: str = "default") -> bool:
-        """Delete a secret"""
-        secrets = self._load_secrets()
+    def set_secret(self, name: str, value: str, category: str = "default") -> None:
+        """
+        Store a secret securely in Vault and/or local storage
         
+        Args:
+            name: Secret name (e.g., 'BINANCE_API_KEY')
+            value: Secret value
+            category: Category for organization (e.g., 'api_keys', 'passwords')
+        """
+        # Try to store in Vault first
+        vault_stored = False
+        if self.vault_client:
+            try:
+                vault_path = self._category_to_vault_path(category)
+                field_name = name.lower().replace('_', '-')
+                
+                # Get existing secrets at this path
+                existing_secrets = self.vault_client.get_secret(vault_path) or {}
+                existing_secrets[field_name] = value
+                
+                if self.vault_client.put_secret(vault_path, existing_secrets):
+                    vault_stored = True
+                    logger.info(f"Secret '{name}' stored in Vault at {vault_path}")
+            except Exception as e:
+                logger.error(f"Failed to store {name} in Vault: {e}")
+        
+        # Always store locally as backup
+        secrets = self._load_secrets()
+        if category not in secrets:
+            secrets[category] = {}
+        secrets[category][name] = value
+        self._save_secrets(secrets)
+        
+        # Update cache
+        self._secrets_cache[f"{category}.{name}"] = value
+        
+        storage_info = "Vault and local" if vault_stored else "local"
+        logger.info(f"Secret '{name}' stored in {storage_info} storage")
+    
+    def delete_secret(self, name: str, category: str = "default") -> bool:
+        """Delete a secret from both Vault and local storage"""
+        deleted = False
+        
+        # Delete from Vault if available
+        if self.vault_client:
+            try:
+                vault_path = self._category_to_vault_path(category)
+                existing_secrets = self.vault_client.get_secret(vault_path) or {}
+                field_name = name.lower().replace('_', '-')
+                
+                if field_name in existing_secrets:
+                    del existing_secrets[field_name]
+                    if self.vault_client.put_secret(vault_path, existing_secrets):
+                        logger.info(f"Secret '{name}' deleted from Vault")
+                        deleted = True
+            except Exception as e:
+                logger.error(f"Failed to delete {name} from Vault: {e}")
+        
+        # Delete from local storage
+        secrets = self._load_secrets()
         if category in secrets and name in secrets[category]:
             del secrets[category][name]
             if not secrets[category]:
                 del secrets[category]
             
             self._save_secrets(secrets)
+            deleted = True
             
             # Remove from cache
             cache_key = f"{category}.{name}"
             self._secrets_cache.pop(cache_key, None)
             
-            logger.info(f"Secret '{name}' deleted from category '{category}'")
-            return True
+            logger.info(f"Secret '{name}' deleted from local storage")
         
-        return False
+        return deleted
     
     def list_secrets(self, category: Optional[str] = None) -> Dict[str, list]:
         """List all secret names (not values) by category"""
-        secrets = self._load_secrets()
+        all_secrets = {}
+        
+        # Get from Vault if available
+        if self.vault_client:
+            try:
+                # List common vault paths
+                vault_paths = ['trading/api-keys', 'database/credentials', 'notifications/webhooks', 'general/secrets']
+                for vault_path in vault_paths:
+                    try:
+                        vault_secrets = self.vault_client.get_secret(vault_path)
+                        if vault_secrets:
+                            category_name = vault_path.split('/')[-1]
+                            all_secrets[f"vault_{category_name}"] = list(vault_secrets.keys())
+                    except:
+                        continue
+            except Exception as e:
+                logger.warning(f"Failed to list Vault secrets: {e}")
+        
+        # Get from local storage
+        local_secrets = self._load_secrets()
+        for cat, names in local_secrets.items():
+            key = f"local_{cat}" if self.vault_client else cat
+            all_secrets[key] = list(names.keys())
         
         if category:
-            return {category: list(secrets.get(category, {}).keys())}
+            return {k: v for k, v in all_secrets.items() if category in k}
         
-        return {cat: list(names.keys()) for cat, names in secrets.items()}
+        return all_secrets
+    
+    def _category_to_vault_path(self, category: str) -> str:
+        """Convert category to Vault path"""
+        category_mapping = {
+            'api_keys': 'trading/api-keys',
+            'database': 'database/credentials', 
+            'webhooks': 'notifications/webhooks',
+            'default': 'general/secrets'
+        }
+        return category_mapping.get(category, f"general/{category}")
+    
+    def migrate_to_vault(self) -> bool:
+        """
+        Migrate all local secrets to Vault
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.vault_client:
+            logger.error("Cannot migrate: Vault not available")
+            return False
+        
+        try:
+            secrets = self._load_secrets()
+            migrated_count = 0
+            total_count = 0
+            
+            for category, category_secrets in secrets.items():
+                vault_path = self._category_to_vault_path(category)
+                
+                # Convert keys to Vault format
+                vault_secrets = {}
+                for name, value in category_secrets.items():
+                    field_name = name.lower().replace('_', '-')
+                    vault_secrets[field_name] = value
+                    total_count += 1
+                
+                if vault_secrets:
+                    if self.vault_client.put_secret(vault_path, vault_secrets):
+                        migrated_count += len(vault_secrets)
+                        logger.info(f"Migrated {len(vault_secrets)} secrets to {vault_path}")
+            
+            if migrated_count == total_count:
+                logger.info(f"Successfully migrated all {migrated_count} secrets to Vault")
+                return True
+            else:
+                logger.warning(f"Migrated {migrated_count}/{total_count} secrets")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to migrate secrets to Vault: {e}")
+            return False
+    
+    def get_binance_credentials(self) -> Dict[str, str]:
+        """Get Binance API credentials"""
+        return {
+            'api_key': self.get_secret('BINANCE_API_KEY', 'api_keys'),
+            'api_secret': self.get_secret('BINANCE_API_SECRET', 'api_keys'),
+            'futures_testnet_api_key': self.get_secret('BINANCE_FUTURES_TESTNET_API_KEY', 'api_keys'),
+            'futures_testnet_api_secret': self.get_secret('BINANCE_FUTURES_TESTNET_API_SECRET', 'api_keys')
+        }
+    
+    def get_database_credentials(self) -> Dict[str, str]:
+        """Get database connection credentials"""
+        return {
+            'host': self.get_secret('POSTGRES_HOST', 'database', 'localhost'),
+            'port': self.get_secret('POSTGRES_PORT', 'database', '5432'),
+            'user': self.get_secret('POSTGRES_USER', 'database', 'postgres'),
+            'password': self.get_secret('POSTGRES_PASSWORD', 'database'),
+            'dbname': self.get_secret('POSTGRES_DBNAME', 'database', 'trading_bot')
+        }
+    
+    def get_redis_credentials(self) -> Dict[str, str]:
+        """Get Redis connection credentials"""
+        # Check if Redis password is actually configured before looking for it
+        redis_password = None
+        try:
+            # Only attempt to get password if it exists, don't warn if missing
+            redis_password = self.get_secret('REDIS_PASSWORD', 'database', warn_if_missing=False)
+        except:
+            pass  # Password is optional for Redis
+        
+        return {
+            'host': self.get_secret('REDIS_HOST', 'database', 'localhost'),
+            'port': self.get_secret('REDIS_PORT', 'database', '6379'),
+            'db': self.get_secret('REDIS_DB', 'database', '0'),
+            'password': redis_password  # None if not configured (which is fine)
+        }
+    
+    def get_telegram_credentials(self) -> Dict[str, str]:
+        """Get Telegram bot credentials"""
+        return {
+            'bot_token': self.get_secret('TELEGRAM_BOT_TOKEN', 'api_keys'),
+            'chat_id': self.get_secret('TELEGRAM_CHAT_ID', 'api_keys')
+        }
+    
+    def get_vault_status(self) -> Dict[str, Any]:
+        """Get Vault connection status"""
+        if not self.vault_client:
+            return {
+                'enabled': False,
+                'connected': False,
+                'healthy': False,
+                'reason': 'Vault client not initialized'
+            }
+        
+        try:
+            healthy = self.vault_client.health_check()
+            authenticated = self.vault_client.is_authenticated
+            
+            return {
+                'enabled': True,
+                'connected': authenticated,
+                'healthy': healthy,
+                'url': self.vault_client.vault_url
+            }
+        except Exception as e:
+            return {
+                'enabled': True,
+                'connected': False,
+                'healthy': False,
+                'error': str(e)
+            }
     
     def _load_secrets(self) -> Dict[str, Dict[str, str]]:
         """Load and decrypt secrets from file"""
@@ -189,11 +407,21 @@ class SecretsManager:
             'api_keys': [
                 'BINANCE_API_KEY',
                 'BINANCE_API_SECRET',
+                'BINANCE_FUTURES_TESTNET_API_KEY',
+                'BINANCE_FUTURES_TESTNET_API_SECRET',
                 'TELEGRAM_BOT_TOKEN',
+                'TELEGRAM_CHAT_ID',
                 'GRAFANA_API_KEY'
             ],
             'database': [
+                'POSTGRES_HOST',
+                'POSTGRES_PORT',
+                'POSTGRES_USER',
                 'POSTGRES_PASSWORD',
+                'POSTGRES_DBNAME',
+                'REDIS_HOST',
+                'REDIS_PORT',
+                'REDIS_DB',
                 'REDIS_PASSWORD'
             ],
             'webhooks': [
@@ -213,94 +441,28 @@ class SecretsManager:
         logger.info(f"Initialized {initialized} secrets from environment variables")
 
 
-class ConfigLoader:
-    """Load configuration with secrets integration"""
-    
-    def __init__(self, secrets_manager: Optional[SecretsManager] = None):
-        self.secrets_manager = secrets_manager or SecretsManager()
-    
-    def load_config(self, config_file: Optional[Path] = None) -> Dict[str, Any]:
-        """
-        Load configuration with secrets replacement
-        
-        Config file can contain placeholders like:
-        {
-            "api_key": "${SECRET:api_keys.BINANCE_API_KEY}",
-            "password": "${SECRET:database.POSTGRES_PASSWORD}"
-        }
-        """
-        if not config_file:
-            config_file = Path("config/config.json")
-        
-        if not config_file.exists():
-            return {}
-        
-        with open(config_file, 'r') as f:
-            config = json.load(f)
-        
-        # Replace secret placeholders
-        return self._replace_secrets(config)
-    
-    def _replace_secrets(self, obj: Any) -> Any:
-        """Recursively replace secret placeholders in configuration"""
-        if isinstance(obj, dict):
-            return {k: self._replace_secrets(v) for k, v in obj.items()}
-        
-        elif isinstance(obj, list):
-            return [self._replace_secrets(item) for item in obj]
-        
-        elif isinstance(obj, str) and obj.startswith("${SECRET:"):
-            # Extract secret reference
-            secret_ref = obj[9:-1]  # Remove ${SECRET: and }
-            
-            if '.' in secret_ref:
-                category, name = secret_ref.split('.', 1)
-                return self.secrets_manager.get_secret(name, category) or obj
-            else:
-                return self.secrets_manager.get_secret(secret_ref) or obj
-        
-        return obj
+# Backward compatibility aliases
+SecretsManager = EnhancedSecretsManager
 
+# Global enhanced secrets manager instance
+_enhanced_secrets_manager = None
 
-def interactive_setup():
-    """Interactive setup for secrets"""
-    print("🔐 ELVIS Trading Bot - Secrets Setup")
-    print("=" * 40)
+def get_enhanced_secrets_manager(logger: logging.Logger = None) -> EnhancedSecretsManager:
+    """
+    Get or create the global enhanced secrets manager instance.
     
-    manager = SecretsManager()
-    
-    # Check if already initialized
-    existing = manager.list_secrets()
-    if existing:
-        print("\n📋 Existing secrets found:")
-        for category, names in existing.items():
-            print(f"  {category}: {', '.join(names)}")
+    Args:
+        logger: Logger instance
         
-        if input("\nReinitialize secrets? (y/N): ").lower() != 'y':
-            return
-    
-    print("\n🔑 Enter your API credentials (leave blank to skip):")
-    
-    # Binance API
-    binance_key = getpass.getpass("Binance API Key: ")
-    if binance_key:
-        binance_secret = getpass.getpass("Binance API Secret: ")
-        manager.set_secret("BINANCE_API_KEY", binance_key, "api_keys")
-        manager.set_secret("BINANCE_API_SECRET", binance_secret, "api_keys")
-    
-    # Telegram Bot
-    telegram_token = getpass.getpass("Telegram Bot Token: ")
-    if telegram_token:
-        telegram_chat_id = input("Telegram Chat ID: ")
-        manager.set_secret("TELEGRAM_BOT_TOKEN", telegram_token, "api_keys")
-        manager.set_secret("TELEGRAM_CHAT_ID", telegram_chat_id, "api_keys")
-    
-    print("\n✅ Secrets stored securely!")
-    print("\n📝 Usage example:")
-    print("  from utils.secrets_manager import SecretsManager")
-    print("  secrets = SecretsManager()")
-    print("  api_key = secrets.get_secret('BINANCE_API_KEY', 'api_keys')")
+    Returns:
+        EnhancedSecretsManager instance
+    """
+    global _enhanced_secrets_manager
+    if _enhanced_secrets_manager is None:
+        _enhanced_secrets_manager = EnhancedSecretsManager()
+    return _enhanced_secrets_manager
 
-
-if __name__ == "__main__":
-    interactive_setup()
+# Backward compatibility function
+def get_secrets_manager(logger: logging.Logger = None) -> EnhancedSecretsManager:
+    """Backward compatibility wrapper"""
+    return get_enhanced_secrets_manager(logger)
