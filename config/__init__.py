@@ -12,7 +12,7 @@ TRADING_CONFIG = {
     'DAILY_PROFIT_TARGET_USD': 100.0,
     'DAILY_LOSS_LIMIT_USD': -50.0,
     'MIN_CAPITAL_USD': 50.0,
-    'COOLDOWN': 10,               # 10 seconds cooldown between trades
+    'COOLDOWN': 0,                # No cooldown - maximum trading speed
 }
 # API Configuration - load from environment variables
 import os
