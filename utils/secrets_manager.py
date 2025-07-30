@@ -107,7 +107,7 @@ class EnhancedSecretsManager:
         if self.vault_client:
             try:
                 vault_path = self._category_to_vault_path(category)
-                field_name = name.lower().replace('_', '-')
+                field_name = name  # Keep original field name for vault
                 value = self.vault_client.get_secret(vault_path, field_name)
                 if value:
                     self._secrets_cache[cache_key] = str(value)
@@ -245,7 +245,10 @@ class EnhancedSecretsManager:
         """Convert category to Vault path"""
         category_mapping = {
             'api_keys': 'trading/api-keys',
-            'database': 'database/credentials', 
+            'database': 'database/credentials',
+            'database/credentials': 'database/credentials', 
+            'trading/api-keys': 'trading/api-keys',
+            'notifications/telegram': 'notifications/telegram',
             'webhooks': 'notifications/webhooks',
             'default': 'general/secrets'
         }

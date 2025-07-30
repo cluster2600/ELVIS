@@ -7,7 +7,11 @@ import time
 import curses
 import os
 
-# Set Vault environment variables early to prevent initialization issues
+# Load environment variables first
+from dotenv import load_dotenv
+load_dotenv()
+
+# Set Vault environment variables only if not already set
 if not os.getenv('VAULT_ADDR'):
     os.environ['VAULT_ADDR'] = 'http://127.0.0.1:8200'
 if not os.getenv('VAULT_TOKEN'):
@@ -727,13 +731,11 @@ def main(mode: str, log_level: str):
                             except Exception as e:
                                 logger.error(f"❌ Position management loop error: {e}")
                             
-                            # COOLDOWN REMOVED - Maximum trading speed enabled
+                            # MAXIMUM SPEED TRADING - No delays whatsoever
                             current_time = time.time()
-                            if not hasattr(trading_loop, 'last_trade_time'):
-                                trading_loop.last_trade_time = 0
                             
-                            # Execute trades based on signals with HIGHER threshold to reduce frequency
-                            if signal in ['BUY', 'SELL'] and confidence >= 0.75:  # INCREASED threshold to reduce micro-trading
+                            # Execute trades based on signals with MUCH HIGHER threshold to stop overtrading
+                            if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # CRITICAL: High threshold for quality trades only
                                 current_price = data.iloc[-1]['close']
                                 
                                 # Check if we have too many open positions (limit to 10 for balanced strategy)
@@ -789,6 +791,18 @@ def main(mode: str, log_level: str):
 
                                 logger.info(f"🎯 DYNAMIC x50+ EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
                                 
+                                # DUPLICATE TRADE PREVENTION
+                                trade_key = f"{signal}_{symbol}_{current_price:.2f}_{position_size:.6f}"
+                                current_time_ms = int(time.time() * 1000)
+                                
+                                # Skip if same trade executed within last 30 seconds
+                                if hasattr(trading_loop, 'recent_trades'):
+                                    if trading_loop.recent_trades.get(trade_key, 0) + 30000 > current_time_ms:
+                                        logger.warning(f"🚫 DUPLICATE PREVENTED: {trade_key}")
+                                        continue
+                                else:
+                                    trading_loop.recent_trades = {}
+                                
                                 # Execute order with new method
                                 logger.info(f"🎯 ORDER ATTEMPT: {signal} | Size: {position_size:.6f} | Price: ${current_price:.2f}")
                                 
@@ -796,7 +810,8 @@ def main(mode: str, log_level: str):
                                     order_result = executor.place_order(symbol, 'buy', position_size, current_price)
                                     if order_result:
                                         logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                        trading_loop.last_trade_time = current_time  # Update cooldown timer
+                                        # Record trade to prevent duplicates
+                                        trading_loop.recent_trades[trade_key] = current_time_ms
                                         # Small delay to ensure trade completion
                                         time.sleep(0.5)
                                     else:
@@ -805,13 +820,14 @@ def main(mode: str, log_level: str):
                                     order_result = executor.place_order(symbol, 'sell', position_size, current_price)
                                     if order_result:
                                         logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                        trading_loop.last_trade_time = current_time  # Update cooldown timer
+                                        # Record trade to prevent duplicates
+                                        trading_loop.recent_trades[trade_key] = current_time_ms
                                         # Small delay to ensure trade completion
                                         time.sleep(0.5)
                                     else:
                                         logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
                             else:
-                                logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 75% threshold)")
+                                logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)")
                         else:
                             # Fallback for strategies without the new generate_signal method
                             logger.warning(f"Strategy {type(active_strategy).__name__} doesn't have generate_signal method - using old approach")
@@ -823,7 +839,7 @@ def main(mode: str, log_level: str):
                                     signal = signal_info.get('signal', 'HOLD')
                                     confidence = signal_info.get('confidence', 0.0)
                                     
-                                    if signal in ['BUY', 'SELL'] and confidence >= 0.55:
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.90:
                                         current_price = data.iloc[-1]['close']
                                         available_balance = executor.get_account_balance()
                                         position_size = active_strategy.calculate_position_size(
