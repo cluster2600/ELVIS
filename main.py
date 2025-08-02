@@ -271,7 +271,23 @@ def main(mode: str, log_level: str):
                     logger.info("=== TRADING LOOP ITERATION START ===")
                     logger.info("Attempting to fetch market data...")
                     try:
-                        data = price_fetcher.get_historical_klines("BTCUSDT", "1m")
+                        # Multi-symbol trading: BTCUSDT (futures) + BNBBTC (spot)
+                        symbols_to_trade = ["BTCUSDT", "BNBBTC"]
+                        all_data = {}
+                        
+                        for trading_symbol in symbols_to_trade:
+                            try:
+                                symbol_data = price_fetcher.get_historical_klines(trading_symbol, "1m")
+                                if not symbol_data.empty:
+                                    all_data[trading_symbol] = symbol_data
+                                    logger.debug(f"✅ {trading_symbol}: {len(symbol_data)} records")
+                                else:
+                                    logger.warning(f"⚠️ No data for {trading_symbol}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Error fetching {trading_symbol}: {e}")
+                        
+                        # Use BTCUSDT as primary for dashboard/indicators
+                        data = all_data.get("BTCUSDT", pd.DataFrame())
                         logger.debug(f"Fetched data shape: {data.shape if not data.empty else 'EMPTY'}")
                         if not data.empty:
                             logger.debug(f"Data columns: {list(data.columns)}")
@@ -606,6 +622,13 @@ def main(mode: str, log_level: str):
                                 'bb_middle': float(data.iloc[-1].get('sma_bb', current_price)) if pd.notna(data.iloc[-1].get('sma_bb')) else current_price
                             }
                             
+                            # Process each symbol with appropriate executor
+                            symbols_data = {
+                                "BTCUSDT": data,  # Primary symbol data
+                                "BNBBTC": all_data.get("BNBBTC", pd.DataFrame())
+                            }
+                            
+                            # Process BTCUSDT first (futures)
                             symbol = "BTCUSDT"
                             logger.info(f"🎯 Calling NEW generate_signal method with market data for {symbol}")
                             logger.info(f"📊 Market data: Price=${current_price:.2f}, RSI={market_data['rsi']:.1f}, MACD={market_data['macd']:.3f}")
@@ -736,6 +759,14 @@ def main(mode: str, log_level: str):
                             
                             # Execute trades based on signals with MUCH HIGHER threshold to stop overtrading
                             if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # CRITICAL: High threshold for quality trades only
+                                # Execute BTCUSDT trade (futures)
+                                self._execute_symbol_trade(symbol, signal, confidence, data, executor)
+                            
+                            # TEMPORARILY DISABLE BNBBTC CONVERSION to stop PnL bug
+                            logger.info("🚫 BNBBTC conversion temporarily disabled to fix PnL calculation bug")
+                            # TODO: Re-enable after fixing the price calculation issue
+                            
+                            # Continue with original BTCUSDT execution logic
                                 current_price = data.iloc[-1]['close']
                                 
                                 # Check if we have too many open positions (limit to 10 for balanced strategy)

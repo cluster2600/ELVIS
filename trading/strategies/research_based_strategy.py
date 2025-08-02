@@ -312,9 +312,39 @@ class ResearchBasedStrategy(BaseStrategy):
             # Convert to numpy array
             features = np.array(feature_vector).reshape(1, -1)
             
+            # Check feature consistency before scaling
+            expected_features = 11 if self.social_data_enabled else 9
+            actual_features = features.shape[1]
+            
+            if actual_features != expected_features:
+                self.logger.warning(f"Feature mismatch: got {actual_features}, expected {expected_features}")
+                # Pad or truncate features to match expected size
+                if actual_features < expected_features:
+                    # Pad with zeros (missing social features)
+                    padding = np.zeros((1, expected_features - actual_features))
+                    features = np.concatenate([features, padding], axis=1)
+                    self.logger.info(f"Padded features from {actual_features} to {expected_features}")
+                else:
+                    # Truncate extra features
+                    features = features[:, :expected_features]
+                    self.logger.info(f"Truncated features from {actual_features} to {expected_features}")
+            
             # Apply standardization if scaler is fitted
             if hasattr(self.feature_scaler, 'mean_'):
-                features = self.feature_scaler.transform(features)
+                try:
+                    # Check if scaler was trained with different number of features
+                    if hasattr(self.feature_scaler, 'n_features_in_'):
+                        scaler_features = self.feature_scaler.n_features_in_
+                        if scaler_features != features.shape[1]:
+                            self.logger.warning(f"Scaler feature mismatch: scaler trained on {scaler_features}, got {features.shape[1]}")
+                            # Skip scaling if mismatch
+                            self.logger.info("Skipping feature scaling due to mismatch")
+                        else:
+                            features = self.feature_scaler.transform(features)
+                    else:
+                        features = self.feature_scaler.transform(features)
+                except Exception as scale_error:
+                    self.logger.warning(f"Feature scaling failed: {scale_error}, using unscaled features")
             
             self.logger.debug(f"🔢 Prepared {features.shape[1]} features for prediction")
             return features
@@ -435,6 +465,22 @@ class ResearchBasedStrategy(BaseStrategy):
             try:
                 self.logger.info(f"🔬 Generating research-based signal for {symbol}")
                 
+                # ATH DETECTION - Override all signals at extreme prices
+                current_price = df['close'].iloc[-1] if not df.empty else 50000
+                
+                # UPDATED ATH THRESHOLDS FOR NEW PARADIGM
+                if current_price > 125000:  # High ATH levels - FORCE SELL
+                    if current_price > 130000:  # Extreme ATH
+                        signal, confidence = 'SELL', 0.95
+                        self.logger.warning(f"🚨 EXTREME ATH OVERRIDE: BTC at ${current_price:,.0f} - FORCING SELL")
+                        signals[symbol] = {"signal": signal, "confidence": confidence}
+                        continue
+                    else:
+                        signal, confidence = 'SELL', 0.85
+                        self.logger.warning(f"🔴 HIGH ATH OVERRIDE: BTC at ${current_price:,.0f} - FORCING SELL")
+                        signals[symbol] = {"signal": signal, "confidence": confidence}
+                        continue
+                
                 features = self.prepare_features(df)
                 
                 if not self.is_trained:
@@ -449,15 +495,39 @@ class ResearchBasedStrategy(BaseStrategy):
                     else:
                         signal, confidence = 'HOLD', 0.5
                 else:
-                    probabilities = self.rf_model.predict_proba(features)[0]
-                    sell_prob, buy_prob = probabilities[0], probabilities[1]
-                    
-                    if buy_prob > 0.5:
-                        signal = 'BUY'
-                        confidence = buy_prob
-                    else:
-                        signal = 'SELL'
-                        confidence = sell_prob
+                    try:
+                        # Ensure features have correct shape
+                        if features.shape[1] != 9:
+                            self.logger.warning(f"Feature shape mismatch: got {features.shape[1]}, expected 9. Fixing...")
+                            if features.shape[1] < 9:
+                                # Pad with zeros
+                                padding = np.zeros((1, 9 - features.shape[1]))
+                                features = np.concatenate([features, padding], axis=1)
+                            else:
+                                # Truncate to 9
+                                features = features[:, :9]
+                        
+                        probabilities = self.rf_model.predict_proba(features)[0]
+                        sell_prob, buy_prob = probabilities[0], probabilities[1]
+                        
+                        if buy_prob > 0.5:
+                            signal = 'BUY'
+                            confidence = buy_prob
+                        else:
+                            signal = 'SELL'
+                            confidence = sell_prob
+                    except Exception as pred_error:
+                        self.logger.error(f"Model prediction failed: {pred_error}")
+                        self.logger.info("Falling back to RSI-based logic")
+                        # Fallback to RSI-based logic if model prediction fails
+                        indicators = self.calculate_financial_indicators(df)
+                        rsi = indicators.get('RSI', 50)
+                        if rsi < 35:
+                            signal, confidence = 'BUY', 0.55
+                        elif rsi > 65:
+                            signal, confidence = 'SELL', 0.55
+                        else:
+                            signal, confidence = 'HOLD', 0.5
                 
                 self.logger.info(f"🎯 Research signal for {symbol}: {signal} with {confidence:.3f} confidence")
                 signals[symbol] = {"signal": signal, "confidence": confidence}
@@ -578,7 +648,7 @@ class ResearchBasedStrategy(BaseStrategy):
 
         # Define risk parameters
         risk_per_trade = 0.02  # Risk 2% of capital per trade for more meaningful positions
-        leverage = kwargs.get('leverage', 5.0) # Use a default leverage of 5x
+        leverage = kwargs.get('leverage', 100.0) # Use a default leverage of 100x
 
         if side.lower() == 'sell':
             # For a SELL order, the position size cannot exceed the available BTC balance

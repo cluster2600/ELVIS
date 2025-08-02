@@ -21,12 +21,14 @@ class BaseExecutor(ABC):
         self.logger = logger
         self.kwargs = kwargs
     
-    @abstractmethod
-    def initialize(self) -> None:
+    def initialize(self) -> bool:
         """
         Initialize the executor.
+        
+        Returns:
+            bool: True if initialization was successful, False otherwise
         """
-        pass
+        return True  # Default implementation always succeeds
     
     @abstractmethod
     def get_balance(self) -> Dict[str, float]:
