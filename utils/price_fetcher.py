@@ -98,6 +98,13 @@ class PriceFetcher:
             self.cache = {}  # Simple dict as fallback
         self.cache_ttl = 10  # 10 seconds cache for prices (more live updates)
         self.indicator_cache_ttl = 5  # 5 seconds for indicators (very fresh)
+        
+        # Symbols that are only available on spot market
+        self.spot_only_symbols = {'BNBBTC', 'ETHBTC', 'LTCBTC', 'XRPBTC', 'ADABTC'}
+    
+    def _is_spot_only_symbol(self, symbol):
+        """Check if a symbol is only available on spot market"""
+        return symbol in self.spot_only_symbols
 
     def get_historical_data(self):
         """
@@ -106,12 +113,26 @@ class PriceFetcher:
         if self.client:
             for symbol in self.symbols:
                 try:
-                    klines = self.client.get_historical_klines(symbol=symbol, interval=self.timeframe, limit=self.history_limit)
+                    # Use spot client for symbols that are spot-only
+                    if self._is_spot_only_symbol(symbol):
+                        # Force use of spot client for spot-only symbols
+                        if hasattr(self, '_spot_client'):
+                            spot_client = self._spot_client
+                        else:
+                            # Create a temporary spot client
+                            spot_client = Client()
+                            self._spot_client = spot_client
+                        klines = spot_client.get_historical_klines(symbol=symbol, interval=self.timeframe, limit=self.history_limit)
+                    elif FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                        klines = self.client.klines(symbol=symbol, interval=self.timeframe, limit=self.history_limit)
+                    else:
+                        klines = self.client.get_historical_klines(symbol=symbol, interval=self.timeframe, limit=self.history_limit)
                     with self.lock:
                         self.candles[symbol] = klines
                     self.logger.info(f"Fetched {len(klines)} historical klines for {symbol}.")
                 except Exception as e:
                     self.logger.error(f"Error fetching historical klines for {symbol}: {e}")
+                    self.logger.warning(f"⚠️ No data for {symbol}")
         else:
             self.logger.error("Client not initialized.")
 
@@ -123,7 +144,14 @@ class PriceFetcher:
             if len(self.candles[symbol]) < 26:
                 return  # Not enough data for EMA, MACD, etc.
 
-            df = pd.DataFrame(self.candles[symbol], columns=['open_time', 'open', 'high', 'low', 'close', 'volume'] + [f'extra_{i}' for i in range(7)])
+            # Dynamically handle columns based on received data length
+            candle_data = self.candles[symbol]
+            num_columns = len(candle_data[0])
+            
+            base_columns = ['open_time', 'open', 'high', 'low', 'close', 'volume']
+            extra_columns = [f'extra_{i}' for i in range(num_columns - len(base_columns))]
+            
+            df = pd.DataFrame(candle_data, columns=base_columns + extra_columns)
             df['close'] = df['close'].astype(float)
 
             close_prices = df['close']
@@ -211,7 +239,12 @@ class PriceFetcher:
         Updates the latest candle and recalculates indicators.
         """
         try:
-            data = json.loads(message)['data']
+            message_data = json.loads(message)
+            if 'data' not in message_data:
+                self.logger.debug(f"Ignoring message without 'data' key: {message}")
+                return
+
+            data = message_data['data']
             if data.get('e') == 'kline':
                 kline = data['k']
                 symbol = kline['s']
@@ -273,9 +306,33 @@ class PriceFetcher:
         if cached_price is not None:
             return cached_price
         
-        # If not in cache, get from candles
+        # If not in cache, get from API
+        if self.client:
+            try:
+                if self._is_spot_only_symbol(symbol):
+                    # Force use of spot client for spot-only symbols
+                    if hasattr(self, '_spot_client'):
+                        spot_client = self._spot_client
+                    else:
+                        spot_client = Client()
+                        self._spot_client = spot_client
+                    ticker = spot_client.get_symbol_ticker(symbol=symbol)
+                    price = float(ticker['price'])
+                elif FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                    ticker = self.client.ticker_price(symbol)
+                    price = float(ticker['price'])
+                else:
+                    ticker = self.client.get_symbol_ticker(symbol=symbol)
+                    price = float(ticker['price'])
+                
+                self._cache_set(cache_key, price, ttl=self.cache_ttl)
+                return price
+            except Exception as e:
+                self.logger.error(f"Error fetching ticker for {symbol}: {e}")
+
+        # Fallback to last candle close price
         with self.lock:
-            if self.candles[symbol]:
+            if self.candles.get(symbol):
                 price = float(self.candles[symbol][-1][4])  # Close price
                 # Cache the price
                 self._cache_set(cache_key, price, ttl=self.cache_ttl)
@@ -311,7 +368,7 @@ class PriceFetcher:
                     # Use spot order book endpoint
                     order_book = self.client.depth(symbol=symbol, limit=limit)
                 self._cache_set(cache_key, order_book, ttl=self.indicator_cache_ttl) # Use indicator TTL
-                self.logger.info(f"Fetched and cached order book for {symbol}.")
+                self.logger.debug(f"Fetched and cached order book for {symbol}.")
                 return order_book
             except Exception as e:
                 self.logger.error(f"Error fetching order book for {symbol}: {e}")
@@ -342,14 +399,22 @@ class PriceFetcher:
 
         if self.client:
             try:
-                if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
+                if self._is_spot_only_symbol(symbol):
+                    # Force use of spot client for spot-only symbols
+                    if hasattr(self, '_spot_client'):
+                        spot_client = self._spot_client
+                    else:
+                        spot_client = Client()
+                        self._spot_client = spot_client
+                    klines = spot_client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
+                elif FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
                     # Use futures klines endpoint
                     klines = self.client.klines(symbol=symbol, interval=interval, limit=limit)
                 else:
                     # Use spot klines endpoint
                     klines = self.client.get_historical_klines(symbol=symbol, interval=interval, limit=limit)
                 self._cache_set(cache_key, klines, ttl=self.cache_ttl)
-                self.logger.info(f"Fetched and cached {len(klines)} klines for {symbol} {interval}.")
+                self.logger.debug(f"Fetched and cached {len(klines)} klines for {symbol} {interval}.")
                 
                 # Create DataFrame with proper column names
                 df = pd.DataFrame(klines, columns=[
@@ -390,13 +455,19 @@ class PriceFetcher:
         if hasattr(self.cache, 'get'):
             return self.cache.get(key)
         else:
-            # Simple dict fallback
-            return self.cache.get(key)
+            # Simple dict fallback with TTL
+            if key in self.cache:
+                value, expiry = self.cache[key]
+                if expiry is None or time.time() < expiry:
+                    return value
+                else:
+                    del self.cache[key]
+            return None
     
     def _cache_set(self, key, value, ttl=None):
         """Set in cache with fallback for dict cache"""
         if hasattr(self.cache, 'set'):
             return self.cache.set(key, value, ttl=ttl)
         else:
-            # Simple dict fallback (ignore TTL)
-            self.cache[key] = value
+            # Simple dict fallback with TTL
+            self.cache[key] = (value, time.time() + ttl if ttl else None)
