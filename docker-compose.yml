@@ -1,22 +1,86 @@
 version: '3.8'
 
 services:
-  elvis-bot:
-    build: .
-    container_name: elvis-trading-bot
+  # PostgreSQL Database for ELVIS Paper Trading
+  postgres:
+    image: postgres:15-alpine
+    container_name: elvis-postgres
     environment:
-      - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      POSTGRES_DB: elvis_trading
+      POSTGRES_USER: elvis_user
+      POSTGRES_PASSWORD: elvis_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elvis_user -d elvis_trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - elvis-network
+
+  # ELVIS Trading Bot - Enhanced for Apple Container System
+  elvis-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.simple  # Use simpler build for faster deployment
+    container_name: elvis-trading-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      # Trading Configuration
+      - TRADING_MODE=paper
+      - STRATEGY_MODE=ensemble
+      - HIGH_FREQUENCY_TRADING=true
+      - LEVERAGE=100
+      - PROFIT_MODE=aggressive
+      - COOLDOWN_DISABLED=true
+      
+      # Database Configuration (Required for paper trading)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=elvis_user
+      - POSTGRES_PASSWORD=elvis_password
+      - POSTGRES_DBNAME=elvis_trading
+      
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      
+      # Paper Trading Initial Balances
+      - INITIAL_USDT_BALANCE=1000.0
+      - INITIAL_BNB_BALANCE=1000.0
+      
+      # API Keys (from environment or .env file)
+      - BINANCE_FUTURES_TESTNET_API_KEY=${BINANCE_FUTURES_TESTNET_API_KEY:-}
+      - BINANCE_FUTURES_TESTNET_API_SECRET=${BINANCE_FUTURES_TESTNET_API_SECRET:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      
+      # Container Configuration
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./models:/app/models
+      - ./.env:/app/.env:ro  # Mount environment file
     ports:
-      - "5050:5050"  # Trade History API
-      - "8000:8000"  # Future web dashboard
+      - "5050:5050"  # Dashboard API
+      - "8000:8000"  # Web Interface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5050/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     networks:
       - elvis-network
@@ -69,6 +133,11 @@ networks:
     driver: bridge
 
 volumes:
+  postgres-data:
+    driver: local
   redis-data:
+    driver: local
   prometheus-data:
+    driver: local
   grafana-data:
+    driver: local

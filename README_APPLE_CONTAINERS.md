@@ -1,0 +1,283 @@
+# 🍎 ELVIS Trading Bot - Apple Container System
+
+## Quick Start Guide
+
+ELVIS (Enhanced Leveraged Virtual Investment System) is now fully containerized and optimized for Apple's Container application and Apple Silicon Macs.
+
+### ⚡ **One-Line Setup**
+```bash
+./apple_container_elvis.sh setup
+```
+
+### 🚀 **One-Line Start**
+```bash
+./apple_container_elvis.sh start
+```
+
+### 📊 **Access Dashboard**
+- **Trading Dashboard**: http://localhost:5050
+- **Grafana Metrics**: http://localhost:3000
+
+---
+
+## 🎯 **What You Get**
+
+### **Trading Features**
+- ✅ **Paper Trading**: Start with $1000 USDT + $1000 BNB
+- ✅ **Bonenkamp HFT Strategy**: Research-based 5-minute trading
+- ✅ **Ensemble Strategies**: Multiple algorithms working together
+- ✅ **Real-time Dashboard**: Live position monitoring
+- ✅ **Multi-Asset Support**: BTCUSDT, BNBUSDT, and more
+
+### **Container Architecture**
+- 🐘 **PostgreSQL**: Trade history and positions
+- 🔴 **Redis**: High-performance caching
+- 📊 **Prometheus**: Metrics collection
+- 📈 **Grafana**: Beautiful dashboards
+- 🤖 **ELVIS Bot**: Main trading engine
+
+### **Apple Optimizations**
+- 🍎 **Apple Silicon**: Native ARM64 support
+- ⚡ **Fast Startup**: Optimized container images
+- 💾 **Memory Efficient**: Smart resource allocation
+- 🔧 **Easy Management**: One-command operations
+
+---
+
+## 📁 **Container Files Created**
+
+### **Main Configuration**
+- `docker-compose.yml` - Enhanced with PostgreSQL database
+- `docker-compose.apple.yml` - Apple Silicon optimizations
+- `Dockerfile.simple` - Lightweight container build
+
+### **Management Scripts**
+- `apple_container_elvis.sh` - Main management interface
+- `setup_apple_containers.sh` - Automated setup
+- `test_container_setup.sh` - Validation tests
+
+### **Documentation**
+- `APPLE_CONTAINER_SETUP.md` - Detailed setup guide
+- `README_APPLE_CONTAINERS.md` - This quick start guide
+
+---
+
+## 🎮 **Management Commands**
+
+### **Essential Commands**
+```bash
+# Complete setup (first time only)
+./apple_container_elvis.sh setup
+
+# Start trading
+./apple_container_elvis.sh start
+
+# Stop trading  
+./apple_container_elvis.sh stop
+
+# View live logs
+./apple_container_elvis.sh logs
+
+# Check status
+./apple_container_elvis.sh status
+```
+
+### **Paper Trading Management**
+```bash
+# Reset to initial balances ($1000 USDT + $1000 BNB)
+./apple_container_elvis.sh reset
+
+# Open dashboard
+./apple_container_elvis.sh dashboard
+```
+
+### **Maintenance**
+```bash
+# Update containers
+./apple_container_elvis.sh update
+
+# Backup data
+./apple_container_elvis.sh backup
+
+# Run tests
+./apple_container_elvis.sh test
+```
+
+---
+
+## 🔧 **Configuration**
+
+### **Environment Variables** (`.env` file)
+```bash
+# Trading Configuration
+TRADING_MODE=paper
+STRATEGY_MODE=ensemble
+HIGH_FREQUENCY_TRADING=true
+LEVERAGE=100
+
+# Paper Trading Balances
+INITIAL_USDT_BALANCE=1000.0
+INITIAL_BNB_BALANCE=1000.0
+
+# API Keys (optional for paper trading)
+BINANCE_FUTURES_TESTNET_API_KEY=your_key_here
+BINANCE_FUTURES_TESTNET_API_SECRET=your_secret_here
+```
+
+### **Container Resources**
+```yaml
+ELVIS Bot:    2GB RAM, 2 CPU cores
+PostgreSQL:   512MB RAM, 1 CPU core  
+Redis:        256MB RAM, 0.5 CPU cores
+Prometheus:   512MB RAM, 0.5 CPU cores
+Grafana:      256MB RAM, 0.5 CPU cores
+```
+
+---
+
+## 📊 **Dashboard Access**
+
+### **Trading Dashboard** (Port 5050)
+- Real-time position monitoring
+- Live P&L tracking  
+- Trade execution logs
+- Strategy performance metrics
+
+### **Grafana Dashboard** (Port 3000)
+- Username: `admin`
+- Password: `admin`
+- Trading performance analytics
+- System health monitoring
+
+### **Prometheus Metrics** (Port 9090)
+- Raw metrics data
+- Custom queries
+- Alert configuration
+
+---
+
+## 🛠️ **Troubleshooting**
+
+### **Common Issues**
+
+1. **Docker not running**
+   ```bash
+   # Start Docker Desktop
+   open -a Docker
+   ```
+
+2. **Port conflicts**
+   ```bash
+   # Check what's using ports
+   lsof -i :5050 -i :3000 -i :9090
+   ```
+
+3. **Container build fails**
+   ```bash
+   # Clean and rebuild
+   docker system prune -f
+   ./apple_container_elvis.sh setup
+   ```
+
+4. **Database connection errors**
+   ```bash
+   # Wait for PostgreSQL to initialize
+   ./apple_container_elvis.sh logs
+   ```
+
+### **Debug Commands**
+```bash
+# Check all container status
+docker-compose ps
+
+# View specific service logs
+docker-compose logs postgres
+docker-compose logs redis
+docker-compose logs elvis-bot
+
+# Connect to ELVIS container
+docker-compose exec elvis-bot /bin/bash
+
+# Test database connection
+docker-compose exec elvis-bot python -c "from utils.paper_trade_db import get_conn; print('DB OK' if get_conn() else 'DB Error')"
+```
+
+---
+
+## 🔐 **Security**
+
+### **Container Security**
+- Non-root user execution
+- Isolated networks
+- Read-only configurations
+- Secret management via environment variables
+
+### **API Key Safety**
+- Use testnet keys for paper trading
+- Never commit real API keys to git
+- Environment variable injection only
+- Regular key rotation recommended
+
+---
+
+## 🚀 **Performance**
+
+### **Apple Silicon Optimization**
+- Native ARM64 containers
+- Optimized memory usage
+- Fast container startup
+- Efficient resource allocation
+
+### **Monitoring**
+- Real-time metrics via Prometheus
+- Performance dashboards in Grafana
+- Container resource monitoring
+- Trading strategy analytics
+
+---
+
+## 📈 **Trading Strategies**
+
+### **Bonenkamp HFT Strategy**
+- **Research Base**: Bonenkamp (2021) academic paper
+- **Frequency**: 5-minute intervals
+- **Features**: 9 financial + 2 social indicators
+- **Model**: Random Forest (600 trees)
+- **Target**: 14.9% annual return, 2.02 Sharpe ratio
+
+### **Ensemble Trading**
+- Multiple strategy combination
+- Risk-weighted decision making
+- Adaptive position sizing
+- Comprehensive market analysis
+
+---
+
+## 🎯 **Next Steps**
+
+1. **First Setup**:
+   ```bash
+   ./apple_container_elvis.sh setup
+   ```
+
+2. **Start Trading**:
+   ```bash
+   ./apple_container_elvis.sh start
+   ```
+
+3. **Monitor Performance**:
+   - Dashboard: http://localhost:5050
+   - Grafana: http://localhost:3000
+
+4. **Customize**:
+   - Edit `.env` for configuration
+   - Add API keys for live data
+   - Adjust strategy parameters
+
+---
+
+## ✅ **Ready to Trade!**
+
+ELVIS is now fully containerized and ready for Apple's Container system. Start with paper trading using $1000 USDT + $1000 BNB and watch the Bonenkamp HFT strategy in action!
+
+### **Happy Trading!** 📈🍎

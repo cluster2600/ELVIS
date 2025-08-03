@@ -257,22 +257,19 @@ class ModelTrainer:
             # Import explainers
             from .explainable_ai import SHAPExplainer, LIMEExplainer
 
-            # Ensure model and data are on the same device if model is a torch.nn.Module
-            if isinstance(model, torch.nn.Module):
-                model_device = next(model.parameters()).device
-                if isinstance(X, torch.Tensor):
-                    X = X.to(model_device)
-                else:
-                    # Convert numpy array to torch tensor on model device
-                    X = torch.tensor(X, device=model_device, dtype=torch.float32)
+            # Convert X to numpy array if it's a tensor
+            if isinstance(X, torch.Tensor):
+                X_numpy = X.cpu().detach().numpy()
+            else:
+                X_numpy = np.array(X)
 
             # Choose explainer based on model type
             if hasattr(model, 'predict_proba') or hasattr(model, 'predict'):
-                explainer = LIMEExplainer(model, feature_names, X)
+                explainer = LIMEExplainer(model, feature_names, X_numpy)
             else:
-                explainer = SHAPExplainer(model, feature_names, X[:100])
+                explainer = SHAPExplainer(model, feature_names, X_numpy[:100])
 
-            explanation = explainer.explain(X)
+            explanation = explainer.explain(X_numpy)
             return explanation
         except Exception as e:
             self.logger.error(f"Error in explain_model: {e}")

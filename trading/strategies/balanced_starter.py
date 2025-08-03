@@ -28,7 +28,7 @@ class BalancedStarterStrategy:
         # OPTIMIZED: Better position management for profitability
         self.target_long_positions = 3   # Increased for better opportunity capture
         self.target_short_positions = 3
-        self.max_total_positions = 8      # Higher limit for active trading
+        # Position limits removed per user request
         
         # OPTIMIZED: Profit targets that beat fees consistently
         self.target_profit_per_trade = 5.00  # $5.00 profit target (5x fee cost)
@@ -400,52 +400,50 @@ class BalancedStarterStrategy:
             # Add LONG positions if needed
             long_to_add = max(0, target_long - current_long)
             for i in range(long_to_add):
-                if pos_analysis['total_count'] + i < self.max_total_positions:
-                    add_open_position(
-                        symbol='BTCUSDT',
-                        side='BUY',
-                        entry_price=current_price,
-                        quantity=position_size,
-                        leverage=leverage
-                    )
-                    record_trade(
-                        symbol='BTCUSDT',
-                        side='BUY',
-                        price=current_price,
-                        quantity=position_size,
-                        pnl=0.0,
-                        fee=current_price * position_size * 0.0004
-                    )
-                    # Track trade timing
-                    from datetime import datetime
-                    self.last_trade_time = datetime.now()
-                    # Reduced logging for position additions
-                    pass
+                add_open_position(
+                    symbol='BTCUSDT',
+                    side='BUY',
+                    entry_price=current_price,
+                    quantity=position_size,
+                    leverage=leverage
+                )
+                record_trade(
+                    symbol='BTCUSDT',
+                    side='BUY',
+                    price=current_price,
+                    quantity=position_size,
+                    pnl=0.0,
+                    fee=current_price * position_size * 0.0004
+                )
+                # Track trade timing
+                from datetime import datetime
+                self.last_trade_time = datetime.now()
+                # Reduced logging for position additions
+                pass
             
             # Add SHORT positions if needed
             short_to_add = max(0, target_short - current_short)
             for i in range(short_to_add):
-                if pos_analysis['total_count'] + long_to_add + i < self.max_total_positions:
-                    add_open_position(
-                        symbol='BTCUSDT',
-                        side='SELL',
-                        entry_price=current_price,
-                        quantity=position_size,
-                        leverage=leverage
-                    )
-                    record_trade(
-                        symbol='BTCUSDT',
-                        side='SELL',
-                        price=current_price,
-                        quantity=position_size,
-                        pnl=0.0,
-                        fee=current_price * position_size * 0.0004
-                    )
-                    # Track trade timing
-                    from datetime import datetime
-                    self.last_trade_time = datetime.now()
-                    # Reduced logging for position additions
-                    pass
+                add_open_position(
+                    symbol='BTCUSDT',
+                    side='SELL',
+                    entry_price=current_price,
+                    quantity=position_size,
+                    leverage=leverage
+                )
+                record_trade(
+                    symbol='BTCUSDT',
+                    side='SELL',
+                    price=current_price,
+                    quantity=position_size,
+                    pnl=0.0,
+                    fee=current_price * position_size * 0.0004
+                )
+                # Track trade timing
+                from datetime import datetime
+                self.last_trade_time = datetime.now()
+                # Reduced logging for position additions
+                pass
             
             self.logger.info(f"🎯 ADAPTATION COMPLETE: {target_long} LONG, {target_short} SHORT target")
             

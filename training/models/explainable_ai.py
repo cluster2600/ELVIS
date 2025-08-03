@@ -38,19 +38,29 @@ class SHAPExplainer(ModelExplainer):
     def __init__(self, model: nn.Module, feature_names: List[str], background_data: np.ndarray):
         super().__init__(model, feature_names)
         self.background_data = background_data
-        self.explainer = shap.DeepExplainer(model, torch.tensor(background_data).float())
+        
+        # Get model device
+        self.device = next(model.parameters()).device
+        
+        # Convert background data to tensor on the same device as model
+        background_tensor = torch.from_numpy(background_data).float().to(self.device)
+        self.explainer = shap.DeepExplainer(model, background_tensor)
         
     def explain(self, data: np.ndarray) -> Dict:
         """Calculate SHAP values for the given data."""
         try:
-            # Convert data to tensor
-            data_tensor = torch.tensor(data).float()
+            # Convert data to tensor on the same device as model
+            data_tensor = torch.from_numpy(data).float().to(self.device)
             
             # Calculate SHAP values
             shap_values = self.explainer.shap_values(data_tensor)
             
-            # Convert to numpy array if it's a list
-            if isinstance(shap_values, list):
+            # Convert tensor/list to numpy array
+            if isinstance(shap_values, torch.Tensor):
+                shap_values = shap_values.cpu().detach().numpy()
+            elif isinstance(shap_values, list):
+                # Handle list of tensors
+                shap_values = [sv.cpu().detach().numpy() if isinstance(sv, torch.Tensor) else sv for sv in shap_values]
                 shap_values = np.array(shap_values)
                 
             return {
@@ -106,10 +116,34 @@ class LIMEExplainer(ModelExplainer):
         """Generate LIME explanations for the given data."""
         try:
             explanations = []
+            
+            def model_predict_fn(x):
+                """Prediction function for LIME that handles tensor conversion."""
+                try:
+                    if hasattr(self.model, 'predict'):
+                        # For sklearn-like models
+                        return self.model.predict(x)
+                    elif hasattr(self.model, 'predict_proba'):
+                        # For sklearn-like models with probabilities
+                        return self.model.predict_proba(x)
+                    else:
+                        # For PyTorch models - handle device placement
+                        device = next(self.model.parameters()).device
+                        x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+                        with torch.no_grad():
+                            predictions = self.model(x_tensor)
+                            if isinstance(predictions, torch.Tensor):
+                                return predictions.cpu().numpy()
+                            return predictions
+                except Exception as e:
+                    self.logger.warning(f"Error in model prediction: {e}")
+                    # Return zeros as fallback
+                    return np.zeros((x.shape[0], 1))
+            
             for i in range(len(data)):
                 exp = self.explainer.explain_instance(
                     data[i],
-                    lambda x: self.model(torch.tensor(x).float()).detach().numpy()
+                    model_predict_fn
                 )
                 explanations.append(exp)
                 
