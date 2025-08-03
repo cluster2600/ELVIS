@@ -11,7 +11,7 @@ from core.events import event_bus, SystemEvent
 from config import TRADING_CONFIG, API_CONFIG
 from utils.logger_config import setup_logging, TradingLogger
 from utils.redis_cache import RedisCache
-from utils.secrets_manager import SecretsManager
+from utils.secrets_manager import EnhancedSecretsManager as SecretsManager
 from utils.async_utils import AsyncTaskManager
 
 
@@ -214,7 +214,7 @@ class ApplicationBootstrapper:
         # Price Fetcher
         def create_price_fetcher():
             logger = container.get('logger')
-            return PriceFetcher(logger)
+            return PriceFetcher(logger, symbols=['BTCUSDT', 'BNBBTC'])
         
         container.register_singleton('price_fetcher', create_price_fetcher)
         
@@ -235,12 +235,20 @@ class ApplicationBootstrapper:
         from trading.risk_management import RiskManager
         from trading.utils.telegram_notifier import TelegramNotifier
         from trading.strategies.ensemble_strategy import EnsembleStrategy
+        from trading.strategies.research_based_strategy import ResearchBasedStrategy
         
         # Telegram Notifier
         def create_notifier():
             logger = container.get('logger')
-            trading_config = container.get('trading_config')
-            return TelegramNotifier(logger, trading_config)
+            secrets_manager = container.get('secrets_manager')
+            telegram_creds = secrets_manager.get_telegram_credentials()
+            bot_token = telegram_creds.get('bot_token')
+            chat_id = telegram_creds.get('chat_id')
+            if bot_token and chat_id:
+                return TelegramNotifier(bot_token, chat_id, logger)
+            else:
+                logger.warning("Telegram credentials not found - notifications disabled")
+                return None
         
         container.register_singleton('notifier', create_notifier)
         
@@ -348,7 +356,7 @@ class ApplicationBootstrapper:
                 logger=logger, 
                 is_testnet=is_testnet,
                 use_futures=use_futures,
-                default_leverage=trading_config.get('DEFAULT_LEVERAGE', 10)
+                default_leverage=trading_config.get('DEFAULT_LEVERAGE', 50)
             )
             
             success = executor.initialize()
@@ -362,17 +370,42 @@ class ApplicationBootstrapper:
         
         container.register_singleton('executor', create_executor)
         
-        # Ensemble Strategy
+        # Strategy (Ensemble, Research-based, or Balanced)
         def create_strategy():
             logger = container.get('logger')
+            strategy_mode = os.getenv('STRATEGY_MODE', 'ensemble').lower()
             
-            return EnsembleStrategy(
-                logger=logger,
-                symbols=['BTCUSDT'],  # Ensure symbols are set
-                order_flow_analyzer=container.get('order_flow_analyzer'),
-                price_fetcher=container.get('price_fetcher'),
-                exchange_manager=container.get('exchange_manager')
-            )
+            if strategy_mode == 'research':
+                # Use research-based strategy from academic paper
+                social_data_enabled = os.getenv('SOCIAL_DATA_ENABLED', 'true').lower() == 'true'
+                rolling_training = os.getenv('ROLLING_TRAINING_ENABLED', 'true').lower() == 'true'
+                
+                logger.info("🔬 Creating Research-Based Strategy")
+                logger.info(f"📱 Social data: {social_data_enabled}")
+                logger.info(f"🔄 Rolling training: {rolling_training}")
+                
+                return ResearchBasedStrategy(
+                    logger=logger,
+                    social_data_enabled=social_data_enabled,
+                    enable_rolling_training=rolling_training
+                )
+            elif strategy_mode == 'balanced':
+                # Use balanced strategy with emergency fixes
+                logger.info("🎯 Creating Balanced Strategy with Emergency Fixes")
+                logger.info("⚠️ Emergency mode: Reduced trading frequency and higher profit targets")
+                
+                from trading.strategies.balanced_starter import BalancedStarterStrategy
+                return BalancedStarterStrategy(logger=logger)
+            else:
+                # Use ensemble strategy (default)
+                logger.info("🎯 Creating Ensemble Strategy")
+                return EnsembleStrategy(
+                    logger=logger,
+                    symbols=['BTCUSDT', 'BNBBTC'],  # Include BNBBTC for BNB→BTC trading
+                    order_flow_analyzer=container.get('order_flow_analyzer'),
+                    price_fetcher=container.get('price_fetcher'),
+                    exchange_manager=container.get('exchange_manager')
+                )
         
         container.register_singleton('strategy', create_strategy)
 

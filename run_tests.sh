@@ -9,7 +9,7 @@ echo "🧪 Running ELVIS Trading Bot Test Suite..."
 echo "========================================="
 
 # Activate virtual environment
-source venv/bin/activate
+source venv310/bin/activate
 
 # Install test dependencies if needed
 echo "📦 Checking test dependencies..."
@@ -25,7 +25,8 @@ echo ""
 echo "🔍 Running unit tests with coverage..."
 echo "-------------------------------------"
 
-pytest tests/ \
+echo "🐍 Python executable: $(which python)"
+./venv310/bin/python -m pytest tests/ \
     --verbose \
     --cov=. \
     --cov-report=term-missing \

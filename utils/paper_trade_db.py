@@ -1,18 +1,28 @@
 import psycopg2
+PSYCOPG2_AVAILABLE = True
+
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+from .secrets_manager import get_enhanced_secrets_manager
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
+# Initialize secrets manager
+secrets_manager = get_enhanced_secrets_manager()
+
 def get_conn():
+    """Get PostgreSQL connection using enhanced secrets manager."""
     try:
+        # Get database credentials from secrets manager (with Vault fallback)
+        db_creds = secrets_manager.get_database_credentials()
+        
         conn = psycopg2.connect(
-            host=os.environ.get('POSTGRES_HOST', os.environ.get('DB_HOST', 'localhost')),
-            port=os.environ.get('POSTGRES_PORT', os.environ.get('DB_PORT', 5432)),
-            user=os.environ.get('POSTGRES_USER', os.environ.get('DB_USER', 'postgres')),
-            password=os.environ.get('POSTGRES_PASSWORD', os.environ.get('DB_PASSWORD', '')),
-            dbname=os.environ.get('POSTGRES_DBNAME', os.environ.get('DB_NAME', 'trading_bot')),
+            host=db_creds.get('host', 'localhost'),
+            port=int(db_creds.get('port', 5432)),
+            user=db_creds.get('user', 'postgres'),
+            password=db_creds.get('password', ''),
+            dbname=db_creds.get('dbname', 'trading_bot'),
             connect_timeout=5  # 5 second timeout
         )
         # Set the search path to use the 'np' schema
@@ -21,69 +31,77 @@ def get_conn():
         conn.commit()
         return conn
     except psycopg2.OperationalError as e:
-        print(f"[WARNING] Could not connect to PostgreSQL: {e}")
-        print("[INFO] Paper trading will continue without database persistence")
+        print(f"[ERROR] Could not connect to PostgreSQL: {e}")
+        print("[ERROR] PostgreSQL connection is required - no fallback available")
         return None
 
 def init_db():
     conn = get_conn()
     if conn is None:
+        print("[ERROR] Cannot initialize database - PostgreSQL connection required")
         return
     try:
-        with conn.cursor() as c:
-            # Try to grant permissions but don't fail if it doesn't work
-            try:
-                c.execute("GRANT USAGE, CREATE ON SCHEMA np TO CURRENT_USER;")
-                conn.commit()
-            except Exception as e:
-                print(f"[INFO] Could not grant permissions, trying to continue: {e}")
-                conn.rollback()  # Rollback the failed transaction
-            
-            # Create tables in the np schema
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS np.trades (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP DEFAULT NOW(),
-                    symbol TEXT,
-                    side TEXT,
-                    price REAL,
-                    quantity REAL,
-                    pnl REAL,
-                    fee REAL
-                )
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS np.open_positions (
-                    id SERIAL PRIMARY KEY,
-                    symbol TEXT,
-                    entry_price REAL,
-                    quantity REAL,
-                    leverage REAL,
-                    entry_time TIMESTAMP DEFAULT NOW()
-                )
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS np.liquidations (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP DEFAULT NOW(),
-                    symbol TEXT,
-                    entry_price REAL,
-                    liquidation_price REAL,
-                    quantity REAL,
-                    leverage REAL,
-                    liquidation_fee REAL
-                )
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS np.margin_history (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP DEFAULT NOW(),
-                    balance REAL,
-                    used_margin REAL,
-                    open_positions INT
-                )
-            """)
+        c = conn.cursor()
+        
+        # PostgreSQL syntax - create tables in the np schema
+        try:
+            c.execute("GRANT USAGE, CREATE ON SCHEMA np TO CURRENT_USER;")
+            conn.commit()
+        except Exception as e:
+            print(f"[INFO] Could not grant permissions, trying to continue: {e}")
+            conn.rollback()
+        
+        # Create tables in the np schema
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.trades (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT NOW(),
+                symbol TEXT,
+                side TEXT,
+                price REAL,
+                quantity REAL,
+                pnl REAL,
+                fee REAL
+            )
+        """)
+        c.execute("DROP TABLE IF EXISTS np.open_positions CASCADE;")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.open_positions (
+                id SERIAL PRIMARY KEY,
+                symbol TEXT,
+                side TEXT,
+                entry_price REAL,
+                quantity REAL,
+                leverage REAL,
+                entry_time TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.liquidations (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT NOW(),
+                symbol TEXT,
+                entry_price REAL,
+                liquidation_price REAL,
+                quantity REAL,
+                leverage REAL,
+                liquidation_fee REAL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.margin_history (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT NOW(),
+                balance REAL,
+                used_margin REAL,
+                open_positions INTEGER
+            )
+        """)
         conn.commit()
+        print("[INFO] Database tables initialized successfully")
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize database: {e}")
+        conn.rollback()
     finally:
         conn.close()
 
@@ -101,12 +119,17 @@ def record_trade(symbol, side, price, quantity, pnl=0.0, fee=0.0, timestamp=None
         pnl = float(pnl) if pnl is not None else 0.0
         fee = float(fee) if fee is not None else 0.0
         
-        with conn.cursor() as c:
-            c.execute("""
-                INSERT INTO trades (timestamp, symbol, side, price, quantity, pnl, fee)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (timestamp, str(symbol), str(side), price, quantity, pnl, fee))
+        c = conn.cursor()
+        
+        # PostgreSQL syntax with %s placeholders
+        c.execute("""
+            INSERT INTO trades (timestamp, symbol, side, price, quantity, pnl, fee)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (timestamp, str(symbol), str(side), price, quantity, pnl, fee))
+            
         conn.commit()
+        # Reduced logging to prevent dashboard spam
+        pass
     except Exception as e:
         import traceback
         print(f"[ERROR] Failed to record trade: {e}")
@@ -117,7 +140,7 @@ def record_trade(symbol, side, price, quantity, pnl=0.0, fee=0.0, timestamp=None
     finally:
         conn.close()
 
-def add_open_position(symbol, entry_price, quantity, leverage=1.0):
+def add_open_position(symbol, side, entry_price, quantity, leverage=1.0):
     conn = get_conn()
     if conn is None:
         print(f"[WARNING] Cannot add open position - database not available")
@@ -128,29 +151,74 @@ def add_open_position(symbol, entry_price, quantity, leverage=1.0):
         quantity = float(quantity) if quantity is not None else 0.0
         leverage = float(leverage) if leverage is not None else 1.0
         
-        with conn.cursor() as c:
-            c.execute("""
-                INSERT INTO open_positions (symbol, entry_price, quantity, leverage)
-                VALUES (%s, %s, %s, %s)
-            """, (str(symbol), entry_price, quantity, leverage))
+        c = conn.cursor()
+        
+        # PostgreSQL syntax with %s placeholders
+        c.execute("""
+            INSERT INTO open_positions (symbol, side, entry_price, quantity, leverage)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (str(symbol), str(side), entry_price, quantity, leverage))
+            
         conn.commit()
+        # Reduced logging to prevent dashboard spam
+        pass
     except Exception as e:
         print(f"[ERROR] Failed to add open position: {e}")
         conn.rollback()
     finally:
         conn.close()
 
-def close_open_position(symbol):
+def close_open_position(symbol, side):
     conn = get_conn()
     if conn is None:
         print(f"[WARNING] Cannot close open position - database not available")
         return
     try:
-        with conn.cursor() as c:
-            c.execute("DELETE FROM open_positions WHERE symbol = %s", (symbol,))
+        c = conn.cursor()
+        
+        # PostgreSQL syntax with %s placeholders
+        c.execute("DELETE FROM open_positions WHERE symbol = %s AND side = %s", (symbol, side))
+            
         conn.commit()
+        # Reduced logging to prevent dashboard spam
+        pass
     except Exception as e:
         print(f"[ERROR] Failed to close open position: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+def close_position(position_id, exit_price, pnl, fee=0.0):
+    """Close a specific position by ID and record the trade"""
+    conn = get_conn()
+    if conn is None:
+        print(f"[WARNING] Cannot close position - database not available")
+        return
+    try:
+        c = conn.cursor()
+        
+        # Get position details before closing
+        c.execute("SELECT symbol, side, entry_price, quantity, leverage FROM open_positions WHERE id = %s", (position_id,))
+        position = c.fetchone()
+        
+        if position:
+            symbol, side, entry_price, quantity, leverage = position
+            
+            # Record the closing trade
+            record_trade(symbol, side, exit_price, quantity, pnl, fee)
+            
+            # Remove from open positions
+            c.execute("DELETE FROM open_positions WHERE id = %s", (position_id,))
+            
+            conn.commit()
+            # Only log significant trades to reduce spam
+            if abs(pnl) >= 5.0:  # Only log profits/losses >= $5
+                print(f"[INFO] Closed position {position_id}: {side} {symbol} P&L: ${pnl:.2f}")
+        else:
+            print(f"[WARNING] Position {position_id} not found")
+            
+    except Exception as e:
+        print(f"[ERROR] Failed to close position {position_id}: {e}")
         conn.rollback()
     finally:
         conn.close()
@@ -161,9 +229,9 @@ def get_open_positions():
         print(f"[WARNING] Cannot get open positions - database not available")
         return []
     try:
-        with conn.cursor() as c:
-            c.execute("SELECT id, symbol, entry_price, quantity, leverage, entry_time FROM open_positions")
-            result = c.fetchall()
+        c = conn.cursor()
+        c.execute("SELECT id, symbol, side, entry_price, quantity, leverage, entry_time FROM open_positions")
+        result = c.fetchall()
         return result
     except Exception as e:
         print(f"[ERROR] Failed to get open positions: {e}")
@@ -172,43 +240,56 @@ def get_open_positions():
         conn.close()
 
 def get_all_trades(limit=100, exclude_test=False):
+    conn = get_conn()
+    if conn is None:
+        print(f"[WARNING] Cannot get trades - database not available")
+        return []
     try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                if exclude_test:
-                    c.execute("""
-                        SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
-                        FROM trades
-                        WHERE side != 'TEST'
-                        ORDER BY timestamp DESC
-                        LIMIT %s
-                    """, (limit,))
-                else:
-                    c.execute("""
-                        SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
-                        FROM trades
-                        ORDER BY timestamp DESC
-                        LIMIT %s
-                    """, (limit,))
-                trades = c.fetchall()
+        c = conn.cursor()
+        
+        # PostgreSQL syntax with %s placeholders
+        if exclude_test:
+            c.execute("""
+                SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
+                FROM trades
+                WHERE side != %s
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, ('TEST', limit))
+        else:
+            c.execute("""
+                SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
+                FROM trades
+                ORDER BY timestamp DESC
+                LIMIT %s
+            """, (limit,))
+                
+        trades = c.fetchall()
         return trades
     except Exception as e:
         print(f"[ERROR] Fetching trades failed: {e}")
         return []
+    finally:
+        conn.close()
 
 def get_trade_count(exclude_test=False):
+    conn = get_conn()
+    if conn is None:
+        print(f"[WARNING] Cannot get trade count - database not available")
+        return 0
     try:
-        with get_conn() as conn:
-            with conn.cursor() as c:
-                if exclude_test:
-                    c.execute("SELECT COUNT(*) FROM trades WHERE side != 'TEST'")
-                else:
-                    c.execute("SELECT COUNT(*) FROM trades")
-                count = c.fetchone()[0]
-                return count
+        c = conn.cursor()
+        if exclude_test:
+            c.execute("SELECT COUNT(*) FROM trades WHERE side != 'TEST'")
+        else:
+            c.execute("SELECT COUNT(*) FROM trades")
+        count = c.fetchone()[0]
+        return count
     except Exception as e:
         print(f"[ERROR] Fetching trade count failed: {e}")
         return 0
+    finally:
+        conn.close()
 
 def get_total_fees(exclude_test=False):
     try:
@@ -365,3 +446,181 @@ def get_market_depth():
     except Exception as e:
         print(f"[ERROR] Fetching market depth failed: {e}")
         return {'bids': [], 'asks': []}
+
+def clear_all_trades():
+    """Clear all trades from the database (for fresh start)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("DELETE FROM trades")
+                conn.commit()
+                print("[INFO] All trades cleared from database")
+    except Exception as e:
+        print(f"[ERROR] Failed to clear trades: {e}")
+
+def clear_open_positions():
+    """Clear all open positions from the database (for fresh start)."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as c:
+                c.execute("DELETE FROM open_positions")
+                conn.commit()
+                print("[INFO] All open positions cleared from database")
+    except Exception as e:
+        print(f"[ERROR] Failed to clear open positions: {e}")
+
+def reset_paper_trading_balances():
+    """Reset paper trading balances to initial $1000 each in USDT and BNB."""
+    try:
+        conn = get_conn()
+        if conn is None:
+            print("[ERROR] Cannot reset balances - database not available")
+            return False
+        
+        with conn.cursor() as c:
+            # Reset USDT balance to $1000
+            c.execute("""
+                INSERT INTO np.account_balances (asset, balance) 
+                VALUES ('USDT', 1000.0) 
+                ON CONFLICT (asset) 
+                DO UPDATE SET balance = 1000.0, last_updated = NOW()
+            """)
+            
+            # Reset BNB balance to $1000
+            c.execute("""
+                INSERT INTO np.account_balances (asset, balance) 
+                VALUES ('BNB', 1000.0) 
+                ON CONFLICT (asset) 
+                DO UPDATE SET balance = 1000.0, last_updated = NOW()
+            """)
+            
+            # Clear any other asset balances to 0
+            c.execute("""
+                UPDATE np.account_balances 
+                SET balance = 0.0, last_updated = NOW() 
+                WHERE asset NOT IN ('USDT', 'BNB')
+            """)
+            
+        conn.commit()
+        print("[INFO] Paper trading balances reset to $1000 each in USDT and BNB")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to reset balances: {e}")
+        return False
+
+def initialize_paper_trading():
+    """Complete paper trading initialization - reset all data to starting state."""
+    print("[INFO] Initializing paper trading mode...")
+    
+    # Initialize database structure
+    init_db_with_balances()
+    
+    # Clear all existing data
+    clear_all_trades()
+    clear_open_positions()
+    
+    # Reset balances to initial state
+    reset_paper_trading_balances()
+    
+    print("[INFO] Paper trading initialized: $1000 USDT + $1000 BNB starting balances")
+    return True
+
+
+def init_db_with_balances():
+    """Initialize database with multi-asset balance support"""
+    conn = get_conn()
+    if conn is None:
+        print("[ERROR] Cannot initialize database - PostgreSQL connection required")
+        return
+    try:
+        c = conn.cursor()
+        
+        # Grant permissions
+        try:
+            c.execute("GRANT USAGE, CREATE ON SCHEMA np TO CURRENT_USER;")
+            conn.commit()
+        except Exception as e:
+            print(f"[INFO] Could not grant permissions, trying to continue: {e}")
+            conn.rollback()
+        
+        # Create enhanced balance table
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.account_balances (
+                id SERIAL PRIMARY KEY,
+                asset TEXT UNIQUE NOT NULL,
+                balance REAL NOT NULL DEFAULT 0,
+                last_updated TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        # Insert initial balances - $1000 each in USDT and BNB
+        c.execute("""
+            INSERT INTO np.account_balances (asset, balance) 
+            VALUES ('USDT', 1000.0) 
+            ON CONFLICT (asset) DO NOTHING
+        """)
+        
+        # Start with $1000 in BNB as well for paper trading
+        c.execute("""
+            INSERT INTO np.account_balances (asset, balance) 
+            VALUES ('BNB', 1000.0) 
+            ON CONFLICT (asset) DO NOTHING
+        """)
+        
+        conn.commit()
+        print("[INFO] Enhanced database with multi-asset balances initialized")
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize enhanced database: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+def get_account_balance(asset='USDT'):
+    """Get balance for a specific asset"""
+    try:
+        conn = get_conn()
+        if conn is None:
+            return 1000.0 if asset in ['USDT', 'BNB'] else 0.0
+        
+        with conn.cursor() as c:
+            c.execute("SELECT balance FROM np.account_balances WHERE asset = %s", (asset,))
+            result = c.fetchone()
+            return float(result[0]) if result else (1000.0 if asset in ['USDT', 'BNB'] else 0.0)
+    except Exception as e:
+        print(f"[ERROR] Error getting {asset} balance: {e}")
+        return 1000.0 if asset in ['USDT', 'BNB'] else 0.0
+
+def update_account_balance(asset, new_balance):
+    """Update balance for a specific asset"""
+    try:
+        conn = get_conn()
+        if conn is None:
+            return False
+        
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO np.account_balances (asset, balance) 
+                VALUES (%s, %s) 
+                ON CONFLICT (asset) 
+                DO UPDATE SET balance = %s, last_updated = NOW()
+            """, (asset, new_balance, new_balance))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[ERROR] Error updating {asset} balance: {e}")
+        return False
+
+def get_all_balances():
+    """Get all asset balances"""
+    try:
+        conn = get_conn()
+        if conn is None:
+            return {'USDT': 1000.0, 'BNB': 1000.0}
+        
+        with conn.cursor() as c:
+            c.execute("SELECT asset, balance FROM np.account_balances")
+            results = c.fetchall()
+            return {row[0]: float(row[1]) for row in results}
+    except Exception as e:
+        print(f"[ERROR] Error getting all balances: {e}")
+        return {'USDT': 1000.0, 'BNB': 1000.0}

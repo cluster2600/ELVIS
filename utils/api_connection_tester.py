@@ -345,20 +345,20 @@ class APIConnectionTester:
                     )
                 elif vault_status.get('enabled'):
                     return APIStatus(
-                    name="vault",
-                    status=ConnectionStatus.ERROR,
-                    response_time=response_time,
-                    last_checked=datetime.now(),
-                    error_message=vault_status.get('error', 'Vault unhealthy')
-                )
-            else:
-                return APIStatus(
-                    name="vault",
-                    status=ConnectionStatus.DISCONNECTED,
-                    response_time=response_time,
-                    last_checked=datetime.now(),
-                    error_message="Vault disabled - using fallback"
-                )
+                        name="vault",
+                        status=ConnectionStatus.ERROR,
+                        response_time=response_time,
+                        last_checked=datetime.now(),
+                        error_message=vault_status.get('error', 'Vault unhealthy')
+                    )
+                else:
+                    return APIStatus(
+                        name="vault",
+                        status=ConnectionStatus.DISCONNECTED,
+                        response_time=response_time,
+                        last_checked=datetime.now(),
+                        error_message="Vault disabled - using fallback"
+                    )
                 
         except Exception as e:
             return APIStatus(

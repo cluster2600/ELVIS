@@ -1,0 +1,2 @@
+side,price,quantity,pnl,fee,hour,day_of_week,minute,price_change,price_volatility,price_sma_5,price_sma_20,volume_change,volume_sma,price_momentum_5,price_momentum_20,price_high_10,price_low_10,price_position,is_long,is_short,notional_value,net_result,is_profitable,is_loss,is_breakeven,fee_ratio,fee_to_pnl_ratio,rolling_pnl_5,rolling_pnl_20,rolling_winrate_10,rolling_winrate_50,win_streak,loss_streak,position_size_zscore
+BUY,118443.6,0.008442837,0.0,0.4,10,2,54,,,,,,,,,,,,1,0,1000.0000084932001,-0.4,0,1,0,0.00039999999660272,inf,,,,,0,1,

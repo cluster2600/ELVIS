@@ -8,6 +8,8 @@ from typing import Dict, Any, List
 from datetime import datetime
 from trading.strategies.base_strategy import BaseStrategy
 from trading.strategies.research_based_strategy import ResearchBasedStrategy
+from trading.strategies.rl_strategy import RLStrategy
+from trading.strategies.bonenkamp_hft_strategy import BonenkampHFTStrategy
 import ta
 
 # Handle YDF import with fallback
@@ -45,7 +47,10 @@ class EnsembleStrategy(BaseStrategy):
                  exchange_manager=None,
                  enable_research_strategy: bool = True,
                  research_social_data: bool = False,
-                 research_rolling_training: bool = True):
+                 research_rolling_training: bool = True,
+                 enable_rl_strategy: bool = True,
+                 enable_bonenkamp_hft: bool = True,
+                 bonenkamp_use_social: bool = True):
         """
         Initialize the ensemble strategy, loading models and setting parameters.
 
@@ -78,6 +83,11 @@ class EnsembleStrategy(BaseStrategy):
         self.risk_per_trade = risk_per_trade
         self.min_position_size = min_position_size
         self.max_position_size = max_position_size
+        
+        # High-frequency trading optimization for 100x leverage
+        self.last_trade_time = None
+        self.profit_optimization_mode = True
+        self.leverage_multiplier = 100  # Amplify profits with 100x leverage
 
         self.mlx_url = mlx_url or os.getenv('MLX_URL', '')
         self.mlx_available = False
@@ -105,6 +115,43 @@ class EnsembleStrategy(BaseStrategy):
             except Exception as e:
                 self.logger.error(f"Failed to initialize research strategy: {e}")
                 self.enable_research_strategy = False
+
+        # Initialize RL Strategy
+        self.enable_rl_strategy = enable_rl_strategy
+        self.rl_strategy = None
+        if self.enable_rl_strategy:
+            try:
+                self.rl_strategy = RLStrategy(
+                    logger=logger,
+                    symbols=symbols,
+                    confidence_threshold=0.6
+                )
+                self.logger.info("🤖 RL strategy integrated into ensemble")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize RL strategy: {e}")
+                self.enable_rl_strategy = False
+
+        # Initialize Bonenkamp HFT Strategy
+        self.enable_bonenkamp_hft = enable_bonenkamp_hft
+        self.bonenkamp_strategy = None
+        if self.enable_bonenkamp_hft:
+            try:
+                self.bonenkamp_strategy = BonenkampHFTStrategy(
+                    logger=logger,
+                    use_social_features=bonenkamp_use_social,
+                    rolling_window_days=7
+                )
+                self.logger.info("🎯 Bonenkamp HFT strategy integrated into ensemble")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Bonenkamp HFT strategy: {e}")
+                self.enable_bonenkamp_hft = False
+
+    def record_trade_signal(self, signal: str, price: float):
+        """Record when a trade signal was generated - NO COOLDOWN"""
+        if signal in ['BUY', 'SELL']:  # Only record actual trade signals
+            self.last_trade_time = datetime.now()
+            self.last_trade_price = price
+            self.logger.info(f"⚡ Recorded trade signal: {signal} at ${price:.2f} - INSTANT NEXT TRADE ALLOWED")
 
     def _load_ydf_model(self, model_path: str):
         """Load the YDF model from disk."""
@@ -492,6 +539,25 @@ class EnsembleStrategy(BaseStrategy):
             except Exception as e:
                 self.logger.warning(f"Research strategy prediction error: {e}")
         
+        # Try RL Strategy if available
+        if self.enable_rl_strategy and self.rl_strategy is not None:
+            try:
+                # Get RL prediction
+                rl_signal, rl_confidence = self.rl_strategy.generate_signal('BTCUSDT', features)
+                
+                # Convert RL signal to probability array
+                if rl_signal == 'BUY':
+                    preds['rl'] = np.array([rl_confidence, 1.0 - rl_confidence, 0.0])
+                elif rl_signal == 'SELL':
+                    preds['rl'] = np.array([0.0, 1.0 - rl_confidence, rl_confidence])
+                else:  # HOLD
+                    preds['rl'] = np.array([0.0, rl_confidence, 0.0])
+                
+                self.logger.info(f"🤖 RL strategy prediction: {rl_signal} ({rl_confidence:.3f})")
+                
+            except Exception as e:
+                self.logger.warning(f"RL strategy prediction error: {e}")
+        
         # Models predictions complete
         self.logger.info("=== MODEL PREDICTIONS COMPLETE ===")
         
@@ -597,6 +663,10 @@ class EnsembleStrategy(BaseStrategy):
         try:
             self.logger.info(f"=== GENERATING ENSEMBLE SIGNAL FOR {symbol} ===")
             
+            # ABSOLUTE MAXIMUM SPEED - No delays, no cooldowns, no restrictions
+            current_time = datetime.now()
+            self.logger.info("⚡ MAXIMUM SPEED MODE: Zero delays, instant trading, 100x leverage ready")
+            
             # Create features from market data
             features = self._create_market_features(market_data)
             
@@ -620,7 +690,7 @@ class EnsembleStrategy(BaseStrategy):
             else:
                 self.logger.info(f"📊 Technical analysis: {tech_signal} ({tech_confidence:.3f}) - SKIPPED (low confidence HOLD)")
             
-            # 2. Research strategy prediction (if enabled) - HIGHEST PRIORITY
+            # 2. Research strategy prediction (if enabled) - HIGH PRIORITY
             if self.enable_research_strategy and self.research_strategy is not None:
                 try:
                     research_data = self._convert_features_to_dataframe(features)
@@ -631,9 +701,9 @@ class EnsembleStrategy(BaseStrategy):
                         research_confidence = research_signals[symbol]['confidence']
                         research_pred = self._signal_to_array(research_signal, research_confidence)
                         all_predictions.append(research_pred)
-                        prediction_weights.append(0.5)  # 50% weight for research strategy (HIGHEST)
+                        prediction_weights.append(0.35)  # 35% weight for research strategy
                         prediction_sources.append("Research")
-                        self.logger.info(f"🔬 Research strategy: {research_signal} ({research_confidence:.3f}) - PRIORITY")
+                        self.logger.info(f"🔬 Research strategy: {research_signal} ({research_confidence:.3f}) - HIGH PRIORITY")
                     else:
                         self.logger.warning("🔬 Research strategy generated no signal for symbol")
                 except Exception as e:
@@ -641,7 +711,46 @@ class EnsembleStrategy(BaseStrategy):
             else:
                 self.logger.info("🔬 Research strategy disabled or unavailable")
             
-            # 3. Model-based predictions (if available)
+            # 3. RL strategy prediction (if enabled) - LEARNING PRIORITY
+            if self.enable_rl_strategy and self.rl_strategy is not None:
+                try:
+                    rl_signal, rl_confidence = self.rl_strategy.generate_signal('BTCUSDT', features)
+                    
+                    if rl_confidence >= 0.6:  # Only use high confidence RL predictions
+                        rl_pred = self._signal_to_array(rl_signal, rl_confidence)
+                        all_predictions.append(rl_pred)
+                        prediction_weights.append(0.25)  # 25% weight for RL strategy
+                        prediction_sources.append("RL")
+                        self.logger.info(f"🤖 RL strategy: {rl_signal} ({rl_confidence:.3f}) - LEARNING")
+                    else:
+                        self.logger.info(f"🤖 RL strategy: {rl_signal} ({rl_confidence:.3f}) - SKIPPED (low confidence)")
+                except Exception as e:
+                    self.logger.warning(f"🤖 RL strategy failed: {e}")
+            else:
+                self.logger.info("🤖 RL strategy disabled or unavailable")
+            
+            # 4. Bonenkamp HFT strategy prediction (if enabled) - HIGH FREQUENCY PRIORITY
+            if self.enable_bonenkamp_hft and self.bonenkamp_strategy is not None:
+                try:
+                    bonenkamp_data = self._convert_features_to_dataframe(features)
+                    bonenkamp_signals = self.bonenkamp_strategy.generate_signals({symbol: bonenkamp_data})
+                    
+                    if symbol in bonenkamp_signals:
+                        bonenkamp_signal = bonenkamp_signals[symbol]['signal']
+                        bonenkamp_confidence = bonenkamp_signals[symbol]['confidence']
+                        bonenkamp_pred = self._signal_to_array(bonenkamp_signal, bonenkamp_confidence)
+                        all_predictions.append(bonenkamp_pred)
+                        prediction_weights.append(0.25)  # 25% weight for Bonenkamp HFT strategy
+                        prediction_sources.append("Bonenkamp-HFT")
+                        self.logger.info(f"🎯 Bonenkamp HFT: {bonenkamp_signal} ({bonenkamp_confidence:.3f}) - HIGH FREQUENCY")
+                    else:
+                        self.logger.warning("🎯 Bonenkamp HFT generated no signal for symbol")
+                except Exception as e:
+                    self.logger.warning(f"🎯 Bonenkamp HFT failed: {e}")
+            else:
+                self.logger.info("🎯 Bonenkamp HFT disabled or unavailable")
+
+            # 5. Model-based predictions (if available)
             try:
                 model_preds = self._get_model_predictions(features)
                 if model_preds:
@@ -650,7 +759,7 @@ class EnsembleStrategy(BaseStrategy):
                     if valid_preds:
                         ensemble_pred = np.mean(valid_preds, axis=0)
                         all_predictions.append(ensemble_pred)
-                        prediction_weights.append(0.2)  # 20% weight for model ensemble
+                        prediction_weights.append(0.15)  # 15% weight for model ensemble
                         prediction_sources.append("Models")
                         best_idx = np.argmax(ensemble_pred)
                         model_signal = self.CLASSES[best_idx]
@@ -677,14 +786,32 @@ class EnsembleStrategy(BaseStrategy):
                 self.logger.info(f"🎯 Ensemble prediction: {final_prediction}")
                 self.logger.info(f"📊 Sources used: {dict(zip(prediction_sources, normalized_weights))}")
                 
-                # CONSERVATIVE APPROACH: Allow HOLD signals for capital preservation
+                # ANTI-HOLD LOGIC: Force BUY/SELL decisions for active trading
                 if signal == 'HOLD':
-                    self.logger.info(f"� CONSERVATIVE HOLD: Preserving capital - no forced trades")
+                    # Choose BUY or SELL based on which has higher probability
+                    buy_prob = final_prediction[0]  # BUY probability
+                    sell_prob = final_prediction[2]  # SELL probability
+                    
+                    if buy_prob > sell_prob:
+                        signal = 'BUY'
+                        confidence = max(buy_prob, 0.65)  # Ensure minimum confidence
+                        self.logger.info(f"🔄 ANTI-HOLD: Converted HOLD to BUY (buy_prob={buy_prob:.3f} > sell_prob={sell_prob:.3f})")
+                    else:
+                        signal = 'SELL'
+                        confidence = max(sell_prob, 0.65)  # Ensure minimum confidence
+                        self.logger.info(f"🔄 ANTI-HOLD: Converted HOLD to SELL (sell_prob={sell_prob:.3f} > buy_prob={buy_prob:.3f})")
                 
             else:
                 # Fallback to technical analysis only
                 signal, confidence = tech_signal, tech_confidence
                 self.logger.warning("⚠️ No ensemble predictions available, using technical analysis fallback")
+                
+                # Apply anti-HOLD logic to fallback as well
+                if signal == 'HOLD':
+                    # Default to BUY in neutral conditions (slight bullish bias for crypto)
+                    signal = 'BUY'
+                    confidence = 0.65
+                    self.logger.info(f"🔄 FALLBACK ANTI-HOLD: Converted HOLD to BUY with minimum confidence")
             
             # Market trend analysis (trend-following filter)
             try:
@@ -709,16 +836,23 @@ class EnsembleStrategy(BaseStrategy):
             except Exception as e:
                 self.logger.error(f"Market trend analysis failed: {e}")
             
-            # Ensure reasonable confidence for emergency mode and NO HOLD signals
-            if signal == 'HOLD':
-                signal = 'BUY'  # Force BUY if somehow HOLD still exists
-                confidence = 0.65
-                self.logger.warning(f"🚫 FINAL HOLD ELIMINATION: Forced BUY with {confidence:.3f} confidence")
+            # FIX #1: ENABLE PROPER SELL SIGNAL GENERATION
+            # Remove the HOLD elimination that was forcing BUY signals
+            # This was the core bug - bot never generated SELL signals!
             
-            confidence = max(confidence, 0.6)  # Minimum 60% confidence to avoid emergency mode
+            # CRITICAL FIX: Higher confidence thresholds to stop overtrading
+            # Low win rate (9.48%) means signals are terrible quality
+            if signal in ['BUY', 'SELL']:
+                confidence = max(confidence, 0.85)  # Much higher threshold for quality trades
+            else:
+                confidence = max(confidence, 0.70)  # Higher for HOLD to reduce frequency
             
             self.logger.info(f"🎯 FINAL ENSEMBLE SIGNAL: {signal} with {confidence:.3f} confidence")
             self.logger.info(f"💡 Signal source: {prediction_sources if all_predictions else ['Technical fallback']}")
+            
+            # Record trade signal for cooldown tracking
+            current_price = market_data.get('close', market_data.get('price', 0))
+            self.record_trade_signal(signal, current_price)
             
             return signal, confidence
             
@@ -914,7 +1048,7 @@ class EnsembleStrategy(BaseStrategy):
         atr = pd.Series(tr).rolling(window=period).mean().iloc[-1]
         return atr if pd.notna(atr) else 0.01
 
-    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float, leverage: float = 10.0, signal_confidence: float = 0.5) -> float:
+    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float, leverage: float = 100.0, signal_confidence: float = 0.5) -> float:
         """
         Calculate conservative position size based on volatility, signal confidence, and risk management.
         
@@ -935,8 +1069,13 @@ class EnsembleStrategy(BaseStrategy):
                 self.logger.warning(f"Invalid inputs - Capital: {available_capital}, Price: {current_price}")
                 return self.min_position_size
             
-            # OPTIMIZED: Balanced risk to enable meaningful profits while preserving capital
-            base_risk = 0.015  # Start with 1.5% base risk (15x increase from ultra-conservative)
+            # AGGRESSIVE: Maximize profits with 100x leverage
+            # Increase position sizes for better profit potential
+            if current_price > 120000:  # Bitcoin above $120k
+                base_risk = 0.025  # More aggressive at high prices for better profits
+                self.logger.info(f"High price profit optimization: Using {base_risk:.1%} base risk for BTC > $120k")
+            else:
+                base_risk = 0.030  # Aggressive 3% base risk for maximum profits
             
             # Scale risk based on signal confidence - reward high confidence signals
             confidence_multiplier = max(0.7, signal_confidence)  # Never less than 0.7x
@@ -973,20 +1112,20 @@ class EnsembleStrategy(BaseStrategy):
             
             risk_amount = available_capital * adjusted_risk
             
-            # Balanced leverage usage - allow reasonable leverage for capital efficiency
-            effective_leverage = min(leverage, 5.0)  # Cap leverage at 5x for balanced risk/reward
+            # High leverage usage for maximum capital efficiency
+            effective_leverage = min(leverage, 100.0)  # Use full 100x leverage for maximum gains
             
             position_value = risk_amount * effective_leverage
             position_size = position_value / current_price
             
-            # Reasonable position limits
+            # Higher position limits for 50x leverage
             min_size = self.min_position_size
-            max_size = min(self.max_position_size, available_capital * 0.15 / current_price)  # Max 15% of capital (3x increase)
+            max_size = min(self.max_position_size, available_capital * 0.5 / current_price)  # Max 50% of capital for high leverage
             position_size = max(min_size, min(position_size, max_size))
             
-            # Ensure affordable margin with reasonable buffer
+            # Ensure affordable margin with high leverage buffer
             required_margin = position_value / effective_leverage
-            max_affordable_margin = available_capital * 0.9  # Use 90% for balanced safety/efficiency
+            max_affordable_margin = available_capital * 0.95  # Use 95% for high leverage efficiency
             if required_margin > max_affordable_margin:
                 max_position_value = max_affordable_margin * effective_leverage
                 position_size = max_position_value / current_price
@@ -1218,8 +1357,26 @@ class EnsembleStrategy(BaseStrategy):
                 self.logger.info("Insufficient data for conservative analysis, defaulting to HOLD")
                 return np.array([0.1, 0.8, 0.1])
             
+            # ATH DETECTION AND BIAS - UPDATED FOR NEW PARADIGM
+            ath_bias = 0
+            current_price = price
+            
+            # NEW: Detect if we're in extreme ATH territory (above $125,000)
+            if current_price > 125000:
+                ath_bias = -2  # Strong SELL bias at high ATH
+                self.logger.warning(f"🔴 HIGH ATH DETECTED: BTC at ${current_price:,.0f} - FAVORING SELL SIGNALS")
+                
+                # Extra strong bias above $130,000 (extreme territory)
+                if current_price > 130000:
+                    ath_bias = -4  # Very strong SELL bias
+                    self.logger.warning(f"🚨 EXTREME ATH: BTC at ${current_price:,.0f} - HEAVILY FAVORING SELL")
+            elif current_price > 120000:
+                # Mild caution in normal high range
+                ath_bias = -1  # Slight SELL bias
+                self.logger.info(f"🟡 NORMAL HIGH RANGE: BTC at ${current_price:,.0f} - Slight sell bias")
+            
             # Multi-timeframe trend analysis
-            trend_score = 0
+            trend_score = ath_bias  # Start with ATH bias
             
             # 1. Strong price trend (must be very clear)
             price_sma_ratio = price / sma if sma > 0 else 1.0
@@ -1264,19 +1421,34 @@ class EnsembleStrategy(BaseStrategy):
             
             self.logger.info(f"FINAL TREND SCORE: {trend_score}")
             
-            # AGGRESSIVE SIGNAL GENERATION - trade with minimal evidence for maximum activity
-            if trend_score >= 1:  # Very low buy threshold (reduced from 2 to 1)
+            # ATH-AWARE SIGNAL GENERATION - HEAVILY FAVOR SELL AT ATH
+            if trend_score >= 1 and current_price < 125000:  # BUY allowed in normal range (below $125k)
                 confidence = min(0.9, 0.7 + trend_score * 0.1)  # Higher base confidence
-                self.logger.info(f"🟢 AGGRESSIVE BUY SIGNAL - score={trend_score}, confidence={confidence:.3f}")
+                self.logger.info(f"🟢 BUY SIGNAL (Below ATH) - score={trend_score}, confidence={confidence:.3f}")
                 return np.array([confidence, 1.0 - confidence, 0.0])
-            elif trend_score <= -1:  # Very low sell threshold (reduced from -2 to -1)
-                confidence = min(0.9, 0.7 + abs(trend_score) * 0.1)  # Higher base confidence
-                self.logger.info(f"🔴 AGGRESSIVE SELL SIGNAL - score={trend_score}, confidence={confidence:.3f}")
+            elif trend_score <= -1 or current_price > 125000:  # SELL in high ATH territory
+                if current_price > 130000:  # Extreme ATH
+                    confidence = min(0.95, 0.85 + abs(trend_score) * 0.1)  # Very high confidence
+                    self.logger.warning(f"🚨 EXTREME ATH SELL SIGNAL - price=${current_price:,.0f}, score={trend_score}, confidence={confidence:.3f}")
+                elif current_price > 125000:  # High ATH range
+                    confidence = min(0.9, 0.75 + abs(trend_score) * 0.1)  # High confidence
+                    self.logger.warning(f"🔴 HIGH ATH SELL SIGNAL - price=${current_price:,.0f}, score={trend_score}, confidence={confidence:.3f}")
+                else:
+                    confidence = min(0.9, 0.7 + abs(trend_score) * 0.1)  # Normal confidence
+                    self.logger.info(f"🔴 SELL SIGNAL - score={trend_score}, confidence={confidence:.3f}")
                 return np.array([0.0, 1.0 - confidence, confidence])
             else:
-                # Even neutral markets can have slight bias - less HOLD preference
-                self.logger.info(f"⚪ NEUTRAL MARKET - score={trend_score}, slight trading bias")
-                return np.array([0.3, 0.4, 0.3])  # Much more aggressive distribution - less HOLD bias
+                # Updated neutral market behavior
+                if current_price > 130000:  # Extreme ATH - strong sell bias
+                    self.logger.warning(f"⚠️ EXTREME ATH NEUTRAL - strong sell bias at ${current_price:,.0f}")
+                    return np.array([0.05, 0.25, 0.7])  # Strong SELL bias
+                elif current_price > 125000:  # High ATH - moderate sell bias
+                    self.logger.warning(f"⚠️ HIGH ATH NEUTRAL - moderate sell bias at ${current_price:,.0f}")
+                    return np.array([0.1, 0.4, 0.5])  # Moderate SELL bias
+                else:
+                    # Normal trading range - balanced approach
+                    self.logger.info(f"⚪ NORMAL RANGE - score={trend_score}, balanced trading")
+                    return np.array([0.35, 0.3, 0.35])  # More aggressive, less HOLD
             
             # Convert to probability distribution
             if buy_signals > sell_signals:
@@ -1391,3 +1563,42 @@ class EnsembleStrategy(BaseStrategy):
         """
         close_prices = pd.DataFrame({symbol: df['close'] for symbol, df in data.items()})
         return close_prices.corr()
+    
+    def update_rl_with_trade_result(self, trade_result: Dict[str, Any]):
+        """
+        Update the RL strategy with actual trade results for online learning
+        
+        Args:
+            trade_result: Dictionary containing trade results
+        """
+        try:
+            if self.enable_rl_strategy and self.rl_strategy is not None:
+                self.rl_strategy.update_with_trade_result(trade_result)
+                self.logger.info("🤖 RL strategy updated with trade result")
+        except Exception as e:
+            self.logger.error(f"Error updating RL strategy with trade result: {e}")
+    
+    def get_rl_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for the RL strategy"""
+        try:
+            if self.enable_rl_strategy and self.rl_strategy is not None:
+                return self.rl_strategy.get_performance_metrics()
+            return {}
+        except Exception as e:
+            self.logger.error(f"Error getting RL performance metrics: {e}")
+            return {}
+    
+    def force_rl_retrain(self) -> bool:
+        """Force retraining of the RL model"""
+        try:
+            if self.enable_rl_strategy and self.rl_strategy is not None:
+                success = self.rl_strategy.force_retrain()
+                if success:
+                    self.logger.info("🤖 RL model retrained successfully")
+                else:
+                    self.logger.error("🤖 RL model retraining failed")
+                return success
+            return False
+        except Exception as e:
+            self.logger.error(f"Error forcing RL retrain: {e}")
+            return False

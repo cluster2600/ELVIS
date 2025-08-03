@@ -392,7 +392,7 @@ class ConsoleDashboard:
             
             if live_positions:
                 displayed_positions = 0
-                for pos in live_positions[:5]:  # Show top 5 positions
+                for pos in live_positions:  # Show all positions
                     if len(pos) >= 5:  # Need at least 5 fields: id, symbol, side, entry_price, quantity
                         symbol = pos[1]
                         side = pos[2]  # BUY or SELL
@@ -765,7 +765,7 @@ class ConsoleDashboard:
         
         if open_positions:
             total_position_value = 0
-            for i, pos in enumerate(open_positions[:3]):  # Show top 3
+            for i, pos in enumerate(open_positions):  # Show all positions
                 symbol = pos.get('symbol', 'N/A')
                 size = pos.get('size', 0)
                 entry_price = pos.get('entry_price', 0)

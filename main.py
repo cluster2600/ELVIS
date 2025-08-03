@@ -602,25 +602,32 @@ def main(mode: str, log_level: str):
                         
                         # Generate signals using the NEW generate_signal method (singular) with anti-HOLD logic
                         if hasattr(active_strategy, 'generate_signal'):
-                            # Get current market data for signal generation
-                            current_price = float(data.iloc[-1]['close'])
-                            market_data = {
-                                'close': current_price,
-                                'price': current_price,
-                                'high': float(data.iloc[-1].get('high', current_price)),
-                                'low': float(data.iloc[-1].get('low', current_price)),
-                                'volume': float(data.iloc[-1].get('volume', 1000)),
-                                'rsi': float(data.iloc[-1].get('rsi', 50.0)) if pd.notna(data.iloc[-1].get('rsi')) else 50.0,
-                                'macd': float(data.iloc[-1].get('macd', 0.0)) if pd.notna(data.iloc[-1].get('macd')) else 0.0,
-                                'macd_signal': float(data.iloc[-1].get('signal_line', 0.0)) if pd.notna(data.iloc[-1].get('signal_line')) else 0.0,
-                                'sma_20': float(data.iloc[-1].get('sma_20', current_price)) if pd.notna(data.iloc[-1].get('sma_20')) else current_price,
-                                'sma_50': float(data.iloc[-1].get('sma_50', current_price)) if pd.notna(data.iloc[-1].get('sma_50')) else current_price,
-                                'atr': float(data.iloc[-1].get('atr', current_price * 0.02)) if pd.notna(data.iloc[-1].get('atr')) else current_price * 0.02,
-                                'adx': float(data.iloc[-1].get('adx', 25.0)) if pd.notna(data.iloc[-1].get('adx')) else 25.0,
-                                'bb_upper': float(data.iloc[-1].get('upper_bb', current_price * 1.02)) if pd.notna(data.iloc[-1].get('upper_bb')) else current_price * 1.02,
-                                'bb_lower': float(data.iloc[-1].get('lower_bb', current_price * 0.98)) if pd.notna(data.iloc[-1].get('lower_bb')) else current_price * 0.98,
-                                'bb_middle': float(data.iloc[-1].get('sma_bb', current_price)) if pd.notna(data.iloc[-1].get('sma_bb')) else current_price
-                            }
+                            # Get current market data for signal generation with error handling
+                            try:
+                                current_price = float(data.iloc[-1]['close'])
+                                logger.debug(f"Current price extracted: {current_price} (type: {type(current_price)})")
+                                
+                                market_data = {
+                                    'close': current_price,
+                                    'price': current_price,
+                                    'high': float(data.iloc[-1].get('high', current_price)),
+                                    'low': float(data.iloc[-1].get('low', current_price)),
+                                    'volume': float(data.iloc[-1].get('volume', 1000)),
+                                    'rsi': float(data.iloc[-1].get('rsi', 50.0)) if pd.notna(data.iloc[-1].get('rsi')) else 50.0,
+                                    'macd': float(data.iloc[-1].get('macd', 0.0)) if pd.notna(data.iloc[-1].get('macd')) else 0.0,
+                                    'macd_signal': float(data.iloc[-1].get('signal_line', 0.0)) if pd.notna(data.iloc[-1].get('signal_line')) else 0.0,
+                                    'sma_20': float(data.iloc[-1].get('sma_20', current_price)) if pd.notna(data.iloc[-1].get('sma_20')) else current_price,
+                                    'sma_50': float(data.iloc[-1].get('sma_50', current_price)) if pd.notna(data.iloc[-1].get('sma_50')) else current_price,
+                                    'atr': float(data.iloc[-1].get('atr', current_price * 0.02)) if pd.notna(data.iloc[-1].get('atr')) else current_price * 0.02,
+                                    'adx': float(data.iloc[-1].get('adx', 25.0)) if pd.notna(data.iloc[-1].get('adx')) else 25.0,
+                                    'bb_upper': float(data.iloc[-1].get('upper_bb', current_price * 1.02)) if pd.notna(data.iloc[-1].get('upper_bb')) else current_price * 1.02,
+                                    'bb_lower': float(data.iloc[-1].get('lower_bb', current_price * 0.98)) if pd.notna(data.iloc[-1].get('lower_bb')) else current_price * 0.98,
+                                    'bb_middle': float(data.iloc[-1].get('sma_bb', current_price)) if pd.notna(data.iloc[-1].get('sma_bb')) else current_price
+                                }
+                            except Exception as e:
+                                logger.error(f"❌ Error processing market data: {e}")
+                                logger.error(f"   Data types - close: {type(data.iloc[-1]['close'])}, value: {data.iloc[-1]['close']}")
+                                continue
                             
                             # Process each symbol with appropriate executor
                             symbols_data = {
@@ -762,101 +769,151 @@ def main(mode: str, log_level: str):
                                 # Execute BTCUSDT trade (futures)
                                 self._execute_symbol_trade(symbol, signal, confidence, data, executor)
                             
-                            # TEMPORARILY DISABLE BNBBTC CONVERSION to stop PnL bug
-                            logger.info("🚫 BNBBTC conversion temporarily disabled to fix PnL calculation bug")
-                            # TODO: Re-enable after fixing the price calculation issue
+                            # BNBBTC CONVERSION RE-ENABLED - PnL bug has been fixed  
+                            logger.info("✅ BNBBTC conversion re-enabled - PnL calculation bug fixed")
+                            
+                            # Process BNBBTC (spot) if data is available
+                            if "BNBBTC" in all_data and not all_data["BNBBTC"].empty:
+                                try:
+                                    bnbbtc_data = all_data["BNBBTC"]
+                                    bnbbtc_price = float(bnbbtc_data.iloc[-1]['close'])
+                                    
+                                    # Create market data for BNBBTC with safe type conversion
+                                    bnbbtc_market_data = {
+                                        'price': bnbbtc_price,
+                                        'volume': float(bnbbtc_data.iloc[-1].get('volume', 1000.0)),
+                                        'high': float(bnbbtc_data.iloc[-1].get('high', bnbbtc_price * 1.01)),
+                                        'low': float(bnbbtc_data.iloc[-1].get('low', bnbbtc_price * 0.99)),
+                                        'rsi': float(bnbbtc_data.iloc[-1].get('rsi', 50.0)) if pd.notna(bnbbtc_data.iloc[-1].get('rsi')) else 50.0,
+                                        'macd': float(bnbbtc_data.iloc[-1].get('macd', 0.0)) if pd.notna(bnbbtc_data.iloc[-1].get('macd')) else 0.0,
+                                        'macd_signal': float(bnbbtc_data.iloc[-1].get('signal_line', 0.0)) if pd.notna(bnbbtc_data.iloc[-1].get('signal_line')) else 0.0,
+                                        'sma_20': float(bnbbtc_data.iloc[-1].get('sma_20', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_20')) else bnbbtc_price,
+                                        'sma_50': float(bnbbtc_data.iloc[-1].get('sma_50', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_50')) else bnbbtc_price,
+                                        'atr': float(bnbbtc_data.iloc[-1].get('atr', bnbbtc_price * 0.02)) if pd.notna(bnbbtc_data.iloc[-1].get('atr')) else bnbbtc_price * 0.02,
+                                        'adx': float(bnbbtc_data.iloc[-1].get('adx', 25.0)) if pd.notna(bnbbtc_data.iloc[-1].get('adx')) else 25.0,
+                                        'bb_upper': float(bnbbtc_data.iloc[-1].get('upper_bb', bnbbtc_price * 1.02)) if pd.notna(bnbbtc_data.iloc[-1].get('upper_bb')) else bnbbtc_price * 1.02,
+                                        'bb_lower': float(bnbbtc_data.iloc[-1].get('lower_bb', bnbbtc_price * 0.98)) if pd.notna(bnbbtc_data.iloc[-1].get('lower_bb')) else bnbbtc_price * 0.98,
+                                        'bb_middle': float(bnbbtc_data.iloc[-1].get('sma_bb', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_bb')) else bnbbtc_price
+                                    }
+                                except Exception as e:
+                                    logger.error(f"❌ Error processing BNBBTC data: {e}")
+                                    logger.warning("⚠️ Skipping BNBBTC trading due to data processing error")
+                                    continue
+                                
+                                logger.info(f"🎯 Processing BNBBTC trading signals")
+                                logger.info(f"📊 BNBBTC Market data: Price={bnbbtc_price:.6f}, RSI={bnbbtc_market_data['rsi']:.1f}")
+                                
+                                # Generate BNBBTC signals
+                                bnbbtc_signal, bnbbtc_confidence = active_strategy.generate_signal("BNBBTC", bnbbtc_market_data)
+                                
+                                logger.info(f"🎉 BNBBTC SIGNAL: {bnbbtc_signal} with confidence {bnbbtc_confidence:.3f}")
+                                
+                                # Execute BNBBTC trades if confidence is high enough
+                                if bnbbtc_signal in ['BUY', 'SELL'] and bnbbtc_confidence >= 0.90:
+                                    logger.info(f"🔄 Executing BNBBTC {bnbbtc_signal} trade")
+                                    self._execute_symbol_trade("BNBBTC", bnbbtc_signal, bnbbtc_confidence, bnbbtc_data, executor)
+                                else:
+                                    logger.info(f"📊 BNBBTC Signal: {bnbbtc_signal} | Confidence: {bnbbtc_confidence:.3f} | Action: HOLD (below 90% threshold)")
+                            else:
+                                logger.warning("⚠️ BNBBTC data not available, skipping BNBBTC trading")
                             
                             # Continue with original BTCUSDT execution logic
-                                current_price = data.iloc[-1]['close']
-                                
-                                # Check if we have too many open positions (limit to 10 for balanced strategy)
-                                try:
-                                    from utils.paper_trade_db import get_open_positions
-                                    open_positions = get_open_positions()
-                                    if len(open_positions) >= 10:
-                                        logger.warning(f"⚠️ Too many open positions ({len(open_positions)}), skipping new trade")
-                                        continue
-                                except Exception as e:
-                                    logger.error(f"Error checking open positions: {e}")
-                                
-                                # DYNAMIC RISK MANAGEMENT with x50 LEVERAGE ENFORCEMENT
-                                available_balance = executor.get_account_balance()
-                                base_leverage = getattr(executor, 'default_leverage', 50)  # Default to x50
-                                
-                                # Get risk manager for dynamic calculations
-                                risk_manager = container.get_optional('risk_manager')
-                                
-                                try:
-                                    # ENFORCE MINIMUM x50 LEVERAGE
-                                    if risk_manager:
-                                        leverage = risk_manager.enforce_minimum_leverage(base_leverage)
-                                        # Use dynamic position sizing
-                                        position_size = risk_manager.calculate_dynamic_position_size(
-                                            available_balance, current_price, confidence, leverage
-                                        )
-                                        logger.info(f"⚡ DYNAMIC: Leverage {leverage}x, Dynamic sizing used")
-                                    else:
-                                        # Fallback to strategy calculation with enforced leverage
-                                        leverage = max(base_leverage, 50.0)  # Ensure minimum x50
-                                        balance_info = executor.get_balance()
-                                        position_size = active_strategy.calculate_position_size(
-                                            data, 
-                                            current_price, 
-                                            available_capital=available_balance, 
-                                            leverage=leverage, 
-                                            signal_confidence=confidence
-                                        )
-                                        logger.info(f"⚡ ENFORCED: Leverage {leverage}x, Strategy sizing used")
-                                except Exception as e:
-                                    logger.error(f"Error in position size calculation: {e}")
-                                    # Emergency fallback position size
-                                    position_size = min(0.001, available_balance / current_price * 0.05)  # REDUCED from 0.1 to 0.05
-                                    logger.warning(f"🚨 Using emergency position size: {position_size:.6f}")
-                                
-                                # Position size calculated - ready for execution
-                                
-                                # Emergency check - force minimum position size if zero
-                                if position_size <= 0:
-                                    position_size = min(0.001, available_balance / current_price * 0.05)  # REDUCED
-                                    logger.warning(f"🚨 Position size was zero, forced to: {position_size:.6f}")
-
-                                logger.info(f"🎯 DYNAMIC x50+ EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
-                                
-                                # DUPLICATE TRADE PREVENTION
-                                trade_key = f"{signal}_{symbol}_{current_price:.2f}_{position_size:.6f}"
-                                current_time_ms = int(time.time() * 1000)
-                                
-                                # Skip if same trade executed within last 30 seconds
-                                if hasattr(trading_loop, 'recent_trades'):
-                                    if trading_loop.recent_trades.get(trade_key, 0) + 30000 > current_time_ms:
-                                        logger.warning(f"🚫 DUPLICATE PREVENTED: {trade_key}")
-                                        continue
+                            current_price = data.iloc[-1]['close']
+                            
+                            # DYNAMIC RISK MANAGEMENT with x50 LEVERAGE ENFORCEMENT
+                            available_balance = executor.get_account_balance()
+                            base_leverage = getattr(executor, 'default_leverage', 50)  # Default to x50
+                            
+                            # Get risk manager for dynamic calculations
+                            risk_manager = container.get_optional('risk_manager')
+                            
+                            try:
+                                # ENFORCE MINIMUM x50 LEVERAGE
+                                if risk_manager:
+                                    leverage = risk_manager.enforce_minimum_leverage(base_leverage)
+                                    # Use dynamic position sizing
+                                    position_size = risk_manager.calculate_dynamic_position_size(
+                                        available_balance, current_price, confidence, leverage
+                                    )
+                                    logger.info(f"⚡ DYNAMIC: Leverage {leverage}x, Dynamic sizing used")
                                 else:
-                                    trading_loop.recent_trades = {}
-                                
-                                # Execute order with new method
-                                logger.info(f"🎯 ORDER ATTEMPT: {signal} | Size: {position_size:.6f} | Price: ${current_price:.2f}")
-                                
-                                if signal == 'BUY':
-                                    order_result = executor.place_order(symbol, 'buy', position_size, current_price)
-                                    if order_result:
-                                        logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                        # Record trade to prevent duplicates
-                                        trading_loop.recent_trades[trade_key] = current_time_ms
-                                        # Small delay to ensure trade completion
-                                        time.sleep(0.5)
-                                    else:
-                                        logger.error(f"❌ [FAIL] Failed to execute BUY order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
-                                elif signal == 'SELL':
-                                    order_result = executor.place_order(symbol, 'sell', position_size, current_price)
-                                    if order_result:
-                                        logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
-                                        # Record trade to prevent duplicates
-                                        trading_loop.recent_trades[trade_key] = current_time_ms
-                                        # Small delay to ensure trade completion
-                                        time.sleep(0.5)
-                                    else:
-                                        logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
+                                    # Fallback to strategy calculation with enforced leverage
+                                    leverage = max(base_leverage, 50.0)  # Ensure minimum x50
+                                    balance_info = executor.get_balance()
+                                    position_size = active_strategy.calculate_position_size(
+                                        data, 
+                                        current_price, 
+                                        available_capital=available_balance, 
+                                        leverage=leverage, 
+                                        signal_confidence=confidence
+                                    )
+                                    logger.info(f"⚡ ENFORCED: Leverage {leverage}x, Strategy sizing used")
+                            except Exception as e:
+                                logger.error(f"Error in position size calculation: {e}")
+                                # Emergency fallback position size with proper type conversion
+                                try:
+                                    safe_balance = float(available_balance) if available_balance is not None else 1000.0
+                                    safe_price = float(current_price) if current_price is not None else 97000.0
+                                    position_size = min(0.001, safe_balance / safe_price * 0.05)  # REDUCED from 0.1 to 0.05
+                                    logger.warning(f"🚨 Using emergency position size: {position_size:.6f}")
+                                except Exception as calc_error:
+                                    logger.error(f"❌ Emergency calculation failed: {calc_error}")
+                                    logger.error(f"   available_balance: {available_balance} (type: {type(available_balance)})")
+                                    logger.error(f"   current_price: {current_price} (type: {type(current_price)})")
+                                    position_size = 0.001  # Ultra-safe fallback
+                                    logger.warning(f"🚨 Using ultra-safe fallback position size: {position_size:.6f}")
+                            
+                            # Position size calculated - ready for execution
+                            
+                            # Emergency check - force minimum position size if zero
+                            if position_size <= 0:
+                                try:
+                                    safe_balance = float(available_balance) if available_balance is not None else 1000.0
+                                    safe_price = float(current_price) if current_price is not None else 97000.0
+                                    position_size = min(0.001, safe_balance / safe_price * 0.05)  # REDUCED
+                                    logger.warning(f"🚨 Position size was zero, forced to: {position_size:.6f}")
+                                except Exception as e:
+                                    logger.error(f"❌ Zero position size fix failed: {e}")
+                                    position_size = 0.001  # Ultra-safe fallback
+                                    logger.warning(f"🚨 Using ultra-safe position size: {position_size:.6f}")
+
+                            logger.info(f"🎯 DYNAMIC x50+ EXECUTION: {signal} order - Price: ${current_price:.2f}, Size: {position_size:.6f}, Balance: ${available_balance:.2f}, Leverage: {leverage}x")
+                            
+                            # DUPLICATE TRADE PREVENTION
+                            trade_key = f"{signal}_{symbol}_{current_price:.2f}_{position_size:.6f}"
+                            current_time_ms = int(time.time() * 1000)
+                            
+                            # Skip if same trade executed within last 30 seconds
+                            if hasattr(trading_loop, 'recent_trades'):
+                                if trading_loop.recent_trades.get(trade_key, 0) + 30000 > current_time_ms:
+                                    logger.warning(f"🚫 DUPLICATE PREVENTED: {trade_key}")
+                                    continue
+                            else:
+                                trading_loop.recent_trades = {}
+                            
+                            # Execute order with new method
+                            logger.info(f"🎯 ORDER ATTEMPT: {signal} | Size: {position_size:.6f} | Price: ${current_price:.2f}")
+                            
+                            if signal == 'BUY':
+                                order_result = executor.place_order(symbol, 'buy', position_size, current_price)
+                                if order_result:
+                                    logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    # Record trade to prevent duplicates
+                                    trading_loop.recent_trades[trade_key] = current_time_ms
+                                    # Small delay to ensure trade completion
+                                    time.sleep(0.5)
+                                else:
+                                    logger.error(f"❌ [FAIL] Failed to execute BUY order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
+                            elif signal == 'SELL':
+                                order_result = executor.place_order(symbol, 'sell', position_size, current_price)
+                                if order_result:
+                                    logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    # Record trade to prevent duplicates
+                                    trading_loop.recent_trades[trade_key] = current_time_ms
+                                    # Small delay to ensure trade completion
+                                    time.sleep(0.5)
+                                else:
+                                    logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
                             else:
                                 logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)")
                         else:

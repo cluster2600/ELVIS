@@ -15,12 +15,26 @@ from pathlib import Path
 import argparse
 import torch
 import torch.distributed as dist
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import json
 import signal
 from typing import Dict, Optional, Union
 from types import SimpleNamespace
+
+# Handle TensorBoard import with NumPy compatibility
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError as e:
+    print(f"Warning: TensorBoard import failed: {e}")
+    # Mock SummaryWriter for compatibility
+    class MockSummaryWriter:
+        def __init__(self, log_dir=None):
+            pass
+        def add_scalar(self, *args, **kwargs):
+            pass
+        def close(self):
+            pass
+    SummaryWriter = MockSummaryWriter
 
 # Add necessary paths
 project_root = str(Path(__file__).parent.parent)
@@ -34,6 +48,7 @@ from utils.logging_utils import setup_logger
 from utils.monitoring import TrainingMonitor
 from trading.utils.checkpoint import CheckpointManager
 from training.models.evaluator import Evaluator  # Import for reference
+from training.data.trade_history_processor import TradeHistoryProcessor  # Import trade history processor
 
 class TrainingInterrupt(Exception):
     pass
@@ -50,6 +65,7 @@ def parse_args():
     parser.add_argument('--distributed', action='store_true', help='Enable distributed training')
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--include-trade-history', action='store_true', help='Include trade history from database')
     return parser.parse_args()
 
 class TrainingPipeline:
@@ -129,13 +145,63 @@ class TrainingPipeline:
         self.writer = SummaryWriter(log_dir=str(Path(self.config['log_dir']) / 'tensorboard'))
 
     def _load_and_prepare_data(self):
+        # Load original market data
         self.data = pd.read_csv(self.args.data) if self.args.data.endswith('.csv') else pd.read_parquet(self.args.data)
-        self.logger.info(f"Loaded data with shape: {self.data.shape}")
+        self.logger.info(f"Loaded market data with shape: {self.data.shape}")
+        
+        # Load and integrate trade history if requested
+        if getattr(self.args, 'include_trade_history', False):
+            self.logger.info("📊 Integrating trade history from database...")
+            try:
+                trade_processor = TradeHistoryProcessor(self.logger)
+                trade_features, trade_targets = trade_processor.process_for_training(limit=5000)
+                
+                if not trade_features.empty:
+                    self.logger.info(f"✅ Loaded {len(trade_features)} trade history samples")
+                    self.logger.info(f"📈 Trade features: {len(trade_features.columns)} columns")
+                    self.logger.info(f"🎯 Trade targets: {len(trade_targets.columns)} columns")
+                    
+                    # Save trade data for reference
+                    trade_processor.save_processed_data(trade_features, trade_targets, 'data/processed/trade_history')
+                    
+                    # Add trade history features to config for model training
+                    self.config['trade_history_features'] = list(trade_features.columns)
+                    self.config['trade_history_targets'] = list(trade_targets.columns)
+                    self.config['trade_history_samples'] = len(trade_features)
+                    
+                    # Store trade data for model training
+                    self.trade_features = trade_features
+                    self.trade_targets = trade_targets
+                    
+                    self.logger.info("✅ Trade history integration completed successfully")
+                else:
+                    self.logger.warning("⚠️ No trade history data available")
+                    self.trade_features = pd.DataFrame()
+                    self.trade_targets = pd.DataFrame()
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Error integrating trade history: {e}")
+                self.trade_features = pd.DataFrame()
+                self.trade_targets = pd.DataFrame()
+        else:
+            self.logger.info("📊 Skipping trade history integration (not requested)")
+            self.trade_features = pd.DataFrame()
+            self.trade_targets = pd.DataFrame()
+        
+        # Prepare data for model training
         self.X, self.y = self.model_trainer.prepare_data(self.data)
+        
         # Validate shapes of X and y
         if self.X.size == 0 or self.y.size == 0:
             raise ValueError("Feature matrix X or target vector y is empty after data preparation.")
         self.logger.info(f"Feature matrix X shape: {self.X.shape}, Target vector y shape: {self.y.shape}")
+        
+        # Log trade history integration status
+        if not self.trade_features.empty:
+            self.logger.info(f"🔗 Trade history features available: {self.trade_features.shape}")
+            self.logger.info(f"🔗 Trade history targets available: {self.trade_targets.shape}")
+        else:
+            self.logger.info("🔗 No trade history features integrated")
 
     def _create_data_loaders(self):
         self.train_loader, self.val_loader = self.model_trainer.create_data_loaders(self.X, self.y, self.config['batch_size'])
@@ -181,9 +247,38 @@ class TrainingPipeline:
         # Fix: Pass all required arguments to Evaluator
         args_namespace = SimpleNamespace(env=None, eval_gap=500, eval_times=10, target_return=200, cwd=self.args.output)
         evaluator = Evaluator(cwd=self.args.output, agent_id=0, eval_env=None, args=args_namespace)  # Using placeholder for agent_id and eval_env
-        ensemble_models = self.model_trainer.load_ensemble()
-        transformer_metrics = {name: evaluator.evaluate(model, self.X, self.y) for name, model in ensemble_models.items()}
-        rl_metrics = rl_agents.evaluate(self.X, self.y) if hasattr(rl_agents, 'evaluate') else {}
+        
+        try:
+            ensemble_models = self.model_trainer.load_ensemble()
+            self.logger.info(f"Loaded {len(ensemble_models)} ensemble models for evaluation")
+            
+            transformer_metrics = {}
+            for name, model in ensemble_models.items():
+                try:
+                    metrics = evaluator.evaluate(model, self.X, self.y)
+                    transformer_metrics[name] = metrics
+                    self.logger.info(f"Evaluated model {name}: {metrics}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to evaluate model {name}: {e}")
+                    transformer_metrics[name] = {"error": str(e)}
+                    
+        except Exception as e:
+            self.logger.warning(f"Failed to load ensemble models: {e}")
+            transformer_metrics = {"error": "Failed to load ensemble models", "details": str(e)}
+        
+        # Evaluate RL agents
+        try:
+            rl_metrics = rl_agents.evaluate(self.X, self.y) if hasattr(rl_agents, 'evaluate') else {"status": "no_evaluate_method"}
+        except Exception as e:
+            self.logger.warning(f"Failed to evaluate RL agents: {e}")
+            rl_metrics = {"error": "RL evaluation failed", "details": str(e)}
+        
+        # Save results with fallback content
+        if not transformer_metrics:
+            transformer_metrics = {"status": "no_models_evaluated", "timestamp": str(datetime.now())}
+        if not rl_metrics:
+            rl_metrics = {"status": "no_rl_evaluation", "timestamp": str(datetime.now())}
+            
         evaluator.save_results(transformer_metrics, 'transformer_evaluation.json')
         evaluator.save_results(rl_metrics, 'rl_agents_evaluation.json')
         return transformer_metrics, rl_metrics

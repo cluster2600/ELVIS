@@ -9,6 +9,7 @@ import os
 from typing import Any, Optional, Union
 import redis
 from redis.exceptions import ConnectionError, TimeoutError
+from .secrets_manager import get_enhanced_secrets_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +29,39 @@ class RedisCache:
             password: Redis password (optional)
             decode_responses: Whether to decode responses to strings
         """
-        self.host = host or os.getenv('REDIS_HOST', 'localhost')
-        self.port = int(port or os.getenv('REDIS_PORT', 6379))
-        self.db = int(db or os.getenv('REDIS_DB', 0))
-        self.password = password or os.getenv('REDIS_PASSWORD', None)
+        # Use enhanced secrets manager for Redis credentials
+        secrets_manager = get_enhanced_secrets_manager()
+        redis_creds = secrets_manager.get_redis_credentials()
+        
+        self.host = host or redis_creds.get('host', 'localhost')
+        self.port = int(port or redis_creds.get('port', 6379))
+        self.db = int(db or redis_creds.get('db', 0))
+        self.password = password or redis_creds.get('password')
         
         try:
-            self.redis_client = redis.Redis(
-                host=self.host,
-                port=self.port,
-                db=self.db,
-                password=self.password,
-                decode_responses=decode_responses,
-                socket_timeout=5,
-                socket_connect_timeout=5,
-                retry_on_timeout=True
-            )
+            # Only include password if it's actually provided
+            redis_params = {
+                'host': self.host,
+                'port': self.port,
+                'db': self.db,
+                'decode_responses': decode_responses,
+                'socket_timeout': 5,
+                'socket_connect_timeout': 5,
+                'retry_on_timeout': True
+            }
+            
+            if self.password:  # Only add password if it's not None/empty
+                redis_params['password'] = self.password
+                logger.debug(f"Connecting to Redis with authentication at {self.host}:{self.port}")
+            else:
+                logger.debug(f"Connecting to Redis without authentication at {self.host}:{self.port}")
+            
+            self.redis_client = redis.Redis(**redis_params)
+            
             # Test connection
             self.redis_client.ping()
-            logger.info(f"Connected to Redis at {self.host}:{self.port}")
+            auth_info = "with authentication" if self.password else "without authentication"
+            logger.info(f"Connected to Redis {auth_info} at {self.host}:{self.port}")
         except (ConnectionError, TimeoutError) as e:
             logger.warning(f"Failed to connect to Redis: {e}. Cache will be disabled.")
             self.redis_client = None

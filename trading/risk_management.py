@@ -38,16 +38,16 @@ class RiskManager:
         self.trades_today = 0
         self.daily_pnl = 0.0
         
-        # DYNAMIC TARGETS - Adjust based on performance
-        self.daily_profit_target_usd = 2000.0  # Starting target
-        self.daily_loss_limit_usd = -300.0  # Starting limit
-        self.cooldown_period = 0  # No cooldown - maximum trading speed
-        self.max_trades_per_day = 500  # High frequency for x50 leverage
+        # AGGRESSIVE TARGETS - Optimize for 100x leverage profits
+        self.daily_profit_target_usd = 5000.0  # Aggressive target with 100x leverage
+        self.daily_loss_limit_usd = -1000.0  # Higher tolerance for 100x volatility  
+        self.cooldown_period = 0  # No cooldown - maximum speed for scalping profits
+        self.max_trades_per_day = 1000  # High frequency for 100x leverage opportunities
         
         # DYNAMIC RISK FACTORS
         self.volatility_factor = 1.0  # Adjusts based on market volatility
         self.performance_factor = 1.0  # Adjusts based on recent performance
-        self.leverage_target = 50.0  # MINIMUM x50 leverage
+        self.leverage_target = 100.0  # Maximum 100x leverage for profit amplification
         self.market_sentiment = 'neutral'  # bullish, bearish, neutral
         self.risk_appetite = 'aggressive'  # conservative, moderate, aggressive
         
@@ -134,9 +134,9 @@ class RiskManager:
             self.dynamic_stop_loss_pct = self.base_stop_loss_pct * self.volatility_factor * self.performance_factor
             self.dynamic_take_profit_pct = self.base_take_profit_pct * self.volatility_factor * (2 - self.performance_factor)
             
-            # Ensure minimum thresholds for x50 leverage
-            self.dynamic_stop_loss_pct = max(0.005, min(0.02, self.dynamic_stop_loss_pct))  # 0.5% to 2%
-            self.dynamic_take_profit_pct = max(0.01, min(0.04, self.dynamic_take_profit_pct))  # 1% to 4%
+            # Ensure reasonable thresholds for reduced leverage
+            self.dynamic_stop_loss_pct = max(0.01, min(0.05, self.dynamic_stop_loss_pct))  # 1% to 5%
+            self.dynamic_take_profit_pct = max(0.02, min(0.08, self.dynamic_take_profit_pct))  # 2% to 8%
             
             self.logger.info(f"🔧 Dynamic Stop Loss: {self.dynamic_stop_loss_pct:.1%}, Take Profit: {self.dynamic_take_profit_pct:.1%}")
             
@@ -160,8 +160,8 @@ class RiskManager:
         # Ensure minimum leverage
         effective_leverage = self.enforce_minimum_leverage(leverage)
         
-        # Base position size (aggressive for high leverage)
-        base_risk = 0.03 if self.risk_appetite == 'aggressive' else 0.02  # 2-3% of capital
+        # Base position size (conservative due to low win rate)
+        base_risk = 0.01 if self.risk_appetite == 'aggressive' else 0.005  # 0.5-1% of capital (REDUCED)
         
         # Adjust for confidence
         confidence_multiplier = signal_confidence if signal_confidence > 0.5 else 0.5
@@ -507,5 +507,7 @@ class RiskManager:
         if self.daily_pnl <= self.daily_loss_limit_usd:
             self.logger.warning("Daily loss limit reached.")
             return False
-        # Cooldown removed for maximum trading speed
+        
+        # COOLDOWN COMPLETELY REMOVED - No delays whatsoever
+        
         return True

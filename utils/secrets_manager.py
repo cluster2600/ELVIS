@@ -107,7 +107,7 @@ class EnhancedSecretsManager:
         if self.vault_client:
             try:
                 vault_path = self._category_to_vault_path(category)
-                field_name = name  # Keep original field name for vault
+                field_name = name.lower().replace('_', '-')  # Convert to vault format
                 value = self.vault_client.get_secret(vault_path, field_name)
                 if value:
                     self._secrets_cache[cache_key] = str(value)

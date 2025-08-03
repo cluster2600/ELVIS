@@ -45,9 +45,12 @@ pip install -r requirements.txt
 export PYTHONPATH=$(pwd):$PYTHONPATH
 log "🛠️ PYTHONPATH set to: $PYTHONPATH"
 
-log "🎯 Starting model training..."
-log "➡️ Command: python training/train_models.py --config training/config/model_config.yaml"
-python training/train_models.py --config training/config/model_config.yaml
+log "📊 Processing trade history from database..."
+python training/data/trade_history_processor.py
+
+log "🎯 Starting model training with trade history..."
+log "➡️ Command: python training/train_models.py --config training/config/model_config.yaml --include-trade-history"
+python training/train_models.py --config training/config/model_config.yaml --include-trade-history
 
 log "✅ Model training completed successfully."
 

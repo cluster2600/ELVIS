@@ -351,6 +351,13 @@ class TradingEnv(gym.Env):
         self.data = data
         self.initial_balance = initial_balance
         self.transaction_fee = transaction_fee
+        self.env_num = 1  # Required by DRL agents
+        self.max_step = len(data) - 1  # Maximum number of steps in environment
+        self.env_name = 'TradingEnv'  # Environment name for DRL agents
+        self.state_dim = data.shape[1] + 2  # State dimension (data features + balance + position)
+        self.action_dim = 3  # Action dimension (0: hold, 1: buy, 2: sell)
+        self.if_discrete = True  # Discrete action space (0, 1, 2)
+        self.target_return = 10000.0  # Target return for the environment
         
         # Define action and observation space
         self.action_space = spaces.Discrete(3)  # 0: hold, 1: buy, 2: sell

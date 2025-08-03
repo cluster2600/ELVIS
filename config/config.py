@@ -46,6 +46,14 @@ TRADING_CONFIG = {
     'COOLDOWN': 0                    # No cooldown - maximum trading speed
 }
 
+# Paper Trading Configuration
+PAPER_TRADING_CONFIG = {
+    'INITIAL_USDT_BALANCE': 1000.0,  # Starting USDT balance
+    'INITIAL_BNB_BALANCE': 1000.0,   # Starting BNB balance
+    'ENABLE_MULTI_ASSET': True,      # Enable trading multiple assets
+    'TRACK_PERFORMANCE': True,       # Track performance metrics
+}
+
 LOGGING_CONFIG = {
     'LOG_LEVEL': 'DEBUG',
     'LOG_TO_FILE': True,
@@ -58,3 +66,29 @@ POSTGRES_CONFIG = {
     'PASSWORD': 'elvis_password',
     'DBNAME': 'elvis_trading'
 }
+
+
+
+
+# BNB Trading and Fee Optimization Configuration
+BNB_CONFIG = {
+    'ENABLE_BNB_FEES': True,           # Use BNB to pay trading fees (10% discount on futures, 25% on spot)
+    'BNB_TRADING_ENABLED': True,       # Allow trading BNB pairs
+    'MIN_BNB_BALANCE': 0.1,           # Minimum BNB balance to maintain for fees
+    'AUTO_BUY_BNB': True,             # Automatically buy BNB when balance is low
+    'MAX_BNB_BUY_PERCENT': 5.0,       # Max % of portfolio to spend on BNB auto-buy
+    'BNB_SYMBOLS': ['BNBUSDT', 'BNBBTC'],  # Available BNB trading pairs
+    'BNB_REBALANCE_THRESHOLD': 0.05,  # Rebalance when BNB balance drops below this
+}
+
+
+
+# Multi-Asset Trading Configuration  
+SYMBOLS_CONFIG = {
+    'PRIMARY_SYMBOLS': ['BTCUSDT', 'BNBUSDT'],     # Primary trading pairs
+    'SECONDARY_SYMBOLS': ['ETHUSDT', 'ADAUSDT'],    # Secondary pairs (optional)
+    'STABLE_PAIRS': ['BTCUSDT', 'ETHUSDT'],        # Stable, high-liquidity pairs
+    'FEE_OPTIMIZATION_PAIRS': ['BNBUSDT'],         # Pairs for fee optimization
+    'MAX_CONCURRENT_PAIRS': 3,                     # Maximum pairs to trade simultaneously
+}
+
