@@ -1,0 +1,738 @@
+---
+- name: Deploy ELVIS Trading Bot Containerized Infrastructure
+  hosts: localhost
+  vars:
+    project_name: "ELVIS"
+    project_user: "{{ ansible_user_id }}"
+    project_dir: "{{ playbook_dir }}/.."
+    docker_compose_version: "v2.24.0"
+    
+  tasks:
+    # System Prerequisites
+    - name: Update package cache (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      become: yes
+      
+    - name: Update package cache (CentOS/RHEL)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+      become: yes
+      
+    - name: Install system dependencies (Ubuntu/Debian)
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - apt-transport-https
+          - python3
+          - python3-pip
+          - python3-venv
+          - jq
+          - unzip
+        state: present
+      when: ansible_os_family == "Debian"
+      become: yes
+      
+    - name: Install system dependencies (CentOS/RHEL)
+      yum:
+        name:
+          - curl
+          - wget
+          - git
+          - ca-certificates
+          - python3
+          - python3-pip
+          - jq
+          - unzip
+        state: present
+      when: ansible_os_family == "RedHat"
+      become: yes
+      
+    - name: Install system dependencies (macOS)
+      community.general.homebrew:
+        name:
+          - curl
+          - wget
+          - git
+          - python@3.11
+          - jq
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    # Docker Installation
+    - name: Add Docker GPG key (Ubuntu/Debian)
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+      become: yes
+      
+    - name: Add Docker repository (Ubuntu/Debian)
+      apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+      become: yes
+      
+    - name: Install Docker (Ubuntu/Debian)
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      become: yes
+      
+    - name: Add Docker Yum repository (CentOS/RHEL)
+      yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable
+        baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+        enabled: yes
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
+      when: ansible_os_family == "RedHat"
+      become: yes
+      
+    - name: Install Docker (CentOS/RHEL)
+      yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      when: ansible_os_family == "RedHat"
+      become: yes
+      
+    - name: Install Docker Desktop (macOS)
+      community.general.homebrew_cask:
+        name: docker
+        state: present
+      when: ansible_os_family == "Darwin"
+      
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: ansible_os_family != "Darwin"
+      become: yes
+      
+    - name: Add user to docker group
+      user:
+        name: "{{ project_user }}"
+        groups: docker
+        append: yes
+      when: ansible_os_family != "Darwin"
+      become: yes
+      notify: restart_shell_session
+      
+    - name: Install Docker Compose (fallback for older systems)
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-{{ ansible_system }}-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      when: ansible_os_family != "Darwin"
+      become: yes
+      ignore_errors: yes
+      
+    # Project Directory Setup
+    - name: Ensure project directory exists
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create necessary project subdirectories
+      file:
+        path: "{{ project_dir }}/{{ item }}"
+        state: directory
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      loop:
+        - logs
+        - data/processed
+        - models
+        - grafana/provisioning/datasources
+        - grafana/provisioning/dashboards  
+        - grafana/dashboards
+        - loki
+        - promtail
+        
+    # Configuration Files Setup
+    - name: Create Prometheus configuration
+      copy:
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          rule_files:
+            # - "first_rules.yml"
+            # - "second_rules.yml"
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+                
+            - job_name: 'elvis'
+              static_configs:
+                - targets: ['host.docker.internal:5050']
+              metrics_path: '/metrics'
+              scheme: 'http'
+              scrape_interval: 10s
+        dest: "{{ project_dir }}/prometheus.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create Loki configuration
+      copy:
+        content: |
+          auth_enabled: false
+
+          server:
+            http_listen_port: 3100
+            grpc_listen_port: 9096
+
+          common:
+            path_prefix: /loki
+            storage:
+              filesystem:
+                chunks_directory: /loki/chunks
+                rules_directory: /loki/rules
+            replication_factor: 1
+            ring:
+              instance_addr: '127.0.0.1'
+              kvstore:
+                store: inmemory
+
+          query_range:
+            results_cache:
+              cache:
+                embedded_cache:
+                  enabled: true
+                  max_size_mb: 100
+
+          schema_config:
+            configs:
+              - from: 2020-10-24
+                store: boltdb-shipper
+                object_store: filesystem
+                schema: v11
+                index:
+                  prefix: index_
+                  period: 24h
+
+          ruler:
+            alertmanager_url: http://localhost:9093
+
+          limits_config:
+            retention_period: 168h  # 7 days
+            ingestion_rate_mb: 64
+            ingestion_burst_size_mb: 128
+            max_query_parallelism: 32
+
+          chunk_store_config:
+            max_look_back_period: 0s
+
+          table_manager:
+            retention_deletes_enabled: true
+            retention_period: 168h
+        dest: "{{ project_dir }}/loki/config.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create Promtail configuration
+      copy:
+        content: |
+          server:
+            http_listen_port: 9080
+            grpc_listen_port: 0
+
+          positions:
+            filename: /tmp/positions.yaml
+
+          clients:
+            - url: http://loki:3100/loki/api/v1/push
+
+          scrape_configs:
+            - job_name: elvis
+              static_configs:
+                - targets:
+                    - localhost
+                  labels:
+                    job: elvis
+                    service: trading-bot
+                    __path__: /var/log/elvis/elvis.log
+              pipeline_stages:
+                - regex:
+                    expression: '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (?P<level>\w+) - (?P<message>.*)'
+                - timestamp:
+                    source: timestamp
+                    format: '2006-01-02 15:04:05,000'
+                - labels:
+                    level:
+                - output:
+                    source: message
+                    
+            - job_name: system
+              static_configs:
+                - targets:
+                    - localhost
+                  labels:
+                    job: system
+                    __path__: /var/log/elvis/*.log
+        dest: "{{ project_dir }}/promtail/config.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create Grafana Prometheus datasource configuration
+      copy:
+        content: |
+          apiVersion: 1
+
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              access: proxy
+              url: http://prometheus:9090
+              isDefault: true
+              editable: true
+              basicAuth: false
+              jsonData:
+                httpMethod: POST
+                queryTimeout: 60s
+                timeInterval: 10s
+        dest: "{{ project_dir }}/grafana/provisioning/datasources/prometheus.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create Grafana Loki datasource configuration
+      copy:
+        content: |
+          apiVersion: 1
+
+          datasources:
+            - name: Loki
+              type: loki
+              access: proxy
+              url: http://loki:3100
+              isDefault: false
+              editable: true
+              basicAuth: false
+              jsonData:
+                maxLines: 1000
+                timeout: 60
+        dest: "{{ project_dir }}/grafana/provisioning/datasources/loki.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create Grafana dashboard provisioning configuration
+      copy:
+        content: |
+          apiVersion: 1
+
+          providers:
+            - name: 'default'
+              orgId: 1
+              folder: ''
+              type: file
+              disableDeletion: false
+              updateIntervalSeconds: 10
+              allowUiUpdates: true
+              options:
+                path: /var/lib/grafana/dashboards
+        dest: "{{ project_dir }}/grafana/provisioning/dashboards/dashboard.yml"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0644'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    # Python Environment Setup (for native ELVIS bot)
+    - name: Create Python virtual environment
+      command: python3 -m venv "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      args:
+        creates: "{{ project_dir }}/venv"
+        
+    - name: Upgrade pip in virtual environment
+      pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Install Python dependencies from requirements.txt
+      pip:
+        requirements: "{{ project_dir }}/requirements.txt"
+        virtualenv: "{{ project_dir }}/venv"
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes
+      
+    # Environment Configuration
+    - name: Create .env file from template
+      copy:
+        src: "{{ project_dir }}/.env.example"
+        dest: "{{ project_dir }}/.env"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0600'
+        remote_src: yes
+        force: no  # Don't overwrite existing .env
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes
+      
+    # Container Deployment
+    - name: Stop any existing containers
+      shell: |
+        cd "{{ project_dir }}"
+        docker-compose down --remove-orphans || docker compose down --remove-orphans || true
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes
+      
+    - name: Pull latest container images
+      shell: |
+        cd "{{ project_dir }}"
+        docker-compose pull || docker compose pull || true
+      become_user: "{{ project_user }}"
+      become: no
+      ignore_errors: yes
+      
+    - name: Start containerized infrastructure (without ELVIS bot)
+      shell: |
+        cd "{{ project_dir }}"
+        docker-compose up -d postgres redis prometheus grafana loki promtail || \
+        docker compose up -d postgres redis prometheus grafana loki promtail
+      become_user: "{{ project_user }}"
+      become: no
+      register: container_start
+      
+    - name: Wait for PostgreSQL to be ready
+      wait_for:
+        port: 5432
+        host: localhost
+        timeout: 60
+        delay: 5
+        
+    - name: Wait for Redis to be ready
+      wait_for:
+        port: 6379
+        host: localhost
+        timeout: 30
+        delay: 2
+        
+    - name: Wait for Prometheus to be ready
+      wait_for:
+        port: 9090
+        host: localhost
+        timeout: 30
+        delay: 5
+        
+    - name: Wait for Grafana to be ready
+      wait_for:
+        port: 3001
+        host: localhost
+        timeout: 60
+        delay: 10
+        
+    - name: Wait for Loki to be ready
+      wait_for:
+        port: 3100
+        host: localhost
+        timeout: 30
+        delay: 5
+        
+    # Verification
+    - name: Verify container status
+      shell: |
+        cd "{{ project_dir }}"
+        docker-compose ps || docker compose ps
+      become_user: "{{ project_user }}"
+      become: no
+      register: container_status
+      
+    - name: Test Prometheus health
+      uri:
+        url: http://localhost:9090/-/healthy
+        method: GET
+        timeout: 10
+      register: prometheus_health
+      ignore_errors: yes
+      
+    - name: Test Grafana health
+      uri:
+        url: http://localhost:3001/api/health
+        method: GET
+        timeout: 10
+      register: grafana_health
+      ignore_errors: yes
+      
+    - name: Test Loki health
+      uri:
+        url: http://localhost:3100/ready
+        method: GET
+        timeout: 10
+      register: loki_health
+      ignore_errors: yes
+      
+    # Create management scripts
+    - name: Create container management script
+      copy:
+        content: |
+          #!/bin/bash
+          # ELVIS Container Management Script
+          
+          PROJECT_DIR="{{ project_dir }}"
+          
+          case "$1" in
+              start)
+                  echo "🚀 Starting ELVIS monitoring infrastructure..."
+                  cd "$PROJECT_DIR"
+                  docker-compose up -d postgres redis prometheus grafana loki promtail || \
+                  docker compose up -d postgres redis prometheus grafana loki promtail
+                  echo "✅ Containers started"
+                  ;;
+              stop)
+                  echo "🛑 Stopping ELVIS containers..."
+                  cd "$PROJECT_DIR"
+                  docker-compose down || docker compose down
+                  echo "✅ Containers stopped"
+                  ;;
+              restart)
+                  echo "🔄 Restarting ELVIS containers..."
+                  cd "$PROJECT_DIR"
+                  docker-compose restart || docker compose restart
+                  echo "✅ Containers restarted"
+                  ;;
+              status)
+                  echo "📊 Container Status:"
+                  cd "$PROJECT_DIR"
+                  docker-compose ps || docker compose ps
+                  echo ""
+                  echo "🌐 Service URLs:"
+                  echo "  Grafana Dashboard: http://localhost:3001 (admin/admin)"
+                  echo "  Prometheus: http://localhost:9090"
+                  echo "  ELVIS API: http://localhost:5050"
+                  echo "  Loki: http://localhost:3100"
+                  ;;
+              logs)
+                  service=${2:-}
+                  if [ -n "$service" ]; then
+                      echo "📋 Logs for $service:"
+                      cd "$PROJECT_DIR"
+                      docker-compose logs -f "$service" || docker compose logs -f "$service"
+                  else
+                      echo "📋 All container logs:"
+                      cd "$PROJECT_DIR"
+                      docker-compose logs -f || docker compose logs -f
+                  fi
+                  ;;
+              update)
+                  echo "🔄 Updating container images..."
+                  cd "$PROJECT_DIR"
+                  docker-compose pull || docker compose pull
+                  docker-compose up -d || docker compose up -d
+                  echo "✅ Containers updated"
+                  ;;
+              clean)
+                  echo "🧹 Cleaning up ELVIS containers and volumes..."
+                  cd "$PROJECT_DIR"
+                  docker-compose down -v || docker compose down -v
+                  docker system prune -f
+                  echo "✅ Cleanup complete"
+                  ;;
+              *)
+                  echo "ELVIS Container Management"
+                  echo "Usage: $0 {start|stop|restart|status|logs [service]|update|clean}"
+                  echo ""
+                  echo "Services: postgres, redis, prometheus, grafana, loki, promtail"
+                  echo ""
+                  echo "Examples:"
+                  echo "  $0 start          # Start all monitoring containers"
+                  echo "  $0 status         # Show container status and URLs"
+                  echo "  $0 logs grafana   # Show Grafana logs"
+                  echo "  $0 restart        # Restart all containers"
+                  echo "  $0 clean          # Stop and remove all containers/volumes"
+                  exit 1
+                  ;;
+          esac
+        dest: "{{ project_dir }}/manage_containers.sh"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    - name: Create ELVIS startup script for hybrid mode
+      copy:
+        content: |
+          #!/bin/bash
+          # ELVIS Hybrid Startup Script - Containers + Native Bot
+          
+          PROJECT_DIR="{{ project_dir }}"
+          
+          echo "🚀 Starting ELVIS Trading Bot (Hybrid Mode)"
+          echo "================================================"
+          
+          # Start containerized infrastructure
+          echo "1. Starting monitoring infrastructure..."
+          cd "$PROJECT_DIR"
+          ./manage_containers.sh start
+          
+          # Wait for services to be ready
+          echo "2. Waiting for services to initialize..."
+          sleep 10
+          
+          # Check service health
+          echo "3. Checking service health..."
+          
+          # Check PostgreSQL
+          if nc -z localhost 5432; then
+              echo "   ✅ PostgreSQL ready"
+          else
+              echo "   ❌ PostgreSQL not ready"
+              exit 1
+          fi
+          
+          # Check Redis
+          if nc -z localhost 6379; then
+              echo "   ✅ Redis ready"
+          else
+              echo "   ❌ Redis not ready"  
+              exit 1
+          fi
+          
+          # Check Prometheus
+          if curl -s http://localhost:9090/-/healthy > /dev/null; then
+              echo "   ✅ Prometheus ready"
+          else
+              echo "   ❌ Prometheus not ready"
+          fi
+          
+          # Check Grafana
+          if curl -s http://localhost:3001/api/health > /dev/null; then
+              echo "   ✅ Grafana ready"
+          else
+              echo "   ❌ Grafana not ready"
+          fi
+          
+          echo ""
+          echo "4. Starting native ELVIS trading bot..."
+          
+          # Activate virtual environment and start ELVIS
+          source "$PROJECT_DIR/venv/bin/activate"
+          export VAULT_ADDR=http://127.0.0.1:8200
+          
+          # Start ELVIS in paper trading mode
+          python "$PROJECT_DIR/main.py" --mode paper --log-level INFO
+          
+        dest: "{{ project_dir }}/start_elvis_hybrid.sh"
+        owner: "{{ project_user }}"
+        group: "{{ project_user }}"
+        mode: '0755'
+      become_user: "{{ project_user }}"
+      become: no
+      
+    # Final Information Display
+    - name: Display deployment summary
+      debug:
+        msg: |
+          
+          🎯 ELVIS Containerized Infrastructure Deployment Complete!
+          
+          📊 Deployed Services:
+          ├── PostgreSQL Database    → http://localhost:5432
+          ├── Redis Cache           → http://localhost:6379  
+          ├── Prometheus Metrics    → http://localhost:9090
+          ├── Grafana Dashboard     → http://localhost:3001 (admin/admin)
+          ├── Loki Log Aggregation  → http://localhost:3100
+          └── Promtail Log Shipper  → (internal service)
+          
+          🚀 Quick Start Commands:
+          
+          1. 📊 View Infrastructure Status:
+             cd {{ project_dir }}
+             ./manage_containers.sh status
+          
+          2. 🤖 Start ELVIS Trading Bot (Hybrid Mode):
+             cd {{ project_dir }}
+             ./start_elvis_hybrid.sh
+          
+          3. 📈 Access Grafana Dashboard:
+             Open: http://localhost:3001
+             Login: admin/admin
+             
+          4. 🔍 View Container Logs:
+             ./manage_containers.sh logs [service_name]
+          
+          📂 Management Scripts:
+          ├── manage_containers.sh     → Container lifecycle management
+          ├── start_elvis_hybrid.sh    → Start full ELVIS system
+          └── docker-compose.yml       → Infrastructure definition
+          
+          📚 Documentation:
+          ├── ELVIS_MONITORING_SYSTEM_COMPLETE.md  → Complete system guide
+          ├── ELVIS_SYSTEM_ARCHITECTURE.md         → Architecture diagrams
+          └── README.md                             → Project overview
+          
+          🔧 Configuration Files:
+          ├── prometheus.yml          → Metrics collection config
+          ├── loki/config.yml         → Log aggregation config
+          ├── promtail/config.yml     → Log shipping config
+          └── grafana/provisioning/   → Dashboard configs
+          
+          ✅ Infrastructure Status:
+          {% if prometheus_health.status == 200 %}✅{% else %}❌{% endif %} Prometheus: {{ 'Healthy' if prometheus_health.status == 200 else 'Unhealthy' }}
+          {% if grafana_health.status == 200 %}✅{% else %}❌{% endif %} Grafana: {{ 'Healthy' if grafana_health.status == 200 else 'Unhealthy' }}
+          {% if loki_health.status == 200 %}✅{% else %}❌{% endif %} Loki: {{ 'Ready' if loki_health.status == 200 else 'Not Ready' }}
+          
+          🎯 Next: Run './start_elvis_hybrid.sh' to begin trading!
+          
+  handlers:
+    - name: restart_shell_session
+      debug:
+        msg: "Please logout and login again to apply Docker group changes"

@@ -1,0 +1,323 @@
+{
+  "id": null,
+  "uid": "elvis-simple-working",
+  "title": "ELVIS Simple Working Dashboard",
+  "description": "Simplified ELVIS dashboard with hardcoded working queries",
+  "tags": ["elvis", "trading", "simple"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "5s",
+  "liveNow": true,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": {"h": 3, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "html",
+        "content": "<div style='text-align: center; font-family: monospace; background: linear-gradient(45deg, #000000 0%, #0a0a23 25%, #1a1a2e 50%, #16213e 75%, #0f3460 100%); padding: 12px; border-radius: 12px; border: 3px solid rgba(0, 255, 65, 0.8); box-shadow: 0 0 25px rgba(0, 255, 65, 0.4);'><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 8px;'>███████╗██╗     ██╗   ██╗██╗███████╗</div><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 8px;'>██╔════╝██║     ██║   ██║██║██╔════╝</div><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 8px;'>█████╗  ██║     ██║   ██║██║███████╗</div><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 8px;'>██╔══╝  ██║     ██║   ██║██║╚════██║</div><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 8px;'>███████╗███████╗╚██████╔╝██║███████║</div><div style='font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 20px #00ff41, 0 0 40px #00ff41; letter-spacing: 3px; margin-bottom: 12px;'>╚══════╝╚══════╝ ╚═════╝ ╚═╝╚══════╝</div><div style='font-size: 18px; font-weight: bold; color: #ffff00; text-shadow: 0 0 15px #ffff00; animation: pulse 2s infinite; margin-bottom: 6px;'>🔴 ENHANCED LEVERAGED VIRTUAL INVESTMENT SYSTEM 🔴</div><div style='font-size: 16px; color: #00ffff; text-shadow: 0 0 10px #00ffff;'>High-Frequency Trading • Real-Time Analytics • Live Market Data</div></div><style>@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.02); } }</style>"
+      },
+      "transparent": true
+    },
+    {
+      "id": 2,
+      "title": "💰 Live BTC Price",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_current_price{symbol=\"BTCUSDT\"}",
+          "legendFormat": "BTCUSDT",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "rgba(50, 172, 45, 0.97)", "value": null}
+            ]
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "title": "📊 Portfolio Value",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_portfolio_value",
+          "legendFormat": "Portfolio",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "title": "🎯 Win Rate",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_win_rate",
+          "legendFormat": "Win Rate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "unit": "percent",
+          "decimals": 1
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 5,
+      "title": "📈 Total Trades",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_total_trades",
+          "legendFormat": "Total Trades",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "blue", "value": null}
+            ]
+          },
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 6,
+      "title": "🔄 Open Positions",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_open_positions_count",
+          "legendFormat": "Open Positions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "orange", "value": null}
+            ]
+          },
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 7,
+      "title": "⚡ System Status",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 3},
+      "targets": [
+        {
+          "expr": "up{job=\"elvis\"}",
+          "legendFormat": "API Status",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"0": {"text": "❌ OFFLINE", "color": "red"}}, "type": "value"},
+            {"options": {"1": {"text": "✅ ONLINE", "color": "green"}}, "type": "value"}
+          ],
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 8,
+      "title": "📊 BTC/USDT Live Price Chart",
+      "type": "timeseries",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "elvis_current_price{symbol=\"BTCUSDT\"}",
+          "legendFormat": "💰 Live Price",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 3,
+            "pointSize": 6,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "off"}
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "💰 Live Price"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "#FFFF00"}},
+              {"id": "custom.lineWidth", "value": 4},
+              {"id": "custom.fillOpacity", "value": 25}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "visible",
+          "placement": "bottom",
+          "values": ["last", "min", "max"],
+          "calcs": ["lastNotNull", "min", "max"]
+        },
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    }
+  ],
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": true,
+  "style": "dark",
+  "hideControls": false
+}

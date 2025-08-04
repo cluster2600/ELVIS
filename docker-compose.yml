@@ -26,7 +26,7 @@ services:
   elvis-bot:
     build:
       context: .
-      dockerfile: Dockerfile.simple  # Use simpler build for faster deployment
+      dockerfile: Dockerfile.minimal  # Use minimal build for core functionality
     container_name: elvis-trading-bot
     depends_on:
       postgres:
@@ -123,8 +123,37 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     ports:
-      - "3000:3000"
+      - "3001:3000"
     restart: unless-stopped
+    depends_on:
+      - loki
+    networks:
+      - elvis-network
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: elvis-loki
+    volumes:
+      - ./loki/config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - elvis-network
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: elvis-promtail
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml
+      - ./logs:/var/log/elvis
+      - ./elvis_enhanced_metrics.log:/var/log/elvis/elvis.log:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    depends_on:
+      - loki
     networks:
       - elvis-network
 
@@ -140,4 +169,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  loki-data:
     driver: local

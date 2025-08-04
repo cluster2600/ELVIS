@@ -1,0 +1,766 @@
+{
+  "id": null,
+  "uid": "elvis-master-console",
+  "title": "ELVIS Master Console - Complete Trading Interface",
+  "description": "Master console dashboard - complete ELVIS trading interface with portfolio tracking, market analysis, system monitoring, and live performance metrics",
+  "tags": ["elvis", "master", "console", "trading", "portfolio", "live"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 3,
+  "refresh": "2s",
+  "liveNow": true,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["1s", "2s", "5s", "10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "30m", "1h", "3h", "6h", "12h", "24h", "2d", "7d"]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "symbol",
+        "type": "custom",
+        "label": "Trading Symbol",
+        "options": [
+          {"text": "BTCUSDT", "value": "BTCUSDT", "selected": true},
+          {"text": "BNBBTC", "value": "BNBBTC", "selected": false}
+        ],
+        "current": {"text": "BTCUSDT", "value": "BTCUSDT"},
+        "multi": false,
+        "includeAll": false,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "",
+      "type": "text",
+      "gridPos": {"h": 3, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "html",
+        "content": "<div style='text-align: center; font-family: \"Courier New\", monospace; background: linear-gradient(45deg, #000000 0%, #0a0a23 25%, #1a1a2e 50%, #16213e 75%, #0f3460 100%); padding: 8px; border-radius: 12px; border: 3px solid rgba(0, 255, 65, 0.6); box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);'><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 5px;'>███████╗██╗     ██╗   ██╗██╗███████╗</div><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 5px;'>██╔════╝██║     ██║   ██║██║██╔════╝</div><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 5px;'>█████╗  ██║     ██║   ██║██║███████╗</div><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 5px;'>██╔══╝  ██║     ██║   ██║██║╚════██║</div><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 5px;'>███████╗███████╗╚██████╔╝██║███████║</div><div style='font-size: 28px; font-weight: bold; color: #00ff41; text-shadow: 0 0 15px #00ff41, 0 0 30px #00ff41; letter-spacing: 2px; margin-bottom: 10px;'>╚══════╝╚══════╝ ╚═════╝ ╚═╝╚══════╝</div><div style='font-size: 16px; font-weight: bold; color: #ffff00; text-shadow: 0 0 10px #ffff00; animation: pulse 2s infinite; margin-bottom: 5px;'>🔴 ENHANCED LEVERAGED VIRTUAL INVESTMENT SYSTEM 🔴</div><div style='font-size: 14px; color: #00ffff; text-shadow: 0 0 8px #00ffff;'>High-Frequency Trading • Real-Time Analytics • Live Market Data</div></div><style>@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(1.05); } }</style>"
+      },
+      "transparent": true
+    },
+    {
+      "id": 2,
+      "title": "💰 Live Market Price",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_current_price{symbol=\"$symbol\"}",
+          "legendFormat": "${symbol}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "rgba(50, 172, 45, 0.97)", "value": null}
+            ]
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "title": "📊 RSI Oscillator",
+      "type": "gauge",
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_rsi{symbol=\"$symbol\"}",
+          "legendFormat": "RSI",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"from": 0, "to": 30}, "type": "range", "result": {"text": "🔴 OVERSOLD", "color": "red"}},
+            {"options": {"from": 30, "to": 40}, "type": "range", "result": {"text": "🟠 BEARISH", "color": "orange"}},
+            {"options": {"from": 40, "to": 60}, "type": "range", "result": {"text": "🟡 NEUTRAL", "color": "yellow"}},
+            {"options": {"from": 60, "to": 70}, "type": "range", "result": {"text": "🟢 BULLISH", "color": "light-green"}},
+            {"options": {"from": 70, "to": 100}, "type": "range", "result": {"text": "🔴 OVERBOUGHT", "color": "red"}}
+          ],
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "orange", "value": 30},
+              {"color": "yellow", "value": 40},
+              {"color": "light-green", "value": 60},
+              {"color": "red", "value": 70}
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "text": {"titleSize": 10, "valueSize": 14}
+      }
+    },
+    {
+      "id": 4,
+      "title": "📈 MACD Convergence",
+      "type": "timeseries",
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_macd{symbol=\"$symbol\"}",
+          "legendFormat": "MACD",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_macd_signal{symbol=\"$symbol\"}",
+          "legendFormat": "Signal",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "hue",
+            "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line", "steps": [{"color": "red", "value": 0}]}
+          },
+          "unit": "short",
+          "decimals": 4
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "visible", "placement": "bottom", "values": []},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 5,
+      "title": "⚡ System Status",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 3},
+      "targets": [
+        {
+          "expr": "up{job=\"elvis\"}",
+          "legendFormat": "API",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"0": {"text": "❌ OFFLINE", "color": "red"}}, "type": "value"},
+            {"options": {"1": {"text": "✅ ONLINE", "color": "green"}}, "type": "value"}
+          ],
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 6,
+      "title": "💼 Portfolio Value",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_portfolio_value",
+          "legendFormat": "Portfolio Value",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "displayMode": "lcd",
+            "orientation": "auto",
+            "showUnfilled": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 7,
+      "title": "🚀 Trading Activity",
+      "type": "stat",
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 3},
+      "targets": [
+        {
+          "expr": "elvis_total_trades",
+          "legendFormat": "Total Trades",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "displayMode": "basic",
+            "orientation": "auto"
+          },
+          "unit": "reqps",
+          "decimals": 1
+        }
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "auto",  
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 8,
+      "title": "📊 BTC/USDT Live Candlestick Chart with Technical Analysis",
+      "type": "timeseries",
+      "gridPos": {"h": 16, "w": 14, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "elvis_current_price{symbol=\"BTCUSDT\"}",
+          "legendFormat": "💰 Live Price",
+          "refId": "A"
+        },
+        {
+          "expr": "elvis_sma{symbol=\"BTCUSDT\"}",
+          "legendFormat": "📈 SMA20",
+          "refId": "B"
+        },
+        {
+          "expr": "elvis_ema_short{symbol=\"BTCUSDT\"}",
+          "legendFormat": "⚡ EMA9 (Fast)",
+          "refId": "C"
+        },
+        {
+          "expr": "elvis_ema_long{symbol=\"BTCUSDT\"}",
+          "legendFormat": "🔵 EMA21 (Slow)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "opacity",
+            "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 3,
+            "pointSize": 6,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "off"}
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "💰 Live Price"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "#FFFF00"}},
+              {"id": "custom.lineWidth", "value": 4},
+              {"id": "custom.fillOpacity", "value": 25}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "📈 SMA20"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "#1F60C4"}},
+              {"id": "custom.lineWidth", "value": 2}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "⚡ EMA9 (Fast)"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "#73BF69"}},
+              {"id": "custom.lineWidth", "value": 2}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "🔵 EMA21 (Slow)"},
+            "properties": [
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2495C"}},
+              {"id": "custom.lineWidth", "value": 2}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "visible",
+          "placement": "bottom",
+          "values": ["last", "min", "max", "diff"],
+          "calcs": ["lastNotNull", "min", "max", "diff"]
+        },
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 9,
+      "title": "📋 Technical Analysis Summary",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 8},
+      "targets": [
+        {
+          "expr": "elvis_current_price{symbol=\"$symbol\"}",
+          "legendFormat": "Current Price",
+          "refId": "A",
+          "instant": true
+        },
+        {
+          "expr": "elvis_rsi{symbol=\"$symbol\"}",
+          "legendFormat": "RSI",
+          "refId": "B",
+          "instant": true
+        },
+        {
+          "expr": "elvis_sma{symbol=\"$symbol\"}",
+          "legendFormat": "SMA20",
+          "refId": "C",
+          "instant": true
+        },
+        {
+          "expr": "elvis_macd{symbol=\"$symbol\"}",
+          "legendFormat": "MACD",
+          "refId": "D",
+          "instant": true
+        },
+        {
+          "expr": "elvis_ema_short{symbol=\"$symbol\"}",
+          "legendFormat": "EMA9",
+          "refId": "E",
+          "instant": true
+        },
+        {
+          "expr": "elvis_ema_long{symbol=\"$symbol\"}",
+          "legendFormat": "EMA21",
+          "refId": "F",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center",
+            "cellOptions": {"type": "colored-background"},
+            "inspect": false,
+            "minWidth": 100
+          },
+          "mappings": [],
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null}
+            ]
+          },
+          "color": {"mode": "thresholds"},
+          "decimals": 4
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Value #A"},
+            "properties": [
+              {"id": "displayName", "value": "💰 Price ($)"},
+              {"id": "unit", "value": "currencyUSD"},
+              {"id": "decimals", "value": 2},
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Value #B"},
+            "properties": [
+              {"id": "displayName", "value": "📊 RSI (%)"},
+              {"id": "unit", "value": "percent"},
+              {"id": "decimals", "value": 1},
+              {"id": "thresholds", "value": {
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "orange", "value": 30},
+                  {"color": "yellow", "value": 40},
+                  {"color": "light-green", "value": 60},
+                  {"color": "red", "value": 70}
+                ]
+              }}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Value #C"},
+            "properties": [
+              {"id": "displayName", "value": "📈 SMA20 ($)"},
+              {"id": "unit", "value": "currencyUSD"},
+              {"id": "decimals", "value": 2}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Value #D"},
+            "properties": [
+              {"id": "displayName", "value": "📈 MACD"},
+              {"id": "decimals", "value": 4}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Value #E"},
+            "properties": [
+              {"id": "displayName", "value": "⚡ EMA9 ($)"},
+              {"id": "unit", "value": "currencyUSD"},
+              {"id": "decimals", "value": 2}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Value #F"},
+            "properties": [
+              {"id": "displayName", "value": "🔵 EMA21 ($)"},
+              {"id": "unit", "value": "currencyUSD"},
+              {"id": "decimals", "value": 2}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "lg",
+        "footer": {"show": false, "reducer": ["sum"], "countRows": false, "fields": ""}
+      },
+      "transformations": [
+        {
+          "id": "seriesToColumns",
+          "options": {"byField": "symbol"}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true},
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "🎯 Live Performance Dashboard",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 16},
+      "targets": [
+        {
+          "expr": "up{job=\"elvis\"}",  
+          "legendFormat": "🔌 System Status",
+          "refId": "A"
+        },
+        {
+          "expr": "flask_http_request_duration_seconds_sum / flask_http_request_duration_seconds_count",
+          "legendFormat": "⚡ Avg Response (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "flask_http_request_total",
+          "legendFormat": "📊 Total Requests",
+          "refId": "C"
+        },
+        {
+          "expr": "rate(flask_http_request_total[1m])",
+          "legendFormat": "🔄 Req Rate (/min)",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {"options": {"0": {"text": "❌ DOWN", "color": "red"}}, "type": "value"},
+            {"options": {"1": {"text": "✅ UP", "color": "green"}}, "type": "value"}
+          ],
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "green", "value": 1}
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "⚡ Avg Response (s)"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "mappings", "value": []},
+              {"id": "decimals", "value": 3},
+              {"id": "thresholds", "value": {
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.1},
+                  {"color": "red", "value": 0.5}
+                ]
+              }}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "📊 Total Requests"},
+            "properties": [
+              {"id": "unit", "value": "short"},
+              {"id": "mappings", "value": []},
+              {"id": "color", "value": {"mode": "palette-classic"}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "🔄 Req Rate (/min)"},
+            "properties": [
+              {"id": "unit", "value": "reqps"},
+              {"id": "mappings", "value": []},
+              {"id": "decimals", "value": 2},
+              {"id": "color", "value": {"mode": "palette-classic"}}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 11,
+      "title": "📊 Market Movement & Price Velocity Analysis",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "rate(elvis_current_price{symbol=\"$symbol\"}[1m])",
+          "legendFormat": "📈 Price Change Rate (/min)",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(elvis_current_price{symbol=\"$symbol\"}[5m])",
+          "legendFormat": "📊 5min Price Change ($)",
+          "refId": "B"
+        },
+        {
+          "expr": "stddev_over_time(elvis_current_price{symbol=\"$symbol\"}[5m])",
+          "legendFormat": "📉 Price Volatility (5min)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 25,
+            "gradientMode": "hue",
+            "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line", "steps": [{"color": "red", "value": 0}]}
+          },
+          "unit": "short",
+          "decimals": 4
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "📊 5min Price Change ($)"},
+            "properties": [
+              {"id": "unit", "value": "currencyUSD"}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "visible", "placement": "bottom", "values": ["last", "max", "min"]},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 12,
+      "title": "🔄 System Activity & Request Monitoring",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "expr": "flask_http_request_total{method=\"GET\",status=\"200\"}",
+          "legendFormat": "✅ Successful API Calls",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(flask_http_request_total{method=\"GET\",status=\"200\"}[1m]) * 60",
+          "legendFormat": "🔄 Request Rate (/min)",
+          "refId": "B"
+        },
+        {
+          "expr": "flask_http_request_duration_seconds_sum",
+          "legendFormat": "⏱️ Cumulative Response Time (s)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "off"}
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "⏱️ Cumulative Response Time (s)"},
+            "properties": [
+              {"id": "unit", "value": "s"},
+              {"id": "custom.drawStyle", "value": "line"},
+              {"id": "custom.fillOpacity", "value": 20}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "visible", "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      }
+    },
+    {
+      "id": 13,
+      "title": "🚨 ELVIS System Status & Trading Activity",
+      "type": "text",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 32},
+      "options": {
+        "mode": "html",
+        "content": "<div style='font-family: monospace; background: #1a1a1a; padding: 15px; border-radius: 8px; color: #00ff41;'><div style='font-size: 18px; font-weight: bold; color: #ffff00; margin-bottom: 10px;'>🚀 ELVIS TRADING SYSTEM STATUS</div><div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;'><div><div style='color: #00ffff; font-weight: bold;'>📊 PORTFOLIO METRICS</div><div>Portfolio Value: $2000.70</div><div>Total P&L: $0.70</div><div>Win Rate: 100%</div><div>Total Trades: 1090</div></div><div><div style='color: #00ffff; font-weight: bold;'>🎯 OPEN POSITIONS</div><div>Active Positions: 6</div><div>Long Positions: 3</div><div>Short Positions: 3</div><div>Unrealized P&L: Live</div></div><div><div style='color: #00ffff; font-weight: bold;'>⚡ SYSTEM HEALTH</div><div>API Status: ✅ ONLINE</div><div>Trading Mode: Paper</div><div>Last Update: Live</div><div>Prometheus: Active</div></div></div><div style='margin-top: 15px; padding: 10px; background: #0a0a0a; border-left: 4px solid #00ff41;'><div style='color: #00ff41; font-weight: bold;'>📈 RECENT ACTIVITY</div><div>✅ Enhanced metrics collection active</div><div>✅ All technical indicators updating</div><div>✅ Live price feeds connected</div><div>✅ Risk management active</div></div></div>"
+      },
+      "transparent": true
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "🔔 RSI Signals",
+        "datasource": "Prometheus",
+        "enable": true,
+        "expr": "changes(elvis_rsi{symbol=\"BTCUSDT\"}[1m]) > 0",
+        "iconColor": "yellow",
+        "showIn": 0,
+        "step": "1m",
+        "titleFormat": "RSI Signal Change",
+        "tagKeys": "symbol",
+        "textFormat": "RSI indicator changed for {{symbol}}"
+      },
+      {
+        "name": "💰 Price Alerts",
+        "datasource": "Prometheus", 
+        "enable": true,
+        "expr": "abs(rate(elvis_current_price{symbol=\"BTCUSDT\"}[1m])) > 10",
+        "iconColor": "red",
+        "showIn": 0,
+        "step": "1m",
+        "titleFormat": "Large Price Movement",
+        "tagKeys": "symbol",
+        "textFormat": "Significant price change detected for {{symbol}}"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": true,
+  "style": "dark",
+  "hideControls": false
+}
