@@ -697,43 +697,56 @@
       become: yes
       
     # Final setup and information
-    - name: Display Vault setup instructions
+    - name: Display setup completion instructions
       debug:
         msg: |
           
           🔐 ELVIS Trading Bot Setup Complete with HashiCorp Vault Integration!
           
-          📋 Next Steps:
+          📋 Deployment Options:
           
-          1. 🔑 Setup Vault secrets (REQUIRED):
+          🏗️ OPTION 1: Native Installation (Traditional)
+          1. 🔑 Setup Vault secrets:
              cd {{ project_dir }}
              ./setup_vault.sh
           
-          2. 🔐 Configure your real API keys:
+          2. 🔐 Configure API keys:
              source .vault_credentials
              vault kv put secret/trading/api-keys \
                binance-api-key=YOUR_REAL_API_KEY \
                binance-api-secret=YOUR_REAL_API_SECRET
           
-          3. 🚀 Start ELVIS with enterprise security:
+          3. 🚀 Start ELVIS:
              export VAULT_ADDR=http://127.0.0.1:8200
              export VAULT_TOKEN=trading-bot-token
              python main.py --mode dashboard
           
-          4. ✅ Verify security status:
-             Dashboard should show: ✅ Vault 3ms (connected)
-             Overall system health: 88%+
+          🐳 OPTION 2: Containerized Infrastructure (Recommended)
+          1. 🚀 Deploy monitoring stack:
+             cd {{ project_dir }}/ansible
+             ansible-playbook deploy_containers.yml
           
-          📚 Security Documentation:
-          - Complete guide: {{ project_dir }}/SECURITY.md
-          - Setup instructions: {{ project_dir }}/docs/VAULT_SETUP.md
+          2. 📊 Start hybrid system:
+             cd {{ project_dir }}
+             ./start_elvis_hybrid.sh
           
-          🎯 Features enabled:
-          ✅ Enterprise-grade secret management
-          ✅ AES-256-GCM encryption
-          ✅ Real-time security monitoring
-          ✅ Maximum speed trading (zero cooldowns)
-          ✅ Comprehensive API health dashboard
+          3. 📈 Access dashboards:
+             - Grafana: http://localhost:3001 (admin/admin)
+             - Prometheus: http://localhost:9090
+             - ELVIS API: http://localhost:5050
+          
+          📚 Documentation:
+          - System Guide: {{ project_dir }}/ELVIS_MONITORING_SYSTEM_COMPLETE.md
+          - Architecture: {{ project_dir }}/ELVIS_SYSTEM_ARCHITECTURE.md
+          - Container Guide: {{ project_dir }}/ansible/deploy_containers.yml
+          
+          🎯 Production Features:
+          ✅ Enterprise-grade secret management (Vault)
+          ✅ Real-time monitoring (Prometheus + Grafana)
+          ✅ Centralized logging (Loki + Promtail)
+          ✅ Container orchestration (Docker Compose)
+          ✅ High-frequency trading capabilities
+          ✅ Comprehensive health monitoring
           
           🔐 Security first, performance optimized!
       

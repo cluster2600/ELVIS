@@ -1,0 +1,44 @@
+# Minimal ELVIS Container - Core Trading Only
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Install essential packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc python3-dev curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install minimal Python packages for core functionality
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+    numpy pandas requests Flask Flask-CORS \
+    redis psycopg2-binary SQLAlchemy websocket-client \
+    psutil python-dotenv ccxt python-binance \
+    colorlog pyyaml tqdm ta keyring
+
+# Copy application code
+COPY . /app
+
+# Create directories
+RUN mkdir -p /app/logs /app/models /app/data /app/tmp && \
+    chmod -R 755 /app
+
+# Create non-root user
+RUN useradd --create-home --shell /bin/bash elvis && \
+    chown -R elvis:elvis /app
+
+USER elvis
+
+EXPOSE 5050 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5050/health || exit 1
+
+# Start with minimal mode
+CMD ["python", "main.py", "--mode", "paper", "--log-level", "INFO"]
