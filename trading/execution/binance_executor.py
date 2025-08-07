@@ -131,39 +131,76 @@ class BinanceExecutor(BaseExecutor):
             current_price = price if price else self._get_mock_price(symbol)
             fee = self.fee_calculator.calculate_trading_fee(current_price, quantity, is_maker=False, is_futures=True)
             
+            # 🛑 CRITICAL: Check existing positions for risk management
             open_positions = get_open_positions()
             opposite_side = 'SELL' if side == 'BUY' else 'BUY'
             existing_position = next((p for p in open_positions if p[1] == symbol and p[2] == side), None)
             opposite_position = next((p for p in open_positions if p[1] == symbol and p[2] == opposite_side), None)
 
             pnl = 0.0
+            should_execute = True
+            
             if opposite_position:
-                self.logger.info(f"[PAPER TRADE] Executing {side} to close {opposite_side} position for {symbol}")
-                pnl = self._calculate_position_pnl(symbol, opposite_side, current_price, quantity)
-                if self.db_available:
-                    record_trade(symbol, side, current_price, quantity, pnl, fee)
+                # Calculate potential PnL before executing
+                potential_pnl = self._calculate_position_pnl(symbol, opposite_side, current_price, quantity)
+                
+                # 🛑 STOP LOSS: If losing more than $5, force close
+                if potential_pnl < -5.0:
+                    self.logger.warning(f"🛑 STOP LOSS: {symbol} {opposite_side} position losing ${abs(potential_pnl):.2f} - FORCE CLOSING")
+                    pnl = potential_pnl
+                    should_execute = True  # Force execute to close losing position
                     
-                    existing_quantity = float(opposite_position[4])
-                    new_quantity = existing_quantity - quantity
+                # 💰 PROFIT TAKING: If profit >= $1, close position  
+                elif potential_pnl >= 1.0:
+                    self.logger.info(f"💰 PROFIT TAKING: {symbol} {opposite_side} position profit ${potential_pnl:.2f} - CLOSING")
+                    pnl = potential_pnl
+                    should_execute = True
                     
-                    if new_quantity <= 0.000001:
-                        close_open_position(symbol, opposite_side)
-                    else:
-                        close_open_position(symbol, opposite_side)
-                        add_open_position(symbol, opposite_side, float(opposite_position[3]), new_quantity, self.default_leverage)
+                else:
+                    pnl = potential_pnl
+                    
+                if should_execute:
+                    self.logger.info(f"[PAPER TRADE] Executing {side} to close {opposite_side} position for {symbol}")
+                    if self.db_available:
+                        record_trade(symbol, side, current_price, quantity, pnl, fee)
+                        
+                        existing_quantity = float(opposite_position[4])
+                        new_quantity = existing_quantity - quantity
+                        
+                        if new_quantity <= 0.000001:
+                            close_open_position(symbol, opposite_side)
+                        else:
+                            close_open_position(symbol, opposite_side)
+                            add_open_position(symbol, opposite_side, float(opposite_position[3]), new_quantity, self.default_leverage)
+                            
             else:
-                self.logger.info(f"[PAPER TRADE] Opening new {side} position for {symbol}")
-                if self.db_available:
-                    record_trade(symbol, side, current_price, quantity, 0.0, fee)
-                    add_open_position(symbol, side, current_price, quantity, self.default_leverage)
+                # Opening new position - check if we should (risk management)
+                current_balance = self._calculate_paper_balance()
+                usdt_balance = current_balance.get('USDT', 0)
+                
+                # 🛑 RISK MANAGEMENT: Don't open new positions if balance < $500
+                if usdt_balance < 500:
+                    self.logger.warning(f"🛑 RISK LIMIT: USDT balance ${usdt_balance:.2f} too low - NOT opening new {side} position")
+                    should_execute = False
+                    
+                if should_execute:
+                    self.logger.info(f"[PAPER TRADE] Opening new {side} position for {symbol}")
+                    if self.db_available:
+                        record_trade(symbol, side, current_price, quantity, 0.0, fee)
+                        add_open_position(symbol, side, current_price, quantity, self.default_leverage)
 
-            mock_order = {
-                'symbol': symbol, 'orderId': f"MOCK_{symbol}_{int(time.time())}", 'side': side,
-                'quantity': str(quantity), 'price': str(current_price), 'status': 'FILLED',
-                'type': 'LIMIT' if price else 'MARKET', 'leverage': self.default_leverage
-            }
-            self.logger.info(f"[PAPER TRADE] {side} order completed successfully: {mock_order} | PnL: ${pnl:.2f}")
-            return mock_order
+            if should_execute:
+                mock_order = {
+                    'symbol': symbol, 'orderId': f"MOCK_{symbol}_{int(time.time())}", 'side': side,
+                    'quantity': str(quantity), 'price': str(current_price), 'status': 'FILLED',
+                    'type': 'LIMIT' if price else 'MARKET', 'leverage': self.default_leverage
+                }
+                self.logger.info(f"[PAPER TRADE] {side} order completed successfully: {mock_order} | PnL: ${pnl:.2f}")
+                return mock_order
+            else:
+                self.logger.info(f"[PAPER TRADE] {side} order BLOCKED by risk management")
+                return {'status': 'BLOCKED', 'reason': 'Risk management'}
+                
         except Exception as e:
             self.logger.error(f"[PAPER TRADE] Error executing {side} order: {e}", exc_info=True)
             return {}
@@ -194,11 +231,11 @@ class BinanceExecutor(BaseExecutor):
     def _get_mock_price(self, symbol: str) -> float:
         """Get mock prices for paper trading - use realistic values"""
         if symbol == 'BTCUSDT': 
-            return 97000.0
-        elif symbol == 'BNBBTC':
-            return 0.00665  # Realistic BNB/BTC rate
+            return 116500.0  # Current BTC price
         elif symbol == 'BNBUSDT':
-            return 757.0    # Realistic BNB/USDT rate
+            return 600.0  # BNB price in USDT
+        elif symbol == 'BNBBTC':
+            return 0.00515  # Realistic BNB/BTC rate (600/116500)
         else: 
             return 100.0
 
@@ -215,13 +252,22 @@ class BinanceExecutor(BaseExecutor):
     def _calculate_paper_balance(self) -> Dict[str, float]:
         """Calculate paper trading balance with multi-asset support"""
         if not self.db_available:
-            return {'USDT': 1000.0, 'BNB': 0.0}
+            # Initial balances: $1000 USDT + $1000 equivalent BNB
+            bnb_price = self._get_mock_price('BNBUSDT') or 600.0  # Assume $600 per BNB
+            initial_bnb_amount = 1000.0 / bnb_price  # $1000 worth of BNB
+            return {'USDT': 1000.0, 'BNB': initial_bnb_amount}
         
         try:
             from utils.paper_trade_db import get_all_balances, get_all_trades
             
             # Get stored balances
             balances = get_all_balances()
+            
+            # Initialize with proper starting balances if not exist
+            if not balances:
+                bnb_price = self._get_mock_price('BNBUSDT') or 600.0
+                initial_bnb_amount = 1000.0 / bnb_price
+                balances = {'USDT': 1000.0, 'BNB': initial_bnb_amount}
             
             # Calculate USDT balance from trades (legacy method)
             usdt_balance = balances.get('USDT', 1000.0)
@@ -235,23 +281,80 @@ class BinanceExecutor(BaseExecutor):
             # Update USDT balance
             balances['USDT'] = usdt_balance
             
-            # Ensure we have minimum balances
-            if 'BNB' not in balances:
-                balances['BNB'] = 0.0
+            # Ensure we have proper BNB balance (equivalent to $1000 initially)
+            if 'BNB' not in balances or balances['BNB'] <= 0:
+                bnb_price = self._get_mock_price('BNBUSDT') or 600.0
+                balances['BNB'] = 1000.0 / bnb_price  # $1000 equivalent (~1.67 BNB)
             
             return balances
             
         except Exception as e:
             self.logger.error(f"Error calculating paper balance: {e}", exc_info=True)
-            return {'USDT': 1000.0, 'BNB': 0.0}
+            bnb_price = self._get_mock_price('BNBUSDT') or 600.0
+            return {'USDT': 1000.0, 'BNB': 1000.0 / bnb_price}
 
     def execute_stop_loss(self, symbol: str, quantity: float, stop_price: float, **kwargs) -> Dict[str, Any]:
-        self.logger.info(f"Paper trading: Stop loss not implemented.")
-        return {}
+        """Execute stop loss - force close losing position"""
+        self.logger.warning(f"🛑 STOP LOSS: Force closing {symbol} position at ${stop_price:.2f}")
+        current_price = self._get_mock_price(symbol)
+        
+        # Determine which side to close (opposite of current losing position)
+        open_positions = get_open_positions()
+        position = next((p for p in open_positions if p[1] == symbol), None)
+        
+        if position:
+            position_side = position[2]  # BUY or SELL
+            close_side = 'SELL' if position_side == 'BUY' else 'BUY'
+            return self._execute_paper_trade(symbol, close_side, quantity, current_price)
+        
+        return {'status': 'NO_POSITION'}
 
     def execute_take_profit(self, symbol: str, quantity: float, take_profit_price: float, **kwargs) -> Dict[str, Any]:
-        self.logger.info(f"Paper trading: Take profit not implemented.")
-        return {}
+        """Execute take profit - close profitable position"""
+        self.logger.info(f"💰 TAKE PROFIT: Closing {symbol} position at ${take_profit_price:.2f}")
+        current_price = self._get_mock_price(symbol)
+        
+        # Determine which side to close
+        open_positions = get_open_positions()
+        position = next((p for p in open_positions if p[1] == symbol), None)
+        
+        if position:
+            position_side = position[2]  # BUY or SELL
+            close_side = 'SELL' if position_side == 'BUY' else 'BUY'
+            return self._execute_paper_trade(symbol, close_side, quantity, current_price)
+        
+        return {'status': 'NO_POSITION'}
+    
+    def check_and_manage_positions(self) -> None:
+        """Automatically check all positions for stop loss and take profit"""
+        try:
+            open_positions = get_open_positions()
+            current_time = time.time()
+            
+            for position in open_positions:
+                symbol = position[1]
+                side = position[2]
+                entry_price = float(position[3])
+                quantity = float(position[4])
+                
+                current_price = self._get_mock_price(symbol)
+                pnl = self._calculate_position_pnl(symbol, side, current_price, quantity)
+                
+                # Auto stop loss at -$5
+                if pnl < -5.0:
+                    self.logger.warning(f"🛑 AUTO STOP LOSS: {symbol} {side} losing ${abs(pnl):.2f}")
+                    close_side = 'SELL' if side == 'BUY' else 'BUY' 
+                    self._execute_paper_trade(symbol, close_side, quantity, current_price)
+                    
+                # Auto take profit at +$1
+                elif pnl >= 1.0:
+                    self.logger.info(f"💰 AUTO TAKE PROFIT: {symbol} {side} profit ${pnl:.2f}")
+                    close_side = 'SELL' if side == 'BUY' else 'BUY'
+                    self._execute_paper_trade(symbol, close_side, quantity, current_price)
+                    
+        except Exception as e:
+            self.logger.error(f"Error in position management: {e}")
+    
 
     def cancel_order(self, order_id: str) -> bool:
         self.logger.info(f"Paper trading: Cancel order not implemented.")
