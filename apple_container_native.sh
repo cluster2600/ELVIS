@@ -61,11 +61,32 @@ check_apple_container() {
 build_elvis_image() {
     print_header "🔨 Building ELVIS Image with Apple Container"
     
-    # Build using Apple's container build command
-    print_success "Building ELVIS trading bot image..."
-    container build -f Dockerfile.simple -t elvis-bot:latest .
+    # Try building with the minimal Dockerfile first (no network dependencies)
+    print_success "Attempting build with minimal Dockerfile (no network dependencies)..."
+    if container build -f Dockerfile.minimal -t elvis-bot:latest . 2>/dev/null; then
+        print_success "✅ ELVIS image built successfully with minimal Dockerfile"
+        return 0
+    fi
     
-    print_success "✅ ELVIS image built successfully"
+    print_warning "Minimal build failed, trying full Dockerfile..."
+    
+    # Fallback to full Dockerfile with network dependencies
+    print_success "Building ELVIS trading bot image with full dependencies..."
+    if container build -f Dockerfile.simple -t elvis-bot:latest .; then
+        print_success "✅ ELVIS image built successfully with full Dockerfile"
+        return 0
+    else
+        print_error "❌ Image build failed. Network connectivity issues detected."
+        echo ""
+        echo "Troubleshooting options:"
+        echo "1. Check your internet connection"
+        echo "2. Try building with Docker Desktop instead:"
+        echo "   docker build -f Dockerfile.minimal -t elvis-bot:latest ."
+        echo "3. Use the Docker Compose setup:"
+        echo "   ./apple_container_elvis.sh setup"
+        echo ""
+        return 1
+    fi
 }
 
 create_network() {

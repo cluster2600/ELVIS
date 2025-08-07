@@ -766,8 +766,7 @@ def main(mode: str, log_level: str):
                             
                             # Execute trades based on signals with MUCH HIGHER threshold to stop overtrading
                             if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # CRITICAL: High threshold for quality trades only
-                                # Execute BTCUSDT trade (futures)
-                                self._execute_symbol_trade(symbol, signal, confidence, data, executor)
+                                logger.info(f"🎯 High confidence signal detected: {signal} with {confidence:.3f} confidence")
                             
                             # BNBBTC CONVERSION RE-ENABLED - PnL bug has been fixed  
                             logger.info("✅ BNBBTC conversion re-enabled - PnL calculation bug fixed")
@@ -810,8 +809,7 @@ def main(mode: str, log_level: str):
                                 
                                 # Execute BNBBTC trades if confidence is high enough
                                 if bnbbtc_signal in ['BUY', 'SELL'] and bnbbtc_confidence >= 0.90:
-                                    logger.info(f"🔄 Executing BNBBTC {bnbbtc_signal} trade")
-                                    self._execute_symbol_trade("BNBBTC", bnbbtc_signal, bnbbtc_confidence, bnbbtc_data, executor)
+                                    logger.info(f"🔄 High confidence BNBBTC {bnbbtc_signal} trade signal detected")
                                 else:
                                     logger.info(f"📊 BNBBTC Signal: {bnbbtc_signal} | Confidence: {bnbbtc_confidence:.3f} | Action: HOLD (below 90% threshold)")
                             else:
@@ -829,12 +827,16 @@ def main(mode: str, log_level: str):
                             
                             try:
                                 # ENFORCE MINIMUM x50 LEVERAGE
-                                if risk_manager:
+                                if risk_manager and hasattr(risk_manager, 'enforce_minimum_leverage'):
                                     leverage = risk_manager.enforce_minimum_leverage(base_leverage)
                                     # Use dynamic position sizing
-                                    position_size = risk_manager.calculate_dynamic_position_size(
-                                        available_balance, current_price, confidence, leverage
-                                    )
+                                    if hasattr(risk_manager, 'calculate_dynamic_position_size'):
+                                        position_size = risk_manager.calculate_dynamic_position_size(
+                                            available_balance, current_price, confidence, leverage
+                                        )
+                                    else:
+                                        # Fallback position size calculation
+                                        position_size = min(0.001, float(available_balance) / float(current_price) * 0.05)
                                     logger.info(f"⚡ DYNAMIC: Leverage {leverage}x, Dynamic sizing used")
                                 else:
                                     # Fallback to strategy calculation with enforced leverage
@@ -851,22 +853,27 @@ def main(mode: str, log_level: str):
                             except Exception as e:
                                 logger.error(f"Error in position size calculation: {e}")
                                 # Emergency fallback position size with proper type conversion
+                                leverage = max(base_leverage, 50.0)  # Set leverage for emergency fallback
                                 try:
                                     safe_balance = float(available_balance) if available_balance is not None else 1000.0
                                     safe_price = float(current_price) if current_price is not None else 97000.0
                                     position_size = min(0.001, safe_balance / safe_price * 0.05)  # REDUCED from 0.1 to 0.05
-                                    logger.warning(f"🚨 Using emergency position size: {position_size:.6f}")
+                                    logger.warning(f"🚨 Using emergency position size: {position_size:.6f} with leverage {leverage}x")
                                 except Exception as calc_error:
                                     logger.error(f"❌ Emergency calculation failed: {calc_error}")
                                     logger.error(f"   available_balance: {available_balance} (type: {type(available_balance)})")
                                     logger.error(f"   current_price: {current_price} (type: {type(current_price)})")
                                     position_size = 0.001  # Ultra-safe fallback
-                                    logger.warning(f"🚨 Using ultra-safe fallback position size: {position_size:.6f}")
+                                    if 'leverage' not in locals():
+                                        leverage = 50.0  # Default leverage
+                                    logger.warning(f"🚨 Using ultra-safe fallback position size: {position_size:.6f} with leverage {leverage}x")
                             
                             # Position size calculated - ready for execution
                             
                             # Emergency check - force minimum position size if zero
                             if position_size <= 0:
+                                if 'leverage' not in locals():
+                                    leverage = max(base_leverage, 50.0)  # Ensure leverage is defined
                                 try:
                                     safe_balance = float(available_balance) if available_balance is not None else 1000.0
                                     safe_price = float(current_price) if current_price is not None else 97000.0
@@ -898,6 +905,22 @@ def main(mode: str, log_level: str):
                                 order_result = executor.place_order(symbol, 'buy', position_size, current_price)
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    
+                                    # 🔥 FIX: Add position to risk manager for monitoring
+                                    try:
+                                        position_data = {
+                                            'symbol': symbol,
+                                            'side': 'BUY',
+                                            'entry_price': current_price,
+                                            'quantity': position_size,
+                                            'leverage': leverage,
+                                            'timestamp': time.time()
+                                        }
+                                        risk_manager.add_position(symbol, position_data)
+                                        logger.info(f"✅ Position added to risk manager: BUY {position_size:.6f} {symbol}")
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to add BUY position to risk manager: {e}")
+                                    
                                     # Record trade to prevent duplicates
                                     trading_loop.recent_trades[trade_key] = current_time_ms
                                     # Small delay to ensure trade completion
@@ -908,6 +931,22 @@ def main(mode: str, log_level: str):
                                 order_result = executor.place_order(symbol, 'sell', position_size, current_price)
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    
+                                    # 🔥 FIX: Add position to risk manager for monitoring  
+                                    try:
+                                        position_data = {
+                                            'symbol': symbol,
+                                            'side': 'SELL',
+                                            'entry_price': current_price,
+                                            'quantity': position_size,
+                                            'leverage': leverage,
+                                            'timestamp': time.time()
+                                        }
+                                        risk_manager.add_position(symbol, position_data)
+                                        logger.info(f"✅ Position added to risk manager: SELL {position_size:.6f} {symbol}")
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to add SELL position to risk manager: {e}")
+                                    
                                     # Record trade to prevent duplicates
                                     trading_loop.recent_trades[trade_key] = current_time_ms
                                     # Small delay to ensure trade completion

@@ -2,13 +2,23 @@ import numpy as np
 import pandas as pd
 import os
 import requests
-import coremltools as ct
+try:
+    import coremltools as ct
+    HAS_COREML = True
+except ImportError:
+    HAS_COREML = False
+    print("Warning: coremltools not available, some ML features disabled")
 import logging
 from typing import Dict, Any, List
 from datetime import datetime
 from trading.strategies.base_strategy import BaseStrategy
 from trading.strategies.research_based_strategy import ResearchBasedStrategy
-from trading.strategies.rl_strategy import RLStrategy
+try:
+    from trading.strategies.rl_strategy import RLStrategy
+    HAS_RL_STRATEGY = True
+except ImportError:
+    HAS_RL_STRATEGY = False
+    print("Warning: RL strategy not available, using fallback strategies")
 from trading.strategies.bonenkamp_hft_strategy import BonenkampHFTStrategy
 import ta
 
