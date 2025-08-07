@@ -35,22 +35,63 @@ elvis.egg-info/
 .coveragerc
 coverage.xml
 htmlcov/
-tests/
 test_data/
 
-# Data and Logs
-data/
-logs/
-*.log
+# Large data files and logs (keep structure but exclude large files)
+logs/*.log
+logs/detailed_logs/
+data/raw/
+data/external/
 plots_and_metrics/
-models/
+
+# Large model files (keep model structure but exclude large binaries)
+models/*.h5
+models/*.pkl
+models/*.pth
+models/model_rf_tf/
+models/checkpoints/
 
 # OS-specific
 .DS_Store
 
-# Other
+# Development artifacts
 ansible/
 drl_agents/
 grafana/
 images/
 tensorflow/
+
+# Large PDF and binary files
+*.pdf
+*.apkg
+*.tar.gz
+*.pid
+
+# Temporary and backup files
+*.backup
+tmp/
+temp/
+
+# Analysis and test scripts (keep core scripts)
+analyze_*.py
+test_*.py
+debug_*.py
+fix_*.py
+enable_*.py
+create_*.py
+comprehensive_*.py
+quick_*.py
+setup_*.py
+optimize_*.py
+train_*.py
+verify_*.py
+emergency_*.py
+check_*.py
+
+# Documentation (keep essential docs)
+*.md
+!README.md
+!requirements.txt
+
+# Tools directory
+tools/

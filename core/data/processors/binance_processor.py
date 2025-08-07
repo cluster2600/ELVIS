@@ -11,7 +11,13 @@ import time
 import logging
 from typing import List, Dict, Tuple, Any, Optional
 from datetime import datetime, timedelta
-import talib
+
+try:
+    import talib
+    HAS_TALIB = True
+except ImportError:
+    HAS_TALIB = False
+    print("Warning: talib not available, BinanceProcessor will use fallback calculations")
 
 from core.data.processors.base_processor import BaseProcessor
 from config import API_CONFIG

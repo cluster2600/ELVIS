@@ -4,8 +4,13 @@ import os
 import threading
 import time
 import psutil
-from prometheus_flask_exporter import PrometheusMetrics
-from prometheus_client import Gauge, Counter, Histogram
+try:
+    from prometheus_flask_exporter import PrometheusMetrics
+    from prometheus_client import Gauge, Counter, Histogram
+    HAS_PROMETHEUS = True
+except ImportError:
+    HAS_PROMETHEUS = False
+    print("Warning: prometheus modules not available")
 from utils.paper_trade_db import (
     get_all_trades, get_open_positions, get_trade_count,
     get_total_fees, get_pnl_breakdown, get_rolling_stats,
@@ -17,7 +22,12 @@ from utils.logger_config import setup_logging
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
-metrics = PrometheusMetrics(app)
+
+# Initialize Prometheus if available
+if HAS_PROMETHEUS:
+    metrics = PrometheusMetrics(app)
+else:
+    metrics = None
 
 # Initialize logger
 logger = setup_logging("TradeHistoryAPI", log_level="INFO")

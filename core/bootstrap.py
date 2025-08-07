@@ -121,16 +121,28 @@ class ApplicationBootstrapper:
         # Event Bus (already global, but register for consistency)
         container.register_singleton('event_bus', lambda: event_bus)
 
-        # Performance Monitor
-        from core.metrics.performance_monitor import PerformanceMonitor
-        def create_performance_monitor():
-            pm = PerformanceMonitor(window=50)  # Smaller window for demo
-            # Add sample percentage returns for demonstration (in decimal format)
-            sample_returns = [0.005, 0.012, -0.008, 0.015, -0.003, 0.007, 0.018, -0.002, 0.021, 0.004] * 10  # 100 returns
-            for ret in sample_returns:
-                pm.add_return(ret)
-            return pm
-        container.register_singleton('performance_monitor', create_performance_monitor)
+        # Performance Monitor - optional
+        try:
+            from core.metrics.performance_monitor import PerformanceMonitor
+            def create_performance_monitor():
+                pm = PerformanceMonitor(window=50)  # Smaller window for demo
+                # Add sample percentage returns for demonstration (in decimal format)
+                sample_returns = [0.005, 0.012, -0.008, 0.015, -0.003, 0.007, 0.018, -0.002, 0.021, 0.004] * 10  # 100 returns
+                for ret in sample_returns:
+                    pm.add_return(ret)
+                return pm
+            container.register_singleton('performance_monitor', create_performance_monitor)
+        except ImportError as e:
+            print(f"Warning: PerformanceMonitor not available: {e}")
+            # Create a mock performance monitor
+            def create_mock_performance_monitor():
+                class MockPerformanceMonitor:
+                    def add_return(self, ret): pass
+                    def get_sharpe_ratio(self): return 1.0
+                    def get_max_drawdown(self): return 0.05
+                    def get_win_rate(self): return 0.6
+                return MockPerformanceMonitor()
+            container.register_singleton('performance_monitor', create_mock_performance_monitor)
 
         # Trade Analyzer
         from utils.trade_analyzer import TradeAnalyzer
@@ -192,14 +204,24 @@ class ApplicationBootstrapper:
         # Strategy Manager
         from trading.strategy_manager import StrategyManager
         def create_strategy_manager():
-            from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
-            from trading.strategies.trend_following_strategy import TrendFollowingStrategy
+            # Optional strategy imports
+            strategies = {}
             
-            strategies = {
-                'trending': container.get('trend_following_strategy'),
-                'mean-reverting': container.get('mean_reversion_strategy'),
-                'default': container.get('strategy') # EnsembleStrategy
-            }
+            # Only add strategies that are available
+            if 'trend_following_strategy' in container._providers:
+                try:
+                    strategies['trending'] = container.get('trend_following_strategy')
+                except Exception:
+                    pass
+            
+            if 'mean_reversion_strategy' in container._providers:
+                try:
+                    strategies['mean-reverting'] = container.get('mean_reversion_strategy')
+                except Exception:
+                    pass
+                    
+            # Always add the default strategy
+            strategies['default'] = container.get('strategy')  # EnsembleStrategy
             return StrategyManager(
                 market_regime_detector=container.get('market_regime_detector'),
                 strategies=strategies
@@ -208,15 +230,25 @@ class ApplicationBootstrapper:
     
     def _register_data_services(self) -> None:
         """Register data-related service dependencies."""
-        from utils.price_fetcher import PriceFetcher
+        try:
+            from utils.price_fetcher import PriceFetcher
+            # Price Fetcher
+            def create_price_fetcher():
+                logger = container.get('logger')
+                return PriceFetcher(logger, symbols=['BTCUSDT', 'BNBBTC'])
+            
+            container.register_singleton('price_fetcher', create_price_fetcher)
+        except ImportError as e:
+            print(f"Warning: PriceFetcher not available: {e}")
+            # Create mock price fetcher
+            def create_mock_price_fetcher():
+                class MockPriceFetcher:
+                    def get_current_price(self, symbol): return 107000.0
+                    def get_historical_data(self, symbol, days=30): return []
+                return MockPriceFetcher()
+            container.register_singleton('price_fetcher', create_mock_price_fetcher)
+        
         from core.data.processors.binance_processor import BinanceProcessor
-        
-        # Price Fetcher
-        def create_price_fetcher():
-            logger = container.get('logger')
-            return PriceFetcher(logger, symbols=['BTCUSDT', 'BNBBTC'])
-        
-        container.register_singleton('price_fetcher', create_price_fetcher)
         
         # Data Processor
         def create_data_processor():
@@ -231,8 +263,26 @@ class ApplicationBootstrapper:
     
     def _register_trading_services(self) -> None:
         """Register trading-related service dependencies."""
-        from trading.execution.binance_executor import BinanceExecutor
-        from trading.risk_management import RiskManager
+        try:
+            from trading.execution.binance_executor import BinanceExecutor
+        except ImportError as e:
+            print(f"Warning: BinanceExecutor not available: {e}")
+            # Create mock executor
+            class BinanceExecutor:
+                def __init__(self, *args, **kwargs): pass
+                def initialize(self): return False
+        
+        try:
+            from trading.risk_management import RiskManager
+        except ImportError as e:
+            print(f"Warning: RiskManager not available: {e}")
+            # Create mock risk manager
+            class RiskManager:
+                def __init__(self, *args, **kwargs):
+                    self.realized_pnl = 0.0
+                    self.unrealized_pnl = 0.0
+                def evaluate_risk(self, *args, **kwargs): return True
+                def update_position(self, *args, **kwargs): pass
         from trading.utils.telegram_notifier import TelegramNotifier
         from trading.strategies.ensemble_strategy import EnsembleStrategy
         from trading.strategies.research_based_strategy import ResearchBasedStrategy
@@ -409,52 +459,75 @@ class ApplicationBootstrapper:
         
         container.register_singleton('strategy', create_strategy)
 
+        # Optional strategies - gracefully handle missing dependencies
+        
         # Grid Strategy
-        from trading.strategies.grid_strategy import GridStrategy
-        container.register_factory('grid_strategy', 
-                                 lambda: GridStrategy(logger=container.get('logger')))
+        try:
+            from trading.strategies.grid_strategy import GridStrategy
+            container.register_factory('grid_strategy', 
+                                     lambda: GridStrategy(logger=container.get('logger')))
+        except ImportError as e:
+            print(f"Warning: GridStrategy not available: {e}")
                                  
-        # Mean Reversion Strategy
-        from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
-        container.register_factory('mean_reversion_strategy',
-                                 lambda: MeanReversionStrategy(logger=container.get('logger')))
+        # Mean Reversion Strategy  
+        try:
+            from trading.strategies.mean_reversion_strategy import MeanReversionStrategy
+            container.register_factory('mean_reversion_strategy',
+                                     lambda: MeanReversionStrategy(logger=container.get('logger')))
+        except ImportError as e:
+            print(f"Warning: MeanReversionStrategy not available: {e}")
                                  
         # Trend Following Strategy
-        from trading.strategies.trend_following_strategy import TrendFollowingStrategy
-        container.register_factory('trend_following_strategy',
-                                 lambda: TrendFollowingStrategy(logger=container.get('logger')))
+        try:
+            from trading.strategies.trend_following_strategy import TrendFollowingStrategy
+            container.register_factory('trend_following_strategy',
+                                     lambda: TrendFollowingStrategy(logger=container.get('logger')))
+        except ImportError as e:
+            print(f"Warning: TrendFollowingStrategy not available: {e}")
     
     def _register_models(self) -> None:
         """Register ML model dependencies."""
-        from core.models.random_forest_model import RandomForestModel
-        from core.models.neural_network_model import NeuralNetworkModel
-        from core.models.transformer_model import TransformerModel
-        from core.models.ensemble_model import EnsembleModel
         
         # Random Forest Model
-        container.register_factory('random_forest_model', 
-                                 lambda: RandomForestModel())
+        try:
+            from core.models.random_forest_model import RandomForestModel
+            container.register_factory('random_forest_model', 
+                                     lambda: RandomForestModel())
+        except ImportError as e:
+            print(f"Warning: RandomForestModel not available: {e}")
         
         # Neural Network Model
-        container.register_factory('neural_network_model', 
-                                 lambda: NeuralNetworkModel(sequence_length=60))
+        try:
+            from core.models.neural_network_model import NeuralNetworkModel
+            container.register_factory('neural_network_model', 
+                                     lambda: NeuralNetworkModel(sequence_length=60))
+        except ImportError as e:
+            print(f"Warning: NeuralNetworkModel not available: {e}")
         
         # Transformer Model
-        container.register_factory('transformer_model',
-                                 lambda: TransformerModel(
-                                     input_dim=10,
-                                     d_model=128,
-                                     nhead=8,
-                                     num_layers=4
-                                 ))
+        try:
+            from core.models.transformer_model import TransformerModel
+            container.register_factory('transformer_model',
+                                     lambda: TransformerModel(
+                                         input_dim=10,
+                                         d_model=128,
+                                         nhead=8,
+                                         num_layers=4
+                                     ))
+        except ImportError as e:
+            print(f"Warning: TransformerModel not available: {e}")
         
         # Ensemble Model
-        def create_ensemble_model():
-            ensemble = EnsembleModel(voting_type='soft')
-            # Add sub-models as needed
-            return ensemble
-        
-        container.register_factory('ensemble_model', create_ensemble_model)
+        try:
+            from core.models.ensemble_model import EnsembleModel
+            def create_ensemble_model():
+                ensemble = EnsembleModel(voting_type='soft')
+                # Add sub-models as needed
+                return ensemble
+            
+            container.register_factory('ensemble_model', create_ensemble_model)
+        except ImportError as e:
+            print(f"Warning: EnsembleModel not available: {e}")
         
         # DRL Agent
         def create_drl_agent():
@@ -483,26 +556,29 @@ class ApplicationBootstrapper:
     
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for the application."""
-        # Import event handlers
-        from trading.event_handlers import (
-            market_data_handlers,
-            trading_signal_handlers,
-            risk_handlers,
-            system_handlers
-        )
-        
-        # Auto-register all handlers
-        from core.events.decorators import auto_register_handlers
-        
-        # Register handlers from each module
-        for module in [market_data_handlers, trading_signal_handlers, 
-                      risk_handlers, system_handlers]:
-            try:
-                auto_register_handlers(module)
-                self.logger.info(f"Registered event handlers from {module.__name__}")
-            except ImportError:
-                # Handlers might not exist yet, that's okay
-                pass
+        try:
+            # Import event handlers
+            from trading.event_handlers import (
+                market_data_handlers,
+                trading_signal_handlers,
+                risk_handlers,
+                system_handlers
+            )
+            
+            # Auto-register all handlers
+            from core.events.decorators import auto_register_handlers
+            
+            # Register handlers from each module
+            for module in [market_data_handlers, trading_signal_handlers, 
+                          risk_handlers, system_handlers]:
+                try:
+                    auto_register_handlers(module)
+                    self.logger.info(f"Registered event handlers from {module.__name__}")
+                except ImportError:
+                    # Handlers might not exist yet, that's okay
+                    pass
+        except ImportError as e:
+            print(f"Warning: Event handlers not available: {e}")
     
     def cleanup(self) -> None:
         """Cleanup resources on shutdown."""

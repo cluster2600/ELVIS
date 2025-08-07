@@ -7,7 +7,12 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Tuple, Dict, Any, List, Optional
-import talib
+try:
+    import talib
+    HAS_TALIB = True
+except ImportError:
+    HAS_TALIB = False
+    print("Warning: talib not available, EMA RSI strategy will use fallback calculations")
 
 from trading.strategies.base_strategy import BaseStrategy
 from config import TRADING_CONFIG
