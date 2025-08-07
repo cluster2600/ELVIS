@@ -158,6 +158,7 @@ def main(mode: str, log_level: str):
         risk_manager = container.get('risk_manager')
         price_fetcher = container.get('price_fetcher')
         executor = container.get('executor')
+        llm_advisor = container.get('llm_advisor')
         
         # Get the active strategy (ensemble or research-based)
         active_strategy = container.get('strategy')
@@ -558,6 +559,38 @@ def main(mode: str, log_level: str):
                         
                         logger.info(f"Latest indicators - RSI: {rsi_str}, MACD: {macd_str}, SMA: {sma_str}")
                         
+                        # 🤖 PERIODIC LLM MARKET ANALYSIS (every 10th iteration)
+                        if hasattr(trading_loop, 'iteration_count'):
+                            trading_loop.iteration_count += 1
+                        else:
+                            trading_loop.iteration_count = 1
+                            
+                        if llm_advisor and trading_loop.iteration_count % 10 == 0:
+                            try:
+                                sentiment_analysis = llm_advisor.analyze_market_sentiment(market_data)
+                                sentiment = sentiment_analysis.get('sentiment', 'Neutral')
+                                sentiment_confidence = sentiment_analysis.get('confidence', 0)
+                                risk_level = sentiment_analysis.get('risk_level', 'Medium')
+                                analysis = sentiment_analysis.get('analysis', '')
+                                
+                                logger.info(f"🧠 LLM Market Sentiment: {sentiment} ({sentiment_confidence:.1%} confidence)")
+                                logger.info(f"📊 Risk Level: {risk_level}")
+                                if analysis:
+                                    logger.info(f"💡 LLM Analysis: {analysis[:100]}...")
+                                    
+                                # Store for dashboard
+                                if 'dashboard' in locals() and hasattr(dashboard, 'config'):
+                                    dashboard.config['llm_sentiment'] = {
+                                        'sentiment': sentiment,
+                                        'confidence': sentiment_confidence,
+                                        'risk_level': risk_level,
+                                        'analysis': analysis,
+                                        'timestamp': sentiment_analysis.get('timestamp')
+                                    }
+                                    
+                            except Exception as e:
+                                logger.debug(f"LLM sentiment analysis failed: {e}")
+                        
                         # BALANCED STARTER STRATEGY - Only execute if not main strategy
                         if strategy_mode != 'balanced':
                             try:
@@ -645,6 +678,35 @@ def main(mode: str, log_level: str):
                             
                             logger.info(f"🎉 NEW METHOD RESULT: {signal} with confidence {confidence:.3f}")
                             
+                            # 🤖 LLM SIGNAL ENHANCEMENT
+                            if llm_advisor and signal in ['BUY', 'SELL']:
+                                try:
+                                    llm_analysis = llm_advisor.enhance_trading_signal(signal, confidence, market_data)
+                                    
+                                    # Apply LLM confidence adjustment
+                                    original_confidence = confidence
+                                    confidence = llm_analysis.get('adjusted_confidence', confidence)
+                                    validation = llm_analysis.get('validation', 'CAUTION')
+                                    
+                                    logger.info(f"🧠 LLM Enhancement: {validation} | Confidence {original_confidence:.3f} → {confidence:.3f}")
+                                    
+                                    if validation == 'REJECT':
+                                        logger.warning(f"🚫 LLM REJECTED signal: {llm_analysis.get('reasoning', 'No reason given')}")
+                                        signal = 'HOLD'
+                                        confidence = 0.1
+                                    elif validation == 'CAUTION':
+                                        logger.info(f"⚠️ LLM CAUTION: {llm_analysis.get('recommendation', 'Proceed with caution')}")
+                                    elif validation == 'CONFIRM':
+                                        logger.info(f"✅ LLM CONFIRMS signal: {llm_analysis.get('recommendation', 'Signal validated')}")
+                                    
+                                    # Log risk factors
+                                    risk_factors = llm_analysis.get('risk_factors', [])
+                                    if risk_factors:
+                                        logger.info(f"⚠️ LLM Risk Factors: {', '.join(risk_factors)}")
+                                        
+                                except Exception as e:
+                                    logger.warning(f"LLM enhancement failed: {e}")
+                            
                             # EMERGENCY ATH FIX: Allow HOLD during extreme market conditions
                             if signal == 'HOLD':
                                 # During extreme ATH periods, HOLD is often the correct decision
@@ -655,7 +717,7 @@ def main(mode: str, log_level: str):
                                 else:
                                     logger.info(f"⏸️ HOLD signal - Waiting for better opportunity")
                             
-                            logger.info(f"Strategy signal for {symbol}: {signal} (confidence: {confidence:.3f})")
+                            logger.info(f"Final signal for {symbol}: {signal} (confidence: {confidence:.3f})")
                             
                             # CRITICAL: Check for stop losses on open positions FIRST
                             try:

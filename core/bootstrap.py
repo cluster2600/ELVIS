@@ -553,6 +553,23 @@ class ApplicationBootstrapper:
                 return None
         
         container.register_factory('drl_agent', create_drl_agent)
+        
+        # LLM Trading Advisor
+        def create_llm_advisor():
+            try:
+                from trading.advisors.llm_advisor import LLMTradingAdvisor
+                logger = container.get('logger')
+                return LLMTradingAdvisor(
+                    llm_endpoint="http://localhost:1234",
+                    model_name="openai/gpt-oss-20b",
+                    logger=logger
+                )
+            except Exception as e:
+                logger = container.get('logger')
+                logger.warning(f"Failed to create LLM advisor: {e}")
+                return None
+        
+        container.register_singleton('llm_advisor', create_llm_advisor)
     
     def _setup_event_handlers(self) -> None:
         """Setup event handlers for the application."""
