@@ -250,48 +250,18 @@ class BinanceExecutor(BaseExecutor):
             self.db_available = False
 
     def _calculate_paper_balance(self) -> Dict[str, float]:
-        """Calculate paper trading balance with multi-asset support"""
-        if not self.db_available:
-            # Initial balances: $1000 USDT + $1000 equivalent BNB
-            bnb_price = self._get_mock_price('BNBUSDT') or 600.0  # Assume $600 per BNB
-            initial_bnb_amount = 1000.0 / bnb_price  # $1000 worth of BNB
-            return {'USDT': 1000.0, 'BNB': initial_bnb_amount}
+        """Calculate paper trading balance - ALWAYS start fresh with $1000 USDT + $1000 BNB"""
+        # CLEAN SLATE: Always start with exactly $1000 USDT + $1000 worth of BNB
+        bnb_price = self._get_mock_price('BNBUSDT') or 600.0  # Current BNB price
+        initial_bnb_amount = 1000.0 / bnb_price  # $1000 worth of BNB (~1.67 BNB)
         
-        try:
-            from utils.paper_trade_db import get_all_balances, get_all_trades
-            
-            # Get stored balances
-            balances = get_all_balances()
-            
-            # Initialize with proper starting balances if not exist
-            if not balances:
-                bnb_price = self._get_mock_price('BNBUSDT') or 600.0
-                initial_bnb_amount = 1000.0 / bnb_price
-                balances = {'USDT': 1000.0, 'BNB': initial_bnb_amount}
-            
-            # Calculate USDT balance from trades (legacy method)
-            usdt_balance = balances.get('USDT', 1000.0)
-            trades = get_all_trades(limit=10000, exclude_test=True)
-            for trade in trades:
-                if trade[2] == 'BTCUSDT':  # Only apply trade PnL to USDT for BTC trades
-                    pnl = float(trade[6]) if trade[6] is not None else 0.0
-                    fee = float(trade[7]) if trade[7] is not None else 0.0
-                    usdt_balance += pnl - fee
-            
-            # Update USDT balance
-            balances['USDT'] = usdt_balance
-            
-            # Ensure we have proper BNB balance (equivalent to $1000 initially)
-            if 'BNB' not in balances or balances['BNB'] <= 0:
-                bnb_price = self._get_mock_price('BNBUSDT') or 600.0
-                balances['BNB'] = 1000.0 / bnb_price  # $1000 equivalent (~1.67 BNB)
-            
-            return balances
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating paper balance: {e}", exc_info=True)
-            bnb_price = self._get_mock_price('BNBUSDT') or 600.0
-            return {'USDT': 1000.0, 'BNB': 1000.0 / bnb_price}
+        fresh_balance = {
+            'USDT': 1000.0,  # Always start with $1000 USDT
+            'BNB': initial_bnb_amount  # Always start with $1000 worth of BNB
+        }
+        
+        self.logger.info(f"💰 PAPER TRADING: Fresh start - $1000 USDT + {initial_bnb_amount:.6f} BNB (${1000:.2f} equivalent)")
+        return fresh_balance
 
     def execute_stop_loss(self, symbol: str, quantity: float, stop_price: float, **kwargs) -> Dict[str, Any]:
         """Execute stop loss - force close losing position"""
