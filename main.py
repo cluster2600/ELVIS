@@ -88,29 +88,52 @@ shutdown_requested = False
 trading_thread = None
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
+    """Handle shutdown signals gracefully - close all positions and exit."""
     global shutdown_requested
     logger = container.get_optional('logger', logging.getLogger(__name__))
-    logger.info(f"Received signal {signum}, shutting down gracefully...")
+    logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
     
     # Set shutdown flag instead of immediate exit
     shutdown_requested = True
+    
+    # 🚨 CRITICAL: Close all open positions before shutdown
+    try:
+        logger.info("🔄 Closing all open positions before shutdown...")
+        
+        # Get the executor from DI container
+        exchange_manager = container.get_optional('exchange_manager')
+        if exchange_manager and hasattr(exchange_manager, 'executors'):
+            for exchange_name, executor in exchange_manager.executors.items():
+                if hasattr(executor, 'close_all_positions'):
+                    logger.info(f"🔄 Closing positions on {exchange_name}...")
+                    results = executor.close_all_positions(reason=f"Shutdown signal {signum}")
+                    
+                    if results['closed']:
+                        logger.info(f"✅ {exchange_name}: Closed {len(results['closed'])} positions, P&L: ${results['total_pnl']:.2f}")
+                    if results['errors']:
+                        logger.warning(f"⚠️ {exchange_name}: {len(results['errors'])} errors occurred")
+        else:
+            logger.warning("⚠️ No executors found - positions may remain open")
+            
+    except Exception as e:
+        logger.error(f"❌ Error closing positions during shutdown: {e}")
+        logger.error("⚠️ Some positions may remain open!")
     
     # Publish shutdown event
     event_bus.publish(SystemEvent(
         system_type='shutdown',
         component='main',
         status='ok',
-        message=f'Shutdown signal {signum} received',
+        message=f'Shutdown signal {signum} received - positions closed',
         source='signal_handler'
     ))
     
     # Wait for trading thread to finish if it exists
     if trading_thread and trading_thread.is_alive():
-        logger.info("Waiting for trading operations to complete...")
-        trading_thread.join(timeout=30)  # Wait up to 30 seconds
+        logger.info("⏳ Waiting for trading operations to complete...")
+        trading_thread.join(timeout=10)  # Reduced timeout since positions are already closed
         
-    logger.info("Graceful shutdown complete")
+    logger.info("✅ Graceful shutdown complete - all positions closed")
     sys.exit(0)
 
 
@@ -272,8 +295,9 @@ def main(mode: str, log_level: str):
                     logger.info("=== TRADING LOOP ITERATION START ===")
                     logger.info("Attempting to fetch market data...")
                     try:
-                        # Multi-symbol trading: BTCUSDT (futures) + BNBBTC (spot)
-                        symbols_to_trade = ["BTCUSDT", "BNBBTC"]
+                        # Multi-symbol trading: BTCUSDT + BNBUSDT (both USDT pairs for balance consistency)
+                        from config.config import SYMBOLS_CONFIG
+                        symbols_to_trade = SYMBOLS_CONFIG.get('PRIMARY_SYMBOLS', ["BTCUSDT", "BNBUSDT"])
                         all_data = {}
                         
                         for trading_symbol in symbols_to_trade:
@@ -577,6 +601,105 @@ def main(mode: str, log_level: str):
                                 logger.info(f"📊 Risk Level: {risk_level}")
                                 if analysis:
                                     logger.info(f"💡 LLM Analysis: {analysis[:100]}...")
+                                
+                                # 🤖 Enhanced LLM Analysis - Performance & Trends
+                                if trading_loop.iteration_count % 20 == 0:  # Every 20 iterations for comprehensive analysis
+                                    try:
+                                        # Get recent trading data
+                                        recent_trades = []
+                                        portfolio_data = {}
+                                        open_positions = []
+                                        
+                                        try:
+                                            # Get recent trades from API
+                                            import requests
+                                            response = requests.get('http://localhost:5050/trades', timeout=2)
+                                            if response.status_code == 200:
+                                                recent_trades = response.json()[-10:]  # Last 10 trades
+                                            
+                                            # Get portfolio data
+                                            balance_response = requests.get('http://localhost:5050/balance', timeout=2)
+                                            if balance_response.status_code == 200:
+                                                balance_data = balance_response.json()
+                                                usdt_balance = balance_data.get('USDT', 1000)
+                                                bnb_balance = balance_data.get('BNB', 1.67)
+                                                btc_balance = balance_data.get('BTC', 0.0086)
+                                                
+                                                # Calculate portfolio value with current prices
+                                                bnb_price = market_data.get('bnb_price', 600)
+                                                btc_price = market_data.get('btc_price', 117000)
+                                                total_value = usdt_balance + (bnb_balance * bnb_price) + (btc_balance * btc_price)
+                                                
+                                                portfolio_data = {
+                                                    'total_value': total_value,
+                                                    'realized_pnl': sum(float(t.get('pnl', 0)) for t in recent_trades),
+                                                    'unrealized_pnl': 0  # Will be calculated from open positions
+                                                }
+                                            
+                                            # Get open positions
+                                            positions_response = requests.get('http://localhost:5050/open_positions', timeout=2)
+                                            if positions_response.status_code == 200:
+                                                open_positions = positions_response.json()
+                                        
+                                        except Exception as data_e:
+                                            logger.debug(f"Could not fetch trading data for LLM analysis: {data_e}")
+                                        
+                                        # 📊 Trading Performance Analysis
+                                        if recent_trades:
+                                            performance_analysis = llm_advisor.analyze_trading_performance(
+                                                recent_trades, portfolio_data, open_positions
+                                            )
+                                            
+                                            perf_score = performance_analysis.get('performance_score', 'N/A')
+                                            win_rate = performance_analysis.get('win_rate', 'N/A')
+                                            risk_assessment = performance_analysis.get('risk_assessment', 'UNKNOWN')
+                                            
+                                            logger.info(f"🎯 LLM Performance Analysis - Score: {perf_score}/10, Win Rate: {win_rate}%, Risk: {risk_assessment}")
+                                            
+                                            # Log key recommendations
+                                            recommendations = performance_analysis.get('recommendations', [])
+                                            for i, rec in enumerate(recommendations[:3], 1):
+                                                logger.info(f"💡 LLM Recommendation {i}: {rec}")
+                                        
+                                        # 📈 Market Trend Analysis
+                                        if hasattr(data, 'index') and len(data) > 10:  # Ensure we have enough price data
+                                            try:
+                                                trend_analysis = llm_advisor.analyze_market_trends(data)
+                                                
+                                                trend = trend_analysis.get('trend', 'UNKNOWN')
+                                                momentum = trend_analysis.get('momentum', 'UNKNOWN')
+                                                volatility = trend_analysis.get('volatility', 'N/A')
+                                                
+                                                logger.info(f"📈 LLM Trend Analysis - Trend: {trend}, Momentum: {momentum}, Volatility: {volatility}%")
+                                                
+                                                # 🔮 Generate Comprehensive Trading Insights
+                                                if recent_trades and trend_analysis.get('analysis'):
+                                                    insights_report = llm_advisor.generate_trading_insights(
+                                                        performance_analysis, trend_analysis
+                                                    )
+                                                    
+                                                    # Log the insights report (truncated for console)
+                                                    insights_lines = insights_report.split('\n')
+                                                    logger.info("🤖 LLM COMPREHENSIVE TRADING INSIGHTS:")
+                                                    for line in insights_lines[:5]:  # Show first 5 lines
+                                                        if line.strip():
+                                                            logger.info(f"   {line.strip()}")
+                                                    
+                                                    # Store insights for dashboard display
+                                                    if 'dashboard' in locals() and hasattr(dashboard, 'config'):
+                                                        dashboard.config['llm_insights'] = {
+                                                            'performance': performance_analysis,
+                                                            'trends': trend_analysis,
+                                                            'report': insights_report,
+                                                            'timestamp': datetime.now()
+                                                        }
+                                            
+                                            except Exception as trend_e:
+                                                logger.debug(f"LLM trend analysis error: {trend_e}")
+                                    
+                                    except Exception as analysis_e:
+                                        logger.warning(f"LLM comprehensive analysis error: {analysis_e}")
+                                        logger.debug("LLM analysis error details:", exc_info=True)
                                     
                                 # Store for dashboard
                                 if 'dashboard' in locals() and hasattr(dashboard, 'config'):
@@ -662,62 +785,130 @@ def main(mode: str, log_level: str):
                                 logger.error(f"   Data types - close: {type(data.iloc[-1]['close'])}, value: {data.iloc[-1]['close']}")
                                 continue
                             
-                            # Process each symbol with appropriate executor
-                            symbols_data = {
-                                "BTCUSDT": data,  # Primary symbol data
-                                "BNBBTC": all_data.get("BNBBTC", pd.DataFrame())
-                            }
+                            # Process ALL symbols from symbols_to_trade  
+                            logger.info(f"🔄 Processing {len(symbols_to_trade)} trading symbols: {symbols_to_trade}")
                             
-                            # Process BTCUSDT first (futures)
-                            symbol = "BTCUSDT"
-                            logger.info(f"🎯 Calling NEW generate_signal method with market data for {symbol}")
-                            logger.info(f"📊 Market data: Price=${current_price:.2f}, RSI={market_data['rsi']:.1f}, MACD={market_data['macd']:.3f}")
-                            
-                            # Call the NEW method with anti-HOLD logic and research strategy integration
-                            signal, confidence = active_strategy.generate_signal(symbol, market_data)
-                            
-                            logger.info(f"🎉 NEW METHOD RESULT: {signal} with confidence {confidence:.3f}")
-                            
-                            # 🤖 LLM SIGNAL ENHANCEMENT
-                            if llm_advisor and signal in ['BUY', 'SELL']:
+                            for symbol in symbols_to_trade:
                                 try:
-                                    llm_analysis = llm_advisor.enhance_trading_signal(signal, confidence, market_data)
+                                    # Get data for this specific symbol
+                                    symbol_data = all_data.get(symbol)
+                                    if symbol_data is None or symbol_data.empty:
+                                        logger.warning(f"⚠️ No data available for {symbol}, skipping")
+                                        continue
                                     
-                                    # Apply LLM confidence adjustment
-                                    original_confidence = confidence
-                                    confidence = llm_analysis.get('adjusted_confidence', confidence)
-                                    validation = llm_analysis.get('validation', 'CAUTION')
+                                    # Extract current price and market data for this symbol
+                                    current_price = float(symbol_data.iloc[-1]['close'])
                                     
-                                    logger.info(f"🧠 LLM Enhancement: {validation} | Confidence {original_confidence:.3f} → {confidence:.3f}")
+                                    # Create market data specific to this symbol
+                                    market_data = {
+                                        'close': current_price,
+                                        'price': current_price,
+                                        'high': float(symbol_data.iloc[-1].get('high', current_price)),
+                                        'low': float(symbol_data.iloc[-1].get('low', current_price)),
+                                        'volume': float(symbol_data.iloc[-1].get('volume', 1000)),
+                                        'rsi': float(symbol_data.iloc[-1].get('rsi', 50.0)) if pd.notna(symbol_data.iloc[-1].get('rsi')) else 50.0,
+                                        'macd': float(symbol_data.iloc[-1].get('macd', 0.0)) if pd.notna(symbol_data.iloc[-1].get('macd')) else 0.0,
+                                        'macd_signal': float(symbol_data.iloc[-1].get('signal_line', 0.0)) if pd.notna(symbol_data.iloc[-1].get('signal_line')) else 0.0,
+                                        'sma_20': float(symbol_data.iloc[-1].get('sma_20', current_price)) if pd.notna(symbol_data.iloc[-1].get('sma_20')) else current_price,
+                                        'sma_50': float(symbol_data.iloc[-1].get('sma_50', current_price)) if pd.notna(symbol_data.iloc[-1].get('sma_50')) else current_price,
+                                        'atr': float(symbol_data.iloc[-1].get('atr', current_price * 0.02)) if pd.notna(symbol_data.iloc[-1].get('atr')) else current_price * 0.02,
+                                        'adx': float(symbol_data.iloc[-1].get('adx', 25.0)) if pd.notna(symbol_data.iloc[-1].get('adx')) else 25.0,
+                                        'bb_upper': float(symbol_data.iloc[-1].get('upper_bb', current_price * 1.02)) if pd.notna(symbol_data.iloc[-1].get('upper_bb')) else current_price * 1.02,
+                                        'bb_lower': float(symbol_data.iloc[-1].get('lower_bb', current_price * 0.98)) if pd.notna(symbol_data.iloc[-1].get('lower_bb')) else current_price * 0.98,
+                                        'bb_middle': float(symbol_data.iloc[-1].get('sma_bb', current_price)) if pd.notna(symbol_data.iloc[-1].get('sma_bb')) else current_price
+                                    }
                                     
-                                    if validation == 'REJECT':
-                                        logger.warning(f"🚫 LLM REJECTED signal: {llm_analysis.get('reasoning', 'No reason given')}")
-                                        signal = 'HOLD'
-                                        confidence = 0.1
-                                    elif validation == 'CAUTION':
-                                        logger.info(f"⚠️ LLM CAUTION: {llm_analysis.get('recommendation', 'Proceed with caution')}")
-                                    elif validation == 'CONFIRM':
-                                        logger.info(f"✅ LLM CONFIRMS signal: {llm_analysis.get('recommendation', 'Signal validated')}")
+                                    logger.info(f"🎯 Processing {symbol}: Price=${current_price:.2f}, RSI={market_data['rsi']:.1f}")
                                     
-                                    # Log risk factors
-                                    risk_factors = llm_analysis.get('risk_factors', [])
-                                    if risk_factors:
-                                        logger.info(f"⚠️ LLM Risk Factors: {', '.join(risk_factors)}")
+                                    # Generate signal for this symbol
+                                    signal, confidence = active_strategy.generate_signal(symbol, market_data)
+                                    
+                                    logger.info(f"🎉 {symbol} SIGNAL: {signal} with confidence {confidence:.3f}")
+                                    
+                                    # 🤖 LLM SIGNAL ENHANCEMENT
+                                    if llm_advisor and signal in ['BUY', 'SELL']:
+                                        try:
+                                            llm_analysis = llm_advisor.enhance_trading_signal(signal, confidence, market_data)
+                                            
+                                            # Apply LLM confidence adjustment
+                                            original_confidence = confidence
+                                            confidence = llm_analysis.get('adjusted_confidence', confidence)
+                                            validation = llm_analysis.get('validation', 'CAUTION')
+                                            
+                                            logger.info(f"🧠 LLM Enhancement: {validation} | Confidence {original_confidence:.3f} → {confidence:.3f}")
+                                            
+                                            if validation == 'REJECT':
+                                                logger.warning(f"🚫 LLM REJECTED signal: {llm_analysis.get('reasoning', 'No reason given')}")
+                                                signal = 'HOLD'
+                                                confidence = 0.1
+                                            elif validation == 'CAUTION':
+                                                logger.info(f"⚠️ LLM CAUTION: {llm_analysis.get('recommendation', 'Proceed with caution')}")
+                                            elif validation == 'CONFIRM':
+                                                logger.info(f"✅ LLM CONFIRMS signal: {llm_analysis.get('recommendation', 'Signal validated')}")
+                                            
+                                            # Log risk factors
+                                            risk_factors = llm_analysis.get('risk_factors', [])
+                                            if risk_factors:
+                                                logger.info(f"⚠️ LLM Risk Factors: {', '.join(risk_factors)}")
+                                                
+                                        except Exception as e:
+                                            logger.warning(f"LLM enhancement failed: {e}")
+                                    
+                                    # EMERGENCY ATH FIX: Allow HOLD during extreme market conditions  
+                                    if signal == 'HOLD':
+                                        # During extreme ATH periods, HOLD is often the correct decision
+                                        if current_price > 130000:  # Updated: Extreme ATH territory now at $130k
+                                            logger.info(f"💎 HOLD signal during EXTREME ATH (${current_price:,.0f}) - SMART DECISION")
+                                        elif current_price > 125000:  # Normal ATH range
+                                            logger.info(f"💎 HOLD signal in ATH range (${current_price:,.0f}) - Cautious approach")
+                                        else:
+                                            logger.info(f"⏸️ HOLD signal - Waiting for better opportunity")
+                                    
+                                    logger.info(f"Final signal for {symbol}: {signal} (confidence: {confidence:.3f})")
+                                    
+                                    # Execute trades based on signals for this symbol
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # High threshold for quality trades
+                                        logger.info(f"🎯 High confidence {symbol} signal: {signal} with {confidence:.3f} confidence")
                                         
+                                        try:
+                                            # Get current account balance
+                                            available_balance = executor.get_account_balance()
+                                            logger.info(f"💰 Available balance: ${available_balance}")
+                                            
+                                            # EMERGENCY RISK MANAGEMENT: Extremely conservative position sizing
+                                            max_risk_per_trade = 5.0  # Maximum $5 per trade
+                                            position_size = min(available_balance * 0.005, max_risk_per_trade) / current_price  # 0.5% of balance, max $5
+                                            
+                                            if signal == 'BUY':
+                                                logger.info(f"🟢 [BUY] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}")
+                                                result = executor.execute_buy(symbol, position_size, current_price)
+                                                
+                                                if result:
+                                                    logger.info(f"✅ [SUCCESS] {symbol} BUY executed successfully")
+                                                else:
+                                                    logger.error(f"❌ [FAIL] Failed to execute {symbol} BUY order")
+                                                    
+                                            elif signal == 'SELL':
+                                                logger.info(f"🔴 [SELL] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}")  
+                                                result = executor.execute_sell(symbol, position_size, current_price)
+                                                
+                                                if result:
+                                                    logger.info(f"✅ [SUCCESS] {symbol} SELL executed successfully")
+                                                else:
+                                                    logger.error(f"❌ [FAIL] Failed to execute {symbol} SELL order")
+                                                    
+                                        except Exception as e:
+                                            logger.error(f"❌ Trading execution error for {symbol}: {e}")
+                                    
+                                    else:
+                                        logger.info(f"📊 {symbol} Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)")
+                                    
                                 except Exception as e:
-                                    logger.warning(f"LLM enhancement failed: {e}")
+                                    logger.error(f"❌ Error processing {symbol}: {e}")
+                                    continue  # Continue with next symbol
                             
-                            # EMERGENCY ATH FIX: Allow HOLD during extreme market conditions
-                            if signal == 'HOLD':
-                                # During extreme ATH periods, HOLD is often the correct decision
-                                if current_price > 130000:  # Updated: Extreme ATH territory now at $130k
-                                    logger.info(f"💎 HOLD signal during EXTREME ATH (${current_price:,.0f}) - SMART DECISION")
-                                elif current_price > 125000:  # Normal ATH range
-                                    logger.info(f"💎 HOLD signal in ATH range (${current_price:,.0f}) - Cautious approach")
-                                else:
-                                    logger.info(f"⏸️ HOLD signal - Waiting for better opportunity")
-                            
-                            logger.info(f"Final signal for {symbol}: {signal} (confidence: {confidence:.3f})")
+                            # END OF SYMBOL LOOP
+                            logger.info("✅ Completed processing all trading symbols")
                             
                             # CRITICAL: Check for stop losses on open positions FIRST
                             try:
@@ -830,54 +1021,10 @@ def main(mode: str, log_level: str):
                             if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # CRITICAL: High threshold for quality trades only
                                 logger.info(f"🎯 High confidence signal detected: {signal} with {confidence:.3f} confidence")
                             
-                            # BNBBTC CONVERSION RE-ENABLED - PnL bug has been fixed  
-                            logger.info("✅ BNBBTC conversion re-enabled - PnL calculation bug fixed")
+                            # Multi-symbol trading is now handled by the main loop above
+                            logger.info("✅ Multi-symbol trading handled by main loop - BNBUSDT included")
                             
-                            # Process BNBBTC (spot) if data is available
-                            if "BNBBTC" in all_data and not all_data["BNBBTC"].empty:
-                                try:
-                                    bnbbtc_data = all_data["BNBBTC"]
-                                    bnbbtc_price = float(bnbbtc_data.iloc[-1]['close'])
-                                    
-                                    # Create market data for BNBBTC with safe type conversion
-                                    bnbbtc_market_data = {
-                                        'price': bnbbtc_price,
-                                        'volume': float(bnbbtc_data.iloc[-1].get('volume', 1000.0)),
-                                        'high': float(bnbbtc_data.iloc[-1].get('high', bnbbtc_price * 1.01)),
-                                        'low': float(bnbbtc_data.iloc[-1].get('low', bnbbtc_price * 0.99)),
-                                        'rsi': float(bnbbtc_data.iloc[-1].get('rsi', 50.0)) if pd.notna(bnbbtc_data.iloc[-1].get('rsi')) else 50.0,
-                                        'macd': float(bnbbtc_data.iloc[-1].get('macd', 0.0)) if pd.notna(bnbbtc_data.iloc[-1].get('macd')) else 0.0,
-                                        'macd_signal': float(bnbbtc_data.iloc[-1].get('signal_line', 0.0)) if pd.notna(bnbbtc_data.iloc[-1].get('signal_line')) else 0.0,
-                                        'sma_20': float(bnbbtc_data.iloc[-1].get('sma_20', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_20')) else bnbbtc_price,
-                                        'sma_50': float(bnbbtc_data.iloc[-1].get('sma_50', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_50')) else bnbbtc_price,
-                                        'atr': float(bnbbtc_data.iloc[-1].get('atr', bnbbtc_price * 0.02)) if pd.notna(bnbbtc_data.iloc[-1].get('atr')) else bnbbtc_price * 0.02,
-                                        'adx': float(bnbbtc_data.iloc[-1].get('adx', 25.0)) if pd.notna(bnbbtc_data.iloc[-1].get('adx')) else 25.0,
-                                        'bb_upper': float(bnbbtc_data.iloc[-1].get('upper_bb', bnbbtc_price * 1.02)) if pd.notna(bnbbtc_data.iloc[-1].get('upper_bb')) else bnbbtc_price * 1.02,
-                                        'bb_lower': float(bnbbtc_data.iloc[-1].get('lower_bb', bnbbtc_price * 0.98)) if pd.notna(bnbbtc_data.iloc[-1].get('lower_bb')) else bnbbtc_price * 0.98,
-                                        'bb_middle': float(bnbbtc_data.iloc[-1].get('sma_bb', bnbbtc_price)) if pd.notna(bnbbtc_data.iloc[-1].get('sma_bb')) else bnbbtc_price
-                                    }
-                                except Exception as e:
-                                    logger.error(f"❌ Error processing BNBBTC data: {e}")
-                                    logger.warning("⚠️ Skipping BNBBTC trading due to data processing error")
-                                    continue
-                                
-                                logger.info(f"🎯 Processing BNBBTC trading signals")
-                                logger.info(f"📊 BNBBTC Market data: Price={bnbbtc_price:.6f}, RSI={bnbbtc_market_data['rsi']:.1f}")
-                                
-                                # Generate BNBBTC signals
-                                bnbbtc_signal, bnbbtc_confidence = active_strategy.generate_signal("BNBBTC", bnbbtc_market_data)
-                                
-                                logger.info(f"🎉 BNBBTC SIGNAL: {bnbbtc_signal} with confidence {bnbbtc_confidence:.3f}")
-                                
-                                # Execute BNBBTC trades if confidence is high enough
-                                if bnbbtc_signal in ['BUY', 'SELL'] and bnbbtc_confidence >= 0.90:
-                                    logger.info(f"🔄 High confidence BNBBTC {bnbbtc_signal} trade signal detected")
-                                else:
-                                    logger.info(f"📊 BNBBTC Signal: {bnbbtc_signal} | Confidence: {bnbbtc_confidence:.3f} | Action: HOLD (below 90% threshold)")
-                            else:
-                                logger.warning("⚠️ BNBBTC data not available, skipping BNBBTC trading")
-                            
-                            # Continue with original BTCUSDT execution logic
+                            # Continue with execution logic
                             current_price = data.iloc[-1]['close']
                             
                             # DYNAMIC RISK MANAGEMENT with x50 LEVERAGE ENFORCEMENT

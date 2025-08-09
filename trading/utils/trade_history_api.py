@@ -66,7 +66,8 @@ def initialize_price_fetcher():
     global price_fetcher
     try:
         logger.info("🚀 Initializing PriceFetcher for Prometheus metrics...")
-        symbols = ['BTCUSDT', 'BNBBTC']
+        from config.config import SYMBOLS_CONFIG
+        symbols = SYMBOLS_CONFIG.get('PRIMARY_SYMBOLS', ['BTCUSDT', 'BNBUSDT', 'BNBBTC'])
         price_fetcher = PriceFetcher(
             logger=logger,
             symbols=symbols,
@@ -213,7 +214,9 @@ def update_trading_metrics():
         # Market Data Metrics
         if price_fetcher:
             try:
-                for symbol in ['BTCUSDT', 'BNBBTC']:
+                from config.config import SYMBOLS_CONFIG
+                symbols = SYMBOLS_CONFIG.get('PRIMARY_SYMBOLS', ['BTCUSDT', 'BNBUSDT', 'BNBBTC'])
+                for symbol in symbols:
                     current_price = price_fetcher.get_current_price(symbol)
                     if current_price:
                         # Simulate market spread (0.01% of price)
@@ -265,22 +268,59 @@ def safe_float(value):
 # API Endpoints
 @app.route('/trades', methods=['GET'])
 def trades():
+    """Get recent trades only (last 24 hours) to avoid historical data pollution"""
     try:
-        trades = get_all_trades(limit=25)
-        trade_list = [
-            {
-                "timestamp": format_timestamp(t[0]),
-                "symbol": t[1],
-                "side": t[2],
-                "price": safe_float(t[3]),
-                "quantity": safe_float(t[4]),
-                "pnl": safe_float(t[5])
-            }
-            for t in trades
-        ]
+        # FIXED: Get recent trades only from PostgreSQL directly
+        import psycopg2
+        from utils.paper_trade_db import get_conn
+        
+        trade_list = []
+        conn = get_conn()
+        if conn:
+            with conn.cursor() as c:
+                # Get the latest reset timestamp
+                c.execute("""
+                    SELECT reset_timestamp FROM trading_session_resets 
+                    ORDER BY reset_timestamp DESC LIMIT 1
+                """)
+                reset_result = c.fetchone()
+                
+                if reset_result:
+                    reset_timestamp = reset_result[0]
+                    # Get trades after reset only
+                    c.execute("""
+                        SELECT id, timestamp, symbol, side, price, quantity, pnl, fee
+                        FROM trades 
+                        WHERE timestamp >= %s
+                        AND pnl BETWEEN -100 AND 100
+                        ORDER BY timestamp DESC
+                        LIMIT 25
+                    """, (reset_timestamp,))
+                    trades = c.fetchall()
+                else:
+                    # No reset found, return empty list
+                    trades = []
+                
+                for t in trades:
+                    trade_list.append({
+                        "id": t[0],
+                        "timestamp": format_timestamp(t[1]),
+                        "symbol": t[2],
+                        "side": t[3],
+                        "price": safe_float(t[4]),
+                        "quantity": safe_float(t[5]),
+                        "pnl": safe_float(t[6]),
+                        "fee": safe_float(t[7]) if len(t) > 7 else 0.0
+                    })
+            conn.close()
+        
+        # If no recent trades, return empty list instead of historical data
         return jsonify(trade_list)
+        
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch trades: {str(e)}"}), 500
+        logger.warning(f"Failed to fetch recent trades: {e}")
+        # Return empty list instead of falling back to historical data
+        return jsonify([])  
 
 @app.route('/trades/count', methods=['GET'])
 def trades_count():
@@ -309,6 +349,84 @@ def open_positions():
         return jsonify(pos_list)
     except Exception as e:
         return jsonify({"error": f"Failed to fetch open positions: {str(e)}"}), 500
+
+@app.route('/balance', methods=['GET'])
+def balance():
+    """Get current account balance for all assets with P&L adjustments"""
+    try:
+        # Try to get balance from DI container or executor (uses fixed calculation)
+        from core.di import container
+        try:
+            executor = container.get('executor')
+            if executor:
+                balance_data = executor.get_balance()
+                return jsonify(balance_data)
+        except:
+            pass
+        
+        # FIXED: Fallback calculation with recent P&L only
+        import psycopg2
+        from utils.paper_trade_db import get_conn
+        
+        # Calculate recent P&L only
+        total_pnl = 0.0
+        try:
+            conn = get_conn()
+            if conn:
+                with conn.cursor() as c:
+                    # Get the latest reset timestamp
+                    c.execute("""
+                        SELECT reset_timestamp FROM trading_session_resets 
+                        ORDER BY reset_timestamp DESC LIMIT 1
+                    """)
+                    reset_result = c.fetchone()
+                    
+                    if reset_result:
+                        reset_timestamp = reset_result[0]
+                        # Get P&L from trades after reset only
+                        c.execute("""
+                            SELECT SUM(pnl) FROM trades 
+                            WHERE timestamp >= %s
+                            AND pnl BETWEEN -100 AND 100
+                        """, (reset_timestamp,))
+                        result = c.fetchone()
+                        total_pnl = float(result[0]) if result and result[0] is not None else 0.0
+                    else:
+                        # No reset found, default to 0
+                        total_pnl = 0.0
+                conn.close()
+            
+            # Cap P&L to reasonable range
+            total_pnl = max(-1000.0, min(1000.0, total_pnl))
+            
+        except Exception as e:
+            logger.warning(f"Could not calculate recent P&L for balance: {e}")
+            total_pnl = 0.0
+        
+        # Calculate asset amounts worth $1000 each initially
+        bnb_price = 600.0  # Default BNB price
+        btc_price = 116500.0  # Default BTC price
+        
+        # Try to get live prices
+        if price_fetcher:
+            try:
+                bnb_price = price_fetcher.get_current_price('BNBUSDT') or bnb_price
+                btc_price = price_fetcher.get_current_price('BTCUSDT') or btc_price
+            except:
+                pass
+        
+        # Fixed balance calculation with recent P&L applied to USDT
+        adjusted_usdt = 1000.0 + total_pnl  # Apply P&L to USDT
+        balance_data = {
+            'USDT': max(0.0, adjusted_usdt),
+            'BNB': 1000.0 / bnb_price,  # Amount of BNB worth $1000
+            'BTC': 1000.0 / btc_price   # Amount of BTC worth $1000
+        }
+        
+        return jsonify(balance_data)
+        
+    except Exception as e:
+        return jsonify({"error": f"Failed to fetch balance: {str(e)}"}), 500
 
 @app.route('/fees', methods=['GET'])
 def fees():

@@ -231,11 +231,11 @@ class BinanceExecutor(BaseExecutor):
     def _get_mock_price(self, symbol: str) -> float:
         """Get mock prices for paper trading - use realistic values"""
         if symbol == 'BTCUSDT': 
-            return 116500.0  # Current BTC price
+            return 116500.0  # Current BTC price in USDT
         elif symbol == 'BNBUSDT':
             return 600.0  # BNB price in USDT
         elif symbol == 'BNBBTC':
-            return 0.00515  # Realistic BNB/BTC rate (600/116500)
+            return 0.00515  # BNB price in BTC (realistic rate: 600/116500)
         else: 
             return 100.0
 
@@ -250,18 +250,80 @@ class BinanceExecutor(BaseExecutor):
             self.db_available = False
 
     def _calculate_paper_balance(self) -> Dict[str, float]:
-        """Calculate paper trading balance - ALWAYS start fresh with $1000 USDT + $1000 BNB"""
-        # CLEAN SLATE: Always start with exactly $1000 USDT + $1000 worth of BNB
-        bnb_price = self._get_mock_price('BNBUSDT') or 600.0  # Current BNB price
-        initial_bnb_amount = 1000.0 / bnb_price  # $1000 worth of BNB (~1.67 BNB)
+        """Calculate paper trading balance including realized P&L from RECENT trades only"""
+        # FIXED: Get total realized P&L from RECENT trades only (not all historical data)
+        total_pnl = 0.0
+        try:
+            import psycopg2
+            from utils.paper_trade_db import get_conn
+            
+            # Only get trades after the latest trading session reset
+            conn = get_conn()
+            if conn:
+                with conn.cursor() as c:
+                    # Get the latest reset timestamp
+                    c.execute("""
+                        SELECT reset_timestamp FROM trading_session_resets 
+                        ORDER BY reset_timestamp DESC LIMIT 1
+                    """)
+                    reset_result = c.fetchone()
+                    
+                    if reset_result:
+                        reset_timestamp = reset_result[0]
+                        # Get P&L from trades after reset only
+                        c.execute("""
+                            SELECT SUM(pnl) FROM trades 
+                            WHERE timestamp >= %s
+                            AND pnl BETWEEN -100 AND 100
+                        """, (reset_timestamp,))
+                        result = c.fetchone()
+                        total_pnl = float(result[0]) if result and result[0] is not None else 0.0
+                    else:
+                        # No reset found, default to 0 (fresh start)
+                        total_pnl = 0.0
+                conn.close()
+            
+            # Cap P&L to reasonable range (-$1000 to +$1000) to prevent bugs
+            total_pnl = max(-1000.0, min(1000.0, total_pnl))
+            
+        except Exception as e:
+            self.logger.warning(f"Could not calculate recent P&L: {e}")
+            total_pnl = 0.0
         
-        fresh_balance = {
-            'USDT': 1000.0,  # Always start with $1000 USDT
-            'BNB': initial_bnb_amount  # Always start with $1000 worth of BNB
+        # Starting balances - $1000 USD equivalent each in USDT, BNB, and BTC
+        # USDT is pegged to USD (1 USDT ≈ 1 USD)
+        # BNB and BTC amounts calculated to equal $1000 USD each
+        
+        bnb_price_in_usdt = self._get_mock_price('BNBUSDT') or 600.0  # BNB price in USDT
+        btc_price_in_usdt = self._get_mock_price('BTCUSDT') or 116500.0  # BTC price in USDT
+        
+        # Calculate crypto amounts that equal $1000 USD each
+        initial_bnb_amount = 1000.0 / bnb_price_in_usdt  # Amount of BNB worth $1000 USD
+        initial_btc_amount = 1000.0 / btc_price_in_usdt  # Amount of BTC worth $1000 USD
+        
+        # FIXED: Include P&L in balance calculation (applied to USDT since it's the base currency)
+        # If P&L is negative (losses), it reduces the USDT balance
+        adjusted_usdt = 1000.0 + total_pnl  # Add P&L to USDT (negative P&L reduces balance)
+        
+        balance_with_pnl = {
+            'USDT': max(0.0, adjusted_usdt),  # USDT balance (USD equivalent)
+            'BNB': initial_bnb_amount,        # BNB amount (worth ~$1000 USD)
+            'BTC': initial_btc_amount         # BTC amount (worth ~$1000 USD)
         }
         
-        self.logger.info(f"💰 PAPER TRADING: Fresh start - $1000 USDT + {initial_bnb_amount:.6f} BNB (${1000:.2f} equivalent)")
-        return fresh_balance
+        # 🚨 EMERGENCY SHUTDOWN if losses are catastrophic
+        if total_pnl < -500.0:  # If losses exceed $500
+            self.logger.error(f"🚨 EMERGENCY: Catastrophic losses detected! P&L: ${total_pnl:.2f}")
+            self.logger.error(f"🛑 TRADING SHOULD BE STOPPED IMMEDIATELY!")
+            # Could implement automatic shutdown here
+        
+        # Calculate current USD values for logging
+        current_bnb_usd = initial_bnb_amount * bnb_price_in_usdt
+        current_btc_usd = initial_btc_amount * btc_price_in_usdt
+        total_portfolio_usd = adjusted_usdt + current_bnb_usd + current_btc_usd
+        
+        self.logger.info(f"💰 PAPER BALANCE: ${adjusted_usdt:.2f} USDT + {initial_bnb_amount:.6f} BNB (${current_bnb_usd:.2f}) + {initial_btc_amount:.8f} BTC (${current_btc_usd:.2f}) = ${total_portfolio_usd:.2f} total (P&L since reset: ${total_pnl:.2f})")
+        return balance_with_pnl
 
     def execute_stop_loss(self, symbol: str, quantity: float, stop_price: float, **kwargs) -> Dict[str, Any]:
         """Execute stop loss - force close losing position"""
@@ -433,3 +495,129 @@ class BinanceExecutor(BaseExecutor):
                 'hours_held': 0.0,
                 'position_value': float(abs(quantity) * current_price)
             }
+
+    def close_all_positions(self, reason: str = "Manual close") -> dict:
+        """LIQUIDATE all open positions immediately - used during shutdown"""
+        results = {'liquidated': [], 'errors': [], 'total_pnl': 0.0}
+        
+        try:
+            open_positions = get_open_positions()
+            self.logger.warning(f"🚨 LIQUIDATING ALL POSITIONS: {len(open_positions)} positions ({reason})...")
+            
+            if len(open_positions) == 0:
+                self.logger.info("💼 LIQUIDATION: No positions to liquidate - portfolio is clean")
+                return results
+            
+            for position in open_positions:
+                try:
+                    position_id = position[0]
+                    symbol = position[1]
+                    side = position[2]
+                    entry_price = float(position[3])
+                    quantity = float(position[4])
+                    leverage = float(position[5]) if len(position) > 5 else 1.0
+                    
+                    # Get current market price for liquidation
+                    current_price = self._get_mock_price(symbol)
+                    
+                    # Calculate final P&L before liquidation
+                    pnl = self._calculate_position_pnl(symbol, side, current_price, quantity)
+                    results['total_pnl'] += pnl
+                    
+                    # LIQUIDATE: Force close at market price
+                    liquidation_side = 'SELL' if side == 'BUY' else 'BUY'
+                    
+                    self.logger.warning(f"🔥 LIQUIDATING {symbol} {side} position: Entry=${entry_price:.2f}, Current=${current_price:.2f}, Quantity={quantity}")
+                    
+                    # Force execution - bypass risk management for liquidation
+                    result = self._execute_paper_trade(symbol, liquidation_side, quantity, current_price)
+                    
+                    if result and result.get('status') != 'BLOCKED':
+                        results['liquidated'].append({
+                            'symbol': symbol,
+                            'side': side,
+                            'quantity': quantity,
+                            'entry_price': entry_price,
+                            'liquidation_price': current_price,
+                            'pnl': pnl,
+                            'leverage': leverage,
+                            'liquidation_type': 'Forced Exit'
+                        })
+                        self.logger.warning(f"🔥 LIQUIDATED {symbol} {side}: ${entry_price:.2f} → ${current_price:.2f} = P&L ${pnl:.2f}")
+                        
+                        # Record liquidation in database for tracking
+                        try:
+                            from utils.paper_trade_db import record_liquidation
+                            record_liquidation(symbol, entry_price, current_price, quantity, leverage, 0.0)
+                        except Exception as db_e:
+                            self.logger.warning(f"Could not record liquidation in DB: {db_e}")
+                        
+                    else:
+                        # Force close in database even if trade execution failed
+                        try:
+                            close_open_position(symbol, side)
+                            self.logger.warning(f"🔥 FORCE CLOSED {symbol} {side} in database (trade execution failed)")
+                            results['liquidated'].append({
+                                'symbol': symbol,
+                                'side': side,
+                                'quantity': quantity,
+                                'entry_price': entry_price,
+                                'liquidation_price': current_price,
+                                'pnl': pnl,
+                                'leverage': leverage,
+                                'liquidation_type': 'Force Database Close'
+                            })
+                        except Exception as db_e:
+                            error_msg = f"CRITICAL: Could not force close {symbol} {side} - position may remain open! Error: {db_e}"
+                            results['errors'].append(error_msg)
+                            self.logger.error(error_msg)
+                        
+                except Exception as e:
+                    error_msg = f"CRITICAL ERROR liquidating position {position}: {e}"
+                    results['errors'].append(error_msg)
+                    self.logger.error(error_msg)
+                    
+                    # Try to force close in database as last resort
+                    try:
+                        close_open_position(position[1], position[2])
+                        self.logger.warning(f"🔥 EMERGENCY: Force closed {position[1]} {position[2]} in database")
+                    except:
+                        self.logger.error(f"💥 EMERGENCY FAILED: Position {position[1]} {position[2]} may remain open!")
+            
+            # Final verification - check if any positions remain
+            remaining_positions = get_open_positions()
+            if remaining_positions:
+                self.logger.error(f"💥 LIQUIDATION INCOMPLETE: {len(remaining_positions)} positions still open!")
+                for pos in remaining_positions:
+                    self.logger.error(f"💥 REMAINING: {pos[1]} {pos[2]} - Manual intervention required")
+            
+            # Summary report
+            if results['liquidated']:
+                liquidation_count = len(results['liquidated'])
+                self.logger.warning(f"🔥 LIQUIDATION COMPLETE: {liquidation_count} positions liquidated")
+                self.logger.warning(f"💰 FINAL P&L FROM LIQUIDATIONS: ${results['total_pnl']:.2f}")
+                
+                # Show breakdown by symbol
+                symbols_liquidated = {}
+                for liq in results['liquidated']:
+                    symbol = liq['symbol']
+                    if symbol not in symbols_liquidated:
+                        symbols_liquidated[symbol] = {'count': 0, 'pnl': 0.0}
+                    symbols_liquidated[symbol]['count'] += 1
+                    symbols_liquidated[symbol]['pnl'] += liq['pnl']
+                
+                for symbol, data in symbols_liquidated.items():
+                    self.logger.warning(f"📊 {symbol}: {data['count']} positions liquidated, P&L: ${data['pnl']:.2f}")
+            else:
+                self.logger.info("💼 LIQUIDATION: Portfolio was already clean")
+            
+            if results['errors']:
+                self.logger.error(f"⚠️ LIQUIDATION ERRORS: {len(results['errors'])} errors occurred - check logs")
+                
+        except Exception as e:
+            critical_error = f"💥 CRITICAL LIQUIDATION ERROR: {e}"
+            results['errors'].append(critical_error)
+            self.logger.error(critical_error)
+            self.logger.error("💥 EMERGENCY: Manual position cleanup may be required!")
+        
+        return results

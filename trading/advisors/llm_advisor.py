@@ -14,7 +14,7 @@ class LLMTradingAdvisor:
     Trading advisor powered by local LLM for market analysis and insights.
     """
     
-    def __init__(self, llm_endpoint: str = "http://192.168.1.171:1234", model_name: str = "openai/gpt-oss-20b", logger: Optional[logging.Logger] = None):
+    def __init__(self, llm_endpoint: str = "http://localhost:1234", model_name: str = "openai/gpt-oss-20b", logger: Optional[logging.Logger] = None):
         """
         Initialize LLM Trading Advisor.
         
@@ -345,3 +345,361 @@ Be professional but accessible. No emojis."""
             return response.strip()
         
         return f"Market Report ({datetime.now().strftime('%H:%M')}): BTC at ${current_price:,.2f}. LLM analysis unavailable."
+    
+    def analyze_trading_performance(self, recent_trades: List[Dict], portfolio_data: Dict[str, Any], 
+                                  open_positions: List[Dict] = None) -> Dict[str, Any]:
+        """
+        Analyze recent trading performance and provide insights.
+        
+        Args:
+            recent_trades: List of recent trade data
+            portfolio_data: Current portfolio information
+            open_positions: Current open positions
+            
+        Returns:
+            Dict containing performance analysis and recommendations
+        """
+        try:
+            # Calculate performance metrics
+            total_trades = len(recent_trades)
+            if total_trades == 0:
+                return {
+                    'analysis': 'No recent trades to analyze.',
+                    'performance_score': 0,
+                    'recommendations': ['Wait for market opportunities'],
+                    'risk_assessment': 'LOW'
+                }
+            
+            # Calculate win rate and P&L metrics
+            profitable_trades = [t for t in recent_trades if float(t.get('pnl', 0)) > 0]
+            losing_trades = [t for t in recent_trades if float(t.get('pnl', 0)) < 0]
+            
+            win_rate = len(profitable_trades) / total_trades * 100
+            total_pnl = sum(float(t.get('pnl', 0)) for t in recent_trades)
+            avg_win = sum(float(t.get('pnl', 0)) for t in profitable_trades) / max(len(profitable_trades), 1)
+            avg_loss = sum(float(t.get('pnl', 0)) for t in losing_trades) / max(len(losing_trades), 1)
+            
+            # Prepare context for LLM
+            context = f"""
+            TRADING PERFORMANCE ANALYSIS REQUEST
+            
+            Portfolio Status:
+            - Total Value: ${portfolio_data.get('total_value', 3000):.2f}
+            - Realized P&L: ${portfolio_data.get('realized_pnl', 0):.2f}
+            - Unrealized P&L: ${portfolio_data.get('unrealized_pnl', 0):.2f}
+            
+            Recent Trading Activity ({total_trades} trades):
+            - Win Rate: {win_rate:.1f}%
+            - Total P&L: ${total_pnl:.2f}
+            - Average Win: ${avg_win:.2f}
+            - Average Loss: ${avg_loss:.2f}
+            - Profitable Trades: {len(profitable_trades)}
+            - Losing Trades: {len(losing_trades)}
+            
+            Open Positions: {len(open_positions or [])}
+            
+            Recent Trade Details:
+            """
+            
+            # Add recent trade details
+            for i, trade in enumerate(recent_trades[-5:], 1):  # Last 5 trades
+                symbol = trade.get('symbol', 'N/A')
+                side = trade.get('side', 'N/A')
+                pnl = float(trade.get('pnl', 0))
+                price = float(trade.get('price', 0))
+                timestamp = trade.get('timestamp', 'N/A')
+                
+                context += f"\n{i}. {symbol} {side} @ ${price:.2f} | P&L: ${pnl:.2f} | {timestamp}"
+            
+            # LLM prompt for analysis
+            prompt = f"""{context}
+            
+            As a professional trading analyst, provide a comprehensive analysis of this trading performance:
+            
+            1. PERFORMANCE ASSESSMENT (rate 1-10):
+               - Overall performance quality
+               - Risk management effectiveness
+               - Trading discipline
+            
+            2. PATTERN ANALYSIS:
+               - What patterns do you see in the trading behavior?
+               - Are there any concerning trends?
+               - What's working well?
+            
+            3. STRATEGIC RECOMMENDATIONS (3-5 specific actions):
+               - Immediate adjustments needed
+               - Risk management improvements
+               - Strategy optimizations
+            
+            4. MARKET OUTLOOK:
+               - How should the bot adapt to current conditions?
+               - What opportunities or risks do you see?
+            
+            Keep analysis concise but actionable. Focus on data-driven insights.
+            """
+            
+            messages = [{"role": "user", "content": prompt}]
+            analysis = self._make_llm_request(messages, temperature=0.3, max_tokens=500)
+            
+            if analysis:
+                # Extract performance score (simple heuristic)
+                performance_score = min(10, max(1, 5 + (win_rate - 50) / 10 + (total_pnl / 100)))
+                
+                # Determine risk level
+                risk_level = "HIGH" if total_pnl < -50 or win_rate < 30 else "MEDIUM" if total_pnl < 0 or win_rate < 45 else "LOW"
+                
+                return {
+                    'analysis': analysis,
+                    'performance_score': round(performance_score, 1),
+                    'win_rate': round(win_rate, 1),
+                    'total_pnl': round(total_pnl, 2),
+                    'total_trades': total_trades,
+                    'risk_assessment': risk_level,
+                    'recommendations': self._extract_recommendations(analysis)
+                }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error analyzing trading performance: {e}")
+            
+        return {
+            'analysis': 'Performance analysis temporarily unavailable.',
+            'performance_score': 5,
+            'recommendations': ['Continue current strategy'],
+            'risk_assessment': 'UNKNOWN'
+        }
+    
+    def analyze_market_trends(self, price_data: pd.DataFrame, volume_data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Analyze current market trends and provide predictions.
+        
+        Args:
+            price_data: Historical price data
+            volume_data: Volume and market depth data
+            
+        Returns:
+            Dict containing trend analysis and predictions
+        """
+        try:
+            if price_data.empty:
+                return {'trend': 'UNKNOWN', 'analysis': 'Insufficient data for trend analysis'}
+            
+            # Calculate trend indicators
+            current_price = float(price_data['close'].iloc[-1])
+            price_24h_ago = float(price_data['close'].iloc[-24]) if len(price_data) >= 24 else current_price
+            price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+            
+            # Calculate moving averages
+            ma_20 = price_data['close'].rolling(20).mean().iloc[-1] if len(price_data) >= 20 else current_price
+            ma_50 = price_data['close'].rolling(50).mean().iloc[-1] if len(price_data) >= 50 else current_price
+            
+            # Calculate volatility
+            volatility = price_data['close'].pct_change().std() * 100 if len(price_data) > 1 else 0
+            
+            # Determine trend direction
+            if current_price > ma_20 > ma_50:
+                trend = "BULLISH"
+            elif current_price < ma_20 < ma_50:
+                trend = "BEARISH"
+            else:
+                trend = "SIDEWAYS"
+            
+            # Prepare context for LLM
+            context = f"""
+            MARKET TREND ANALYSIS REQUEST
+            
+            Current Market Data:
+            - Current Price: ${current_price:.2f}
+            - 24h Change: {price_change_24h:+.2f}%
+            - 20-period MA: ${ma_20:.2f}
+            - 50-period MA: ${ma_50:.2f}
+            - Volatility: {volatility:.2f}%
+            - Technical Trend: {trend}
+            
+            Recent Price Action (last 10 candles):
+            """
+            
+            # Add recent price action
+            for i, (idx, row) in enumerate(price_data.tail(10).iterrows(), 1):
+                open_p = float(row['open'])
+                high_p = float(row['high'])
+                low_p = float(row['low'])
+                close_p = float(row['close'])
+                change = ((close_p - open_p) / open_p) * 100
+                
+                context += f"\n{i}. O:${open_p:.2f} H:${high_p:.2f} L:${low_p:.2f} C:${close_p:.2f} ({change:+.2f}%)"
+            
+            # LLM prompt for trend analysis
+            prompt = f"""{context}
+            
+            As a technical analyst, provide a comprehensive market trend analysis:
+            
+            1. TREND CONFIRMATION:
+               - Is the technical trend ({trend}) reliable?
+               - What key levels should we watch?
+               - How strong is the current momentum?
+            
+            2. SHORT-TERM OUTLOOK (next 1-4 hours):
+               - Expected price direction
+               - Key support/resistance levels
+               - Volatility expectations
+            
+            3. TRADING IMPLICATIONS:
+               - Best strategy for current conditions
+               - Entry/exit timing considerations
+               - Risk management advice
+            
+            4. MARKET STRUCTURE:
+               - What's driving current price action?
+               - Any concerning patterns or signals?
+            
+            Be specific with price levels and actionable insights.
+            """
+            
+            messages = [{"role": "user", "content": prompt}]
+            analysis = self._make_llm_request(messages, temperature=0.2, max_tokens=400)
+            
+            if analysis:
+                return {
+                    'trend': trend,
+                    'current_price': round(current_price, 2),
+                    'price_change_24h': round(price_change_24h, 2),
+                    'volatility': round(volatility, 2),
+                    'analysis': analysis,
+                    'key_levels': {
+                        'ma_20': round(ma_20, 2),
+                        'ma_50': round(ma_50, 2),
+                    },
+                    'momentum': 'STRONG' if abs(price_change_24h) > 3 else 'MODERATE' if abs(price_change_24h) > 1 else 'WEAK'
+                }
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error analyzing market trends: {e}")
+            
+        return {
+            'trend': 'UNKNOWN',
+            'analysis': 'Trend analysis temporarily unavailable.',
+            'momentum': 'UNKNOWN'
+        }
+    
+    def generate_trading_insights(self, performance_data: Dict[str, Any], trend_data: Dict[str, Any], 
+                                market_conditions: Dict[str, Any] = None) -> str:
+        """
+        Generate comprehensive trading insights combining performance and trend analysis.
+        
+        Args:
+            performance_data: Output from analyze_trading_performance
+            trend_data: Output from analyze_market_trends
+            market_conditions: Additional market context
+            
+        Returns:
+            Formatted insights report
+        """
+        try:
+            # Prepare combined analysis context
+            context = f"""
+            COMPREHENSIVE TRADING INSIGHTS REQUEST
+            
+            PERFORMANCE SUMMARY:
+            - Performance Score: {performance_data.get('performance_score', 'N/A')}/10
+            - Win Rate: {performance_data.get('win_rate', 'N/A')}%
+            - Total P&L: ${performance_data.get('total_pnl', 'N/A')}
+            - Risk Level: {performance_data.get('risk_assessment', 'N/A')}
+            - Total Trades: {performance_data.get('total_trades', 'N/A')}
+            
+            MARKET TREND ANALYSIS:
+            - Current Trend: {trend_data.get('trend', 'N/A')}
+            - Price Change 24h: {trend_data.get('price_change_24h', 'N/A')}%
+            - Momentum: {trend_data.get('momentum', 'N/A')}
+            - Volatility: {trend_data.get('volatility', 'N/A')}%
+            - Current Price: ${trend_data.get('current_price', 'N/A')}
+            """
+            
+            if market_conditions:
+                context += f"\n\nMARKET CONDITIONS:\n"
+                for key, value in market_conditions.items():
+                    context += f"- {key}: {value}\n"
+            
+            # LLM prompt for comprehensive insights
+            prompt = f"""{context}
+            
+            As an expert trading strategist, synthesize this information into actionable insights:
+            
+            1. STRATEGIC ASSESSMENT:
+               - How well is the current strategy performing given market conditions?
+               - What adjustments are needed for optimal performance?
+            
+            2. IMMEDIATE ACTION ITEMS (next 1-2 hours):
+               - Specific trading adjustments
+               - Risk management changes
+               - Position sizing recommendations
+            
+            3. PERFORMANCE OPTIMIZATION:
+               - What's limiting current performance?
+               - How can win rate and profitability be improved?
+            
+            4. MARKET ADAPTATION:
+               - How should the bot adapt to current trends?
+               - What opportunities are being missed?
+            
+            Provide 3-5 concrete, actionable recommendations. Be specific and direct.
+            """
+            
+            messages = [{"role": "user", "content": prompt}]
+            insights = self._make_llm_request(messages, temperature=0.4, max_tokens=600)
+            
+            if insights:
+                return f"""
+🤖 LLM TRADING INSIGHTS REPORT
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+{insights}
+
+📊 KEY METRICS:
+• Performance Score: {performance_data.get('performance_score', 'N/A')}/10
+• Win Rate: {performance_data.get('win_rate', 'N/A')}%
+• Current Trend: {trend_data.get('trend', 'N/A')}
+• Risk Level: {performance_data.get('risk_assessment', 'N/A')}
+""".strip()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error generating trading insights: {e}")
+            
+        return f"""
+🤖 LLM TRADING INSIGHTS REPORT
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Trading insights temporarily unavailable due to technical issues.
+Continuing with current strategy parameters.
+
+📊 KEY METRICS:
+• Performance Score: {performance_data.get('performance_score', 'N/A')}/10
+• Win Rate: {performance_data.get('win_rate', 'N/A')}%
+• Current Trend: {trend_data.get('trend', 'N/A')}
+• Risk Level: {performance_data.get('risk_assessment', 'N/A')}
+"""
+    
+    def _extract_recommendations(self, analysis: str) -> List[str]:
+        """Extract actionable recommendations from LLM analysis."""
+        try:
+            # Simple extraction of recommendations (could be improved with better parsing)
+            recommendations = []
+            lines = analysis.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                if any(keyword in line.lower() for keyword in ['recommend', 'should', 'consider', 'adjust', 'improve']):
+                    if len(line) > 10 and not line.endswith(':'):
+                        recommendations.append(line)
+            
+            # Fallback to generic recommendations
+            if not recommendations:
+                recommendations = [
+                    'Continue monitoring market conditions',
+                    'Maintain current risk management',
+                    'Review position sizing'
+                ]
+            
+            return recommendations[:5]  # Limit to 5 recommendations
+            
+        except Exception:
+            return ['Continue current trading strategy']
