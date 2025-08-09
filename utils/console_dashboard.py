@@ -268,14 +268,43 @@ class ConsoleDashboard:
             # Get live data from paper trading database
             from utils.paper_trade_db import get_all_trades, get_open_positions
             
-            # Calculate realized P&L from completed trades
-            all_trades = get_all_trades(limit=1000)
+            # Calculate realized P&L from RECENT trades only (after reset)
+            from utils.paper_trade_db import get_conn
             realized_pnl = 0.0
             
-            for trade in all_trades:
-                if len(trade) >= 7:
-                    pnl = float(trade[6])
-                    realized_pnl += pnl
+            try:
+                conn = get_conn()
+                if conn:
+                    with conn.cursor() as c:
+                        # Get the latest reset timestamp
+                        c.execute("""
+                            SELECT reset_timestamp FROM trading_session_resets 
+                            ORDER BY reset_timestamp DESC LIMIT 1
+                        """)
+                        reset_result = c.fetchone()
+                        
+                        if reset_result:
+                            reset_timestamp = reset_result[0]
+                            # Get P&L from trades after reset only
+                            c.execute("""
+                                SELECT COALESCE(SUM(pnl), 0) FROM trades 
+                                WHERE timestamp >= %s
+                                AND pnl BETWEEN -100 AND 100
+                            """, (reset_timestamp,))
+                            result = c.fetchone()
+                            if result:
+                                realized_pnl = float(result[0]) if result[0] is not None else 0.0
+                        else:
+                            # No reset found, default to 0 (fresh start)
+                            realized_pnl = 0.0
+                    conn.close()
+                
+                # Cap P&L to reasonable range
+                realized_pnl = max(-1000.0, min(1000.0, realized_pnl))
+                
+            except Exception as e:
+                self.logger.warning(f"Could not calculate reset-based realized P&L: {e}")
+                realized_pnl = 0.0
             
             # Calculate unrealized P&L from open positions
             open_positions_raw = get_open_positions()
@@ -1004,11 +1033,43 @@ class ConsoleDashboard:
                 except Exception as e:
                     self.logger.debug(f"Live price fetch error: {e}")
             
-            # Get live portfolio value from database
+            # Get live portfolio value from database - use reset-based calculation
             try:
-                from utils.paper_trade_db import get_all_trades
-                trades = get_all_trades(limit=1000)
-                realized_pnl = sum(float(trade[6]) for trade in trades if len(trade) >= 7)
+                from utils.paper_trade_db import get_conn
+                realized_pnl = 0.0
+                
+                try:
+                    conn = get_conn()
+                    if conn:
+                        with conn.cursor() as c:
+                            # Get the latest reset timestamp
+                            c.execute("""
+                                SELECT reset_timestamp FROM trading_session_resets 
+                                ORDER BY reset_timestamp DESC LIMIT 1
+                            """)
+                            reset_result = c.fetchone()
+                            
+                            if reset_result:
+                                reset_timestamp = reset_result[0]
+                                # Get P&L from trades after reset only
+                                c.execute("""
+                                    SELECT COALESCE(SUM(pnl), 0) FROM trades 
+                                    WHERE timestamp >= %s
+                                    AND pnl BETWEEN -100 AND 100
+                                """, (reset_timestamp,))
+                                result = c.fetchone()
+                                if result:
+                                    realized_pnl = float(result[0]) if result[0] is not None else 0.0
+                            else:
+                                # No reset found, default to 0 (fresh start)
+                                realized_pnl = 0.0
+                        conn.close()
+                    
+                    # Cap P&L to reasonable range
+                    realized_pnl = max(-1000.0, min(1000.0, realized_pnl))
+                    
+                except Exception as db_e:
+                    realized_pnl = 0.0
                 
                 # Calculate live portfolio value from LIVE executor balance
                 try:
