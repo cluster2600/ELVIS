@@ -583,6 +583,17 @@ def main(mode: str, log_level: str):
                         
                         logger.info(f"Latest indicators - RSI: {rsi_str}, MACD: {macd_str}, SMA: {sma_str}")
                         
+                        # 💰 AGGRESSIVE POSITION MANAGEMENT: Check positions EVERY iteration for profit-taking
+                        try:
+                            exchange_manager = container.get_optional('exchange_manager')
+                            if exchange_manager and hasattr(exchange_manager, 'executors'):
+                                for exchange_name, executor in exchange_manager.executors.items():
+                                    if hasattr(executor, 'check_and_manage_positions'):
+                                        executor.check_and_manage_positions()
+                                        logger.debug(f"🔍 Aggressive position check completed for {exchange_name}")
+                        except Exception as pos_mgmt_e:
+                            logger.debug(f"Position management error: {pos_mgmt_e}")
+                        
                         # 🤖 PERIODIC LLM MARKET ANALYSIS (every 10th iteration)
                         if hasattr(trading_loop, 'iteration_count'):
                             trading_loop.iteration_count += 1
@@ -1115,6 +1126,14 @@ def main(mode: str, log_level: str):
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
                                     
+                                    # 💰 IMMEDIATE PROFIT CHECK: Check for profit-taking opportunities after every trade
+                                    try:
+                                        if hasattr(executor, 'check_and_manage_positions'):
+                                            executor.check_and_manage_positions()
+                                            logger.debug(f"🔍 Position management check completed for {symbol}")
+                                    except Exception as pos_e:
+                                        logger.debug(f"Position management check error: {pos_e}")
+                                    
                                     # 🔥 FIX: Add position to risk manager for monitoring
                                     try:
                                         position_data = {
@@ -1140,6 +1159,14 @@ def main(mode: str, log_level: str):
                                 order_result = executor.place_order(symbol, 'sell', position_size, current_price)
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    
+                                    # 💰 IMMEDIATE PROFIT CHECK: Check for profit-taking opportunities after every trade
+                                    try:
+                                        if hasattr(executor, 'check_and_manage_positions'):
+                                            executor.check_and_manage_positions()
+                                            logger.debug(f"🔍 Position management check completed for {symbol}")
+                                    except Exception as pos_e:
+                                        logger.debug(f"Position management check error: {pos_e}")
                                     
                                     # 🔥 FIX: Add position to risk manager for monitoring  
                                     try:
