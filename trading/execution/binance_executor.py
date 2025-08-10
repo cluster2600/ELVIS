@@ -150,9 +150,9 @@ class BinanceExecutor(BaseExecutor):
                     pnl = potential_pnl
                     should_execute = True  # Force execute to close losing position
                     
-                # 💰 PROFIT TAKING: If profit >= $1, close position  
-                elif potential_pnl >= 1.0:
-                    self.logger.info(f"💰 PROFIT TAKING: {symbol} {opposite_side} position profit ${potential_pnl:.2f} - CLOSING")
+                # 💰 ULTRA AGGRESSIVE PROFIT TAKING: If profit >= $0.10, close position immediately 
+                elif potential_pnl >= 0.10:
+                    self.logger.info(f"💰 IMMEDIATE PROFIT TAKING: {symbol} {opposite_side} position profit ${potential_pnl:.2f} - CLOSING NOW!")
                     pnl = potential_pnl
                     should_execute = True
                     
@@ -378,9 +378,9 @@ class BinanceExecutor(BaseExecutor):
                     close_side = 'SELL' if side == 'BUY' else 'BUY' 
                     self._execute_paper_trade(symbol, close_side, quantity, current_price)
                     
-                # Auto take profit at +$1
-                elif pnl >= 1.0:
-                    self.logger.info(f"💰 AUTO TAKE PROFIT: {symbol} {side} profit ${pnl:.2f}")
+                # Auto take profit at +$0.10 (ULTRA AGGRESSIVE)
+                elif pnl >= 0.10:
+                    self.logger.info(f"💰 AGGRESSIVE AUTO TAKE PROFIT: {symbol} {side} profit ${pnl:.2f} - CLOSING IMMEDIATELY!")
                     close_side = 'SELL' if side == 'BUY' else 'BUY'
                     self._execute_paper_trade(symbol, close_side, quantity, current_price)
                     
