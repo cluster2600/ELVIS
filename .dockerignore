@@ -9,6 +9,7 @@ Dockerfile
 # Virtualenv
 venv/
 venv310/
+venv_new/
 env/
 env-coreml/
 env-ydf/
@@ -38,18 +39,14 @@ htmlcov/
 test_data/
 
 # Large data files and logs (keep structure but exclude large files)
-logs/*.log
-logs/detailed_logs/
-data/raw/
-data/external/
+logs/
+data/
+loki/
+grafana/
 plots_and_metrics/
 
 # Large model files (keep model structure but exclude large binaries)
-models/*.h5
-models/*.pkl
-models/*.pth
-models/model_rf_tf/
-models/checkpoints/
+models/
 
 # OS-specific
 .DS_Store
@@ -64,6 +61,7 @@ tensorflow/
 # Large PDF and binary files
 *.pdf
 *.apkg
+*.tar
 *.tar.gz
 *.pid
 

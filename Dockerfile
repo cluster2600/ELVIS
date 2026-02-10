@@ -38,10 +38,12 @@ WORKDIR /app
 # Install Python dependencies
 ENV TA_LIBRARY_PATH=/usr/lib
 ENV TA_INCLUDE_PATH=/usr/include
+# Install Python dependencies (prefer wheels to reduce build time/RAM)
+# NOTE: building some scientific packages from source on arm64 can OOM; prefer binaries.
 RUN pip install --no-cache-dir --upgrade pip \
     && ldconfig \
-    && CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib" pip install --no-cache-dir --no-binary :all: ta-lib \
-    && pip install --no-cache-dir -r requirements.txt
+    && CFLAGS="-I/usr/include" LDFLAGS="-L/usr/lib" pip install --no-cache-dir --prefer-binary ta-lib \
+    && pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 # Production stage
 FROM python:3.11-slim AS production
