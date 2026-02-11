@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elvis-trading-bot"
+version = "0.1.0"
+description = "ELVIS algorithmic trading bot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "matplotlib",
+  "seaborn",
+  "tqdm",
+  "rich",
+  "pyyaml",
+  "ccxt",
+  "ta",
+  "requests",
+  "Flask",
+  "Flask-CORS",
+  "Flask-SocketIO",
+  "Flask-Limiter",
+  "flask-swagger-ui",
+  "PyJWT",
+  "prometheus-flask-exporter",
+  "statsmodels",
+  "python-binance",
+  "binance-futures-connector",
+  "python-telegram-bot",
+  "redis",
+  "prometheus-client",
+  "SQLAlchemy",
+  "websocket-client",
+  "psycopg2-binary",
+  "psutil",
+  "colorlog",
+  "python-dotenv",
+  "keyring",
+  "hvac",
+  "cryptography",
+  "protobuf>=3.20.3,<6.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "scripts*"]
