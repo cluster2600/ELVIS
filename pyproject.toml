@@ -48,3 +48,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
