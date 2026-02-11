@@ -20,7 +20,7 @@
 
 #### HashiCorp Vault Integration
 - **Centralized Secret Management**: All API keys stored in Vault KV v2 engine
-- **AES-256-GCM Encryption**: Military-grade encryption for all secrets
+- **AES-256-GCM Encryption**: Strong encryption for secrets
 - **Multi-Layer Fallback**: Vault → OS Keyring → Encrypted Files → Environment
 - **Audit Trail**: Complete logging of all secret access
 - **Real-time Monitoring**: Live health checks and status indicators
@@ -29,21 +29,27 @@
 - **OWASP Top 10**: Follows industry security standards
 - **SOC 2 Type II**: Vault provides enterprise compliance
 - **FIPS 140-2**: Cryptographic module compliance
-- **Zero Hardcoded Secrets**: All sensitive data in secure storage
+- **No Production Secrets in Source**: Credentials must come from Vault/environment
 
 ### 📈 Performance Optimizations
 - **Zero Cooldowns**: Maximum trading speed with no artificial delays
-- **Sub-5ms Response**: Vault connectivity under 3ms average
-- **88% System Health**: All critical services monitored
+- **Low-Latency Vault Checks**: Vault connectivity and latency are monitored
+- **Health Visibility**: Critical services are continuously monitored
 - **Error-Free Operation**: Comprehensive NoneType protection
+
+### 🔎 Security Assumptions
+- Development may use `vault server -dev` with a local, explicit token.
+- Production must not use dev mode, shared/fixed tokens, or committed credentials.
+- API keys and database credentials must be injected via Vault or secure environment variables.
 
 ### 🔧 Quick Setup
 
 #### 1. Start Vault (Development)
 ```bash
-vault server -dev -dev-root-token-id=trading-bot-token
+export VAULT_DEV_ROOT_TOKEN_ID="<choose-a-local-dev-token>"
+vault server -dev -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID"
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN="$VAULT_DEV_ROOT_TOKEN_ID"
 ```
 
 #### 2. Initialize Secrets

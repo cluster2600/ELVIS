@@ -32,24 +32,30 @@ The **ELVIS** (**E**nhanced **L**everaged **V**irtual **I**nvestment **S**ystem)
 
 ## 🚀 Current Status (July 2025)
 
-**✅ FULLY OPERATIONAL TRADING BOT WITH ENTERPRISE SECURITY**
+**✅ ACTIVELY MAINTAINED TRADING BOT WITH VAULT-BASED SECRET MANAGEMENT**
 
-The ELVIS Trading Bot is now fully functional and actively trading with enterprise-grade security! Recent major updates include maximum speed trading and comprehensive security implementation:
+The ELVIS Trading Bot includes a Vault-first security model and monitoring-oriented operations tooling. Use the notes below to distinguish development defaults from production requirements.
 
 ## 🔐 **SECURITY & PERFORMANCE BREAKTHROUGH (NEW!)**
 
 ### 🛡️ **Enterprise-Grade HashiCorp Vault Integration**
 - **Centralized Secret Management**: All API keys and credentials secured in Vault KV v2 engine
-- **AES-256-GCM Encryption**: Military-grade encryption for all sensitive data
-- **Zero Hardcoded Secrets**: Complete elimination of credentials in source code
+- **AES-256-GCM Encryption**: Strong encryption for sensitive data at rest/in transit
+- **No Production Secrets in Source**: Credentials must be provided via Vault/environment
 - **Multi-Layer Security**: Vault → OS Keyring → Encrypted Files → Environment variables
-- **Real-time Security Monitoring**: Live dashboard with Vault health indicators (✅ ~3ms response)
+- **Real-time Security Monitoring**: Live dashboard with Vault health indicators
 
 ### ⚡ **Maximum Speed Trading**
 - **Zero Cooldowns**: All trading delays removed for maximum execution speed
 - **Ultra-Fast Risk Management**: `cooldown_period = 0` for instant position management
-- **Sub-5ms Performance**: Vault secrets retrieval in under 3ms average
-- **88% System Health**: Real-time monitoring of all critical services
+- **Low-Latency Secret Access**: Vault access is monitored and reported in dashboard status
+- **Health Visibility**: Real-time monitoring of critical services
+
+### 🔎 **Security Assumptions (Important)**
+- **Development mode**: you may run `vault server -dev` locally with an explicit dev token.
+- **Production mode**: never use dev Vault mode or fixed/shared tokens.
+- **Secret source of truth**: provide API keys and credentials from Vault and/or secure environment variables.
+- **Repository policy**: do not commit real credentials, tokens, or secrets.
 
 ### 📊 **Advanced API Monitoring Dashboard**
 - **Visual Status Indicators**: ✅❌⏳ for Binance, Postgres, Vault, Redis, Telegram
@@ -59,10 +65,11 @@ The ELVIS Trading Bot is now fully functional and actively trading with enterpri
 
 **Quick Security Setup:**
 ```bash
-# Start Vault (Development)
-vault server -dev -dev-root-token-id=trading-bot-token
+# Start Vault (Development only)
+export VAULT_DEV_ROOT_TOKEN_ID="<choose-a-local-dev-token>"
+vault server -dev -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID"
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN="$VAULT_DEV_ROOT_TOKEN_ID"
 
 # Store secrets securely
 vault kv put secret/trading/api-keys \
@@ -121,10 +128,11 @@ chmod +x run_setup.sh
 git clone https://github.com/cluster2600/ELVIS.git
 cd ELVIS
 
-# 2. Start HashiCorp Vault for secure secrets
-vault server -dev -dev-root-token-id=trading-bot-token &
+# 2. Start HashiCorp Vault for secure secrets (development only)
+export VAULT_DEV_ROOT_TOKEN_ID="<choose-a-local-dev-token>"
+vault server -dev -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID" &
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN="$VAULT_DEV_ROOT_TOKEN_ID"
 
 # 3. Store your API keys securely in Vault
 vault kv put secret/trading/api-keys \
@@ -856,7 +864,7 @@ ELVIS Trading Bot implements comprehensive security with HashiCorp Vault integra
 ├── Encrypted local cache with 5-minute TTL
 └── Real-time health monitoring (✅ 3ms response)
 
-🔒 Zero Hardcoded Secrets
+🔒 No production secrets should be committed
 ├── All API keys secured in Vault
 ├── Database credentials encrypted
 ├── Comprehensive audit trail
@@ -878,12 +886,13 @@ ELVIS Trading Bot implements comprehensive security with HashiCorp Vault integra
 
 #### **Quick Security Setup**
 ```bash
-# 1. Start Vault (Development)
-vault server -dev -dev-root-token-id=trading-bot-token
+# 1. Start Vault (Development only)
+export VAULT_DEV_ROOT_TOKEN_ID="<choose-a-local-dev-token>"
+vault server -dev -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID"
 
 # 2. Configure environment
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN="$VAULT_DEV_ROOT_TOKEN_ID"
 
 # 3. Store secrets securely
 vault kv put secret/trading/api-keys \
