@@ -38,7 +38,9 @@ TRADING_CONFIG = {
     'TAKE_PROFIT_PCT': 0.02,  # Added to fix the current error; adjust as needed
     'LEVERAGE_MAX': 125,      # Maximum leverage for futures
     'LEVERAGE_MIN': 1,        # Minimum leverage for futures
-    'DEFAULT_LEVERAGE': 100,  # Default leverage for maximum trading power
+    # Issue #14: Default leverage reduced from 100x to 3x to prevent catastrophic
+    # losses on startup.  Override via DEFAULT_LEVERAGE env var (integer).
+    'DEFAULT_LEVERAGE': int(os.getenv('DEFAULT_LEVERAGE', '3')),
     'MAX_TRADES_PER_DAY': 10,  # Added to fix MAX_TRADES_PER_DAY error
     'DAILY_PROFIT_TARGET_USD': 100,  # Added to fix DAILY_PROFIT_TARGET_USD error
     'DAILY_LOSS_LIMIT_USD': 100,     # Added to fix DAILY_LOSS_LIMIT_USD error
@@ -101,3 +103,64 @@ SYMBOLS_CONFIG = {
     'MAX_CONCURRENT_PAIRS': 3,                     # Maximum pairs to trade simultaneously
 }
 
+
+
+# ---------------------------------------------------------------------------
+# Issue #14: Leverage safety validation
+# Call validate_leverage_config() before starting the trading engine.
+# ---------------------------------------------------------------------------
+import logging as _logging
+
+_leverage_logger = _logging.getLogger(__name__)
+
+def validate_leverage_config(leverage: int = None) -> int:
+    """
+    Validate the configured leverage and refuse to start if it is dangerously
+    high without an explicit operator override.
+
+    Rules:
+      - leverage > 10x requires OVERRIDE_HIGH_LEVERAGE=true in the environment.
+      - leverage > 5x emits a WARNING log on every startup.
+      - leverage <= 0 raises ValueError immediately.
+
+    Args:
+        leverage: The leverage value to validate.  Defaults to
+                  TRADING_CONFIG['DEFAULT_LEVERAGE'].
+
+    Returns:
+        The validated leverage value (int).
+
+    Raises:
+        ValueError:       If leverage <= 0 or an invalid value is supplied.
+        EnvironmentError: If leverage > 10x and OVERRIDE_HIGH_LEVERAGE != 'true'.
+    """
+    if leverage is None:
+        leverage = TRADING_CONFIG['DEFAULT_LEVERAGE']
+
+    leverage = int(leverage)
+
+    if leverage <= 0:
+        raise ValueError(f"Leverage must be a positive integer, got {leverage}.")
+
+    if leverage > 5:
+        _leverage_logger.warning(
+            "⚠️  Leverage is set to %dx which is above the recommended maximum of 5x. "
+            "High leverage significantly increases liquidation risk.",
+            leverage,
+        )
+
+    if leverage > 10:
+        override = os.getenv("OVERRIDE_HIGH_LEVERAGE", "false").strip().lower()
+        if override != "true":
+            raise EnvironmentError(
+                f"Leverage {leverage}x exceeds the 10x safety limit. "
+                "Set OVERRIDE_HIGH_LEVERAGE=true in your environment to acknowledge "
+                "the risk and allow startup."
+            )
+        _leverage_logger.warning(
+            "🚨 OVERRIDE_HIGH_LEVERAGE=true detected — starting with %dx leverage. "
+            "Ensure you understand the liquidation risks.",
+            leverage,
+        )
+
+    return leverage

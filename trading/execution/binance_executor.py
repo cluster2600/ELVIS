@@ -22,16 +22,24 @@ from datetime import datetime
 from utils.binance_rate_limiter import binance_retry, check_rate_limit_headers
 
 class BinanceExecutor(BaseExecutor):
-    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, use_futures: bool = False, default_leverage: int = 100, **kwargs):
+    # Issue #14: Default leverage reduced from 100x to 3x.  Callers may pass an
+    # explicit value, which is validated by validate_leverage_config() below.
+    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, use_futures: bool = False, default_leverage: int = None, **kwargs):
         super().__init__(logger, **kwargs)
         self.client = None
         self.api_key = api_key
         self.api_secret = api_secret
         self.is_testnet = is_testnet
         self.use_futures = use_futures
-        self.default_leverage = default_leverage
         self.fee_calculator = BinanceFeeCalculator(logger)
         self.db_available = False
+
+        # Issue #14: Validate leverage before storing it.  Imports here to
+        # avoid circular-import issues at module load time.
+        from config.config import validate_leverage_config, TRADING_CONFIG
+        resolved_leverage = default_leverage if default_leverage is not None else TRADING_CONFIG['DEFAULT_LEVERAGE']
+        self.default_leverage = validate_leverage_config(resolved_leverage)
+
         if is_testnet:
             self._init_paper_trading_db()
 
