@@ -24,21 +24,6 @@ app = Flask(__name__)
 CORS(app)
 
 # ---------------------------------------------------------------------------
-# ISSUE #15 FIX: Emergency Kill-Switch
-# Global flag that can be set by POST /emergency-stop to halt all trading.
-# Trading loops and executors should poll is_trading_halted() before placing orders.
-# ---------------------------------------------------------------------------
-_TRADING_HALTED = False
-_HALT_REASON = ""
-_HALT_TIMESTAMP = None
-
-
-def is_trading_halted() -> bool:
-    """Return True if the emergency stop has been triggered."""
-    return _TRADING_HALTED
-
-
-# ---------------------------------------------------------------------------
 # ISSUE #13 FIX: API Key Authentication
 # The Flask API was publicly accessible on 0.0.0.0:5050 with no authentication.
 # Any process on the network could read trade data or trigger actions.
@@ -514,9 +499,9 @@ def dashboard():
 
 # ---------------------------------------------------------------------------
 # ISSUE #15 FIX: Kill-switch / Emergency Stop
-# Provides a POST /emergency_stop endpoint that sets a global flag to halt
-# all trading activity. The trading loop in main.py should poll
-# trade_history_api.KILL_SWITCH_ACTIVE to honour the signal.
+# Provides POST /emergency-stop (and legacy /emergency_stop) endpoints that
+# set a global flag to halt all trading activity.  The trading loop in
+# main.py should call is_trading_halted() before placing each order.
 # Protected by the same API key authentication as all other endpoints.
 # ---------------------------------------------------------------------------
 import datetime as _datetime
@@ -524,6 +509,11 @@ import datetime as _datetime
 KILL_SWITCH_ACTIVE = False          # Global flag — checked by the trading engine
 _kill_switch_activated_at = None    # Timestamp when the stop was triggered
 _kill_switch_activated_by = None    # Remote IP that triggered it (for audit)
+
+
+def is_trading_halted() -> bool:
+    """Public helper: return True if the emergency kill-switch is active."""
+    return KILL_SWITCH_ACTIVE
 
 @app.route('/emergency_stop', methods=['POST'])
 def emergency_stop():
@@ -618,6 +608,25 @@ def kill_switch_status():
         "activated_at": _kill_switch_activated_at,
         "activated_by": _kill_switch_activated_by,
     }), 200
+
+
+# RESTful hyphen aliases — /emergency-stop mirrors /emergency_stop
+@app.route('/emergency-stop', methods=['POST'])
+def emergency_stop_hyphen():
+    """Alias for POST /emergency_stop (hyphen variant per Issue #15 spec)."""
+    return emergency_stop()
+
+
+@app.route('/emergency-stop', methods=['DELETE'])
+def reset_kill_switch_hyphen():
+    """Alias for DELETE /emergency_stop (hyphen variant)."""
+    return reset_kill_switch()
+
+
+@app.route('/emergency-stop/status', methods=['GET'])
+def kill_switch_status_hyphen():
+    """Alias for GET /emergency_stop/status (hyphen variant)."""
+    return kill_switch_status()
 
 
 @app.route('/health', methods=['GET'])
