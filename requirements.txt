@@ -1,3 +1,6 @@
+# Retry / back-off (Issue #12 — Binance rate limiting)
+tenacity
+
 # Core dependencies
 numpy
 pandas
