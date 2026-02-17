@@ -24,6 +24,21 @@ app = Flask(__name__)
 CORS(app)
 
 # ---------------------------------------------------------------------------
+# ISSUE #15 FIX: Emergency Kill-Switch
+# Global flag that can be set by POST /emergency-stop to halt all trading.
+# Trading loops and executors should poll is_trading_halted() before placing orders.
+# ---------------------------------------------------------------------------
+_TRADING_HALTED = False
+_HALT_REASON = ""
+_HALT_TIMESTAMP = None
+
+
+def is_trading_halted() -> bool:
+    """Return True if the emergency stop has been triggered."""
+    return _TRADING_HALTED
+
+
+# ---------------------------------------------------------------------------
 # ISSUE #13 FIX: API Key Authentication
 # The Flask API was publicly accessible on 0.0.0.0:5050 with no authentication.
 # Any process on the network could read trade data or trigger actions.
@@ -497,13 +512,122 @@ def dashboard():
     except Exception as e:
         return jsonify({"error": f"Dashboard not found: {str(e)}"}), 404
 
+# ---------------------------------------------------------------------------
+# ISSUE #15 FIX: Kill-switch / Emergency Stop
+# Provides a POST /emergency_stop endpoint that sets a global flag to halt
+# all trading activity. The trading loop in main.py should poll
+# trade_history_api.KILL_SWITCH_ACTIVE to honour the signal.
+# Protected by the same API key authentication as all other endpoints.
+# ---------------------------------------------------------------------------
+import datetime as _datetime
+
+KILL_SWITCH_ACTIVE = False          # Global flag — checked by the trading engine
+_kill_switch_activated_at = None    # Timestamp when the stop was triggered
+_kill_switch_activated_by = None    # Remote IP that triggered it (for audit)
+
+@app.route('/emergency_stop', methods=['POST'])
+def emergency_stop():
+    """
+    Activate the kill-switch to halt all trading immediately.
+
+    Expected request body (JSON, optional):
+        { "reason": "string describing why the stop was triggered" }
+
+    Returns:
+        200 — kill-switch activated
+        409 — kill-switch was already active
+    """
+    global KILL_SWITCH_ACTIVE, _kill_switch_activated_at, _kill_switch_activated_by
+
+    from flask import request, jsonify
+
+    reason = "No reason provided"
+    try:
+        body = request.get_json(silent=True) or {}
+        reason = body.get("reason", reason)
+    except Exception:
+        pass
+
+    if KILL_SWITCH_ACTIVE:
+        return jsonify({
+            "status": "already_stopped",
+            "kill_switch_active": True,
+            "activated_at": _kill_switch_activated_at,
+            "activated_by": _kill_switch_activated_by,
+        }), 409
+
+    KILL_SWITCH_ACTIVE = True
+    _kill_switch_activated_at = _datetime.datetime.utcnow().isoformat() + "Z"
+    _kill_switch_activated_by = request.remote_addr
+
+    logger.critical(
+        f"🚨 KILL-SWITCH ACTIVATED by {_kill_switch_activated_by} "
+        f"at {_kill_switch_activated_at}. Reason: {reason}"
+    )
+
+    return jsonify({
+        "status": "stopped",
+        "kill_switch_active": True,
+        "activated_at": _kill_switch_activated_at,
+        "activated_by": _kill_switch_activated_by,
+        "reason": reason,
+        "message": "Emergency stop activated — all trading halted.",
+    }), 200
+
+
+@app.route('/emergency_stop', methods=['DELETE'])
+def reset_kill_switch():
+    """
+    Deactivate the kill-switch (allow trading to resume after human review).
+
+    Returns:
+        200 — kill-switch cleared
+        409 — kill-switch was not active
+    """
+    global KILL_SWITCH_ACTIVE, _kill_switch_activated_at, _kill_switch_activated_by
+
+    from flask import request, jsonify
+
+    if not KILL_SWITCH_ACTIVE:
+        return jsonify({
+            "status": "not_active",
+            "kill_switch_active": False,
+        }), 409
+
+    KILL_SWITCH_ACTIVE = False
+    logger.warning(
+        f"✅ Kill-switch CLEARED by {request.remote_addr} at "
+        + _datetime.datetime.utcnow().isoformat() + "Z"
+    )
+    _kill_switch_activated_at = None
+    _kill_switch_activated_by = None
+
+    return jsonify({
+        "status": "cleared",
+        "kill_switch_active": False,
+        "message": "Kill-switch cleared — trading may resume.",
+    }), 200
+
+
+@app.route('/emergency_stop/status', methods=['GET'])
+def kill_switch_status():
+    """Return the current kill-switch state (read-only, no side effects)."""
+    from flask import jsonify
+    return jsonify({
+        "kill_switch_active": KILL_SWITCH_ACTIVE,
+        "activated_at": _kill_switch_activated_at,
+        "activated_by": _kill_switch_activated_by,
+    }), 200
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint for Docker container"""
     return jsonify({
         "status": "healthy",
         "service": "trade_history_api",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "kill_switch_active": KILL_SWITCH_ACTIVE,
     })
 
 # NEW: Create a function that can be called externally
