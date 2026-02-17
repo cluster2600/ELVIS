@@ -59,13 +59,22 @@ LOGGING_CONFIG = {
     'LOG_TO_FILE': True,
 }
 
+# ISSUE #11 FIX: Removed hardcoded Postgres password 'elvis_password'.
+# Database credentials must never be hardcoded in source code.
+# Set DB_PASSWORD (and optionally DB_HOST, DB_PORT, DB_USER, DB_NAME) as environment variables.
 POSTGRES_CONFIG = {
-    'HOST': 'localhost',
-    'PORT': 5432,
-    'USER': 'elvis_user',
-    'PASSWORD': 'elvis_password',
-    'DBNAME': 'elvis_trading'
+    'HOST': os.getenv('DB_HOST', 'localhost'),
+    'PORT': int(os.getenv('DB_PORT', '5432')),
+    'USER': os.getenv('DB_USER', 'elvis_user'),
+    'PASSWORD': os.getenv('DB_PASSWORD'),   # Required — no default; must be set explicitly
+    'DBNAME': os.getenv('DB_NAME', 'elvis_trading'),
 }
+
+if not POSTGRES_CONFIG['PASSWORD']:
+    raise EnvironmentError(
+        "DB_PASSWORD environment variable is not set. "
+        "Export it before starting: export DB_PASSWORD=<your-db-password>"
+    )
 
 
 
