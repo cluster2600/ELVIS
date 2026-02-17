@@ -498,27 +498,125 @@ def dashboard():
         return jsonify({"error": f"Dashboard not found: {str(e)}"}), 404
 
 # ---------------------------------------------------------------------------
-# ISSUE #15 FIX: Kill-switch / Emergency Stop
-# Provides POST /emergency-stop (and legacy /emergency_stop) endpoints that
-# set a global flag to halt all trading activity.  The trading loop in
-# main.py should call is_trading_halted() before placing each order.
-# Protected by the same API key authentication as all other endpoints.
+# ISSUE #15 FIX (updated): Kill-switch / Emergency Stop — Redis persistence
+#
+# The kill-switch state is now stored in Redis under the key
+# 'ELVIS_KILL_SWITCH' so that it survives process restarts.
+#
+#   Activate  : redis.set('ELVIS_KILL_SWITCH', '1')
+#   Deactivate: redis.delete('ELVIS_KILL_SWITCH')
+#   Query     : redis.get('ELVIS_KILL_SWITCH') == '1'
+#
+# The in-memory flag (KILL_SWITCH_ACTIVE) is kept as a local cache so that
+# high-frequency callers (the trading loop) don't hammer Redis on every tick.
+# The flag is synchronised with Redis on every REST call that changes state,
+# and also on every read of /emergency_stop/status.
+#
+# If Redis is unavailable the module falls back gracefully to in-memory only
+# behaviour (exactly as Sprint 1) and logs a warning.
 # ---------------------------------------------------------------------------
 import datetime as _datetime
+import os as _os
 
-KILL_SWITCH_ACTIVE = False          # Global flag — checked by the trading engine
+# Redis key used to persist the kill-switch state.
+_REDIS_KILL_SWITCH_KEY = "ELVIS_KILL_SWITCH"
+
+def _get_redis_client():
+    """
+    Return a Redis client connected to the configured server, or None if
+    Redis is unavailable.  Connection parameters come from env vars so that
+    no credentials are hardcoded.
+    """
+    try:
+        import redis as _redis
+        client = _redis.Redis(
+            host=_os.getenv("REDIS_HOST", "localhost"),
+            port=int(_os.getenv("REDIS_PORT", "6379")),
+            db=int(_os.getenv("REDIS_DB", "0")),
+            password=_os.getenv("REDIS_PASSWORD") or None,
+            decode_responses=True,
+            socket_timeout=2,
+            socket_connect_timeout=2,
+        )
+        client.ping()  # Verify connection.
+        return client
+    except Exception as _e:
+        logger.warning(
+            "Kill-switch: Redis unavailable (%s). Falling back to in-memory state.", _e
+        )
+        return None
+
+
+def _redis_set_kill_switch(active: bool) -> bool:
+    """
+    Persist kill-switch state to Redis.
+
+    Returns True if Redis write succeeded, False if Redis was unreachable
+    (in which case only the in-memory flag is updated).
+    """
+    client = _get_redis_client()
+    if client is None:
+        return False
+    try:
+        if active:
+            client.set(_REDIS_KILL_SWITCH_KEY, "1")
+        else:
+            client.delete(_REDIS_KILL_SWITCH_KEY)
+        return True
+    except Exception as _e:
+        logger.error("Failed to update kill-switch in Redis: %s", _e)
+        return False
+
+
+def _redis_get_kill_switch() -> bool:
+    """
+    Read the kill-switch state from Redis.
+
+    Returns the Redis value if available, otherwise falls back to the
+    in-memory flag so the bot stays safe during a Redis outage.
+    """
+    client = _get_redis_client()
+    if client is None:
+        return KILL_SWITCH_ACTIVE  # Fallback: trust in-memory state.
+    try:
+        return client.get(_REDIS_KILL_SWITCH_KEY) == "1"
+    except Exception as _e:
+        logger.error("Failed to read kill-switch from Redis: %s", _e)
+        return KILL_SWITCH_ACTIVE
+
+
+# In-memory cache of the kill-switch state (avoids a Redis round-trip on
+# every call to is_trading_halted() in the hot trading loop).
+KILL_SWITCH_ACTIVE = False          # In-memory flag — synced with Redis on state changes
 _kill_switch_activated_at = None    # Timestamp when the stop was triggered
 _kill_switch_activated_by = None    # Remote IP that triggered it (for audit)
 
+# On startup: check Redis and restore any previously persisted kill-switch.
+_startup_state = _redis_get_kill_switch()
+if _startup_state:
+    KILL_SWITCH_ACTIVE = True
+    logger.critical(
+        "🚨 KILL-SWITCH was ACTIVE in Redis from a previous session. "
+        "Trading is HALTED. POST DELETE /emergency_stop to clear."
+    )
+
 
 def is_trading_halted() -> bool:
-    """Public helper: return True if the emergency kill-switch is active."""
+    """
+    Public helper: return True if the emergency kill-switch is active.
+
+    Uses the in-memory flag for speed; the flag is kept in sync with Redis
+    whenever the state is changed via the REST endpoints.
+    """
     return KILL_SWITCH_ACTIVE
 
 @app.route('/emergency_stop', methods=['POST'])
 def emergency_stop():
     """
     Activate the kill-switch to halt all trading immediately.
+
+    Persists state to Redis (key 'ELVIS_KILL_SWITCH' = '1') so it survives
+    process restarts.  Falls back to in-memory only if Redis is unavailable.
 
     Expected request body (JSON, optional):
         { "reason": "string describing why the stop was triggered" }
@@ -550,9 +648,12 @@ def emergency_stop():
     _kill_switch_activated_at = _datetime.datetime.utcnow().isoformat() + "Z"
     _kill_switch_activated_by = request.remote_addr
 
+    # Persist to Redis so the kill-switch survives a process restart.
+    redis_ok = _redis_set_kill_switch(True)
+
     logger.critical(
-        f"🚨 KILL-SWITCH ACTIVATED by {_kill_switch_activated_by} "
-        f"at {_kill_switch_activated_at}. Reason: {reason}"
+        "🚨 KILL-SWITCH ACTIVATED by %s at %s. Reason: %s (Redis persisted: %s)",
+        _kill_switch_activated_by, _kill_switch_activated_at, reason, redis_ok,
     )
 
     return jsonify({
@@ -561,6 +662,7 @@ def emergency_stop():
         "activated_at": _kill_switch_activated_at,
         "activated_by": _kill_switch_activated_by,
         "reason": reason,
+        "redis_persisted": redis_ok,
         "message": "Emergency stop activated — all trading halted.",
     }), 200
 
@@ -569,6 +671,9 @@ def emergency_stop():
 def reset_kill_switch():
     """
     Deactivate the kill-switch (allow trading to resume after human review).
+
+    Removes the 'ELVIS_KILL_SWITCH' key from Redis so the cleared state
+    also persists across restarts.
 
     Returns:
         200 — kill-switch cleared
@@ -585,9 +690,14 @@ def reset_kill_switch():
         }), 409
 
     KILL_SWITCH_ACTIVE = False
+    # Remove from Redis so the cleared state persists across restarts.
+    redis_ok = _redis_set_kill_switch(False)
+
     logger.warning(
-        f"✅ Kill-switch CLEARED by {request.remote_addr} at "
-        + _datetime.datetime.utcnow().isoformat() + "Z"
+        "✅ Kill-switch CLEARED by %s at %s (Redis updated: %s)",
+        request.remote_addr,
+        _datetime.datetime.utcnow().isoformat() + "Z",
+        redis_ok,
     )
     _kill_switch_activated_at = None
     _kill_switch_activated_by = None
@@ -595,18 +705,32 @@ def reset_kill_switch():
     return jsonify({
         "status": "cleared",
         "kill_switch_active": False,
+        "redis_updated": redis_ok,
         "message": "Kill-switch cleared — trading may resume.",
     }), 200
 
 
 @app.route('/emergency_stop/status', methods=['GET'])
 def kill_switch_status():
-    """Return the current kill-switch state (read-only, no side effects)."""
+    """
+    Return the current kill-switch state sourced directly from Redis.
+
+    Syncs the in-memory flag with the Redis value on every call so that
+    external tools (e.g. monitoring) always see an accurate picture even if
+    Redis was updated by another process.
+    """
+    global KILL_SWITCH_ACTIVE
     from flask import jsonify
+
+    # Re-read from Redis on every status check (low-frequency endpoint).
+    redis_state = _redis_get_kill_switch()
+    KILL_SWITCH_ACTIVE = redis_state  # Keep in-memory flag in sync.
+
     return jsonify({
         "kill_switch_active": KILL_SWITCH_ACTIVE,
         "activated_at": _kill_switch_activated_at,
         "activated_by": _kill_switch_activated_by,
+        "source": "redis",
     }), 200
 
 
