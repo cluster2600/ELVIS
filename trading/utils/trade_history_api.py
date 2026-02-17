@@ -23,6 +23,32 @@ from utils.logger_config import setup_logging
 app = Flask(__name__)
 CORS(app)
 
+# ---------------------------------------------------------------------------
+# ISSUE #13 FIX: API Key Authentication
+# The Flask API was publicly accessible on 0.0.0.0:5050 with no authentication.
+# Any process on the network could read trade data or trigger actions.
+# Now every request (except /health) must supply the correct API key via header:
+#   X-API-Key: <value of API_KEY env variable>
+# Set the API_KEY environment variable before starting the bot.
+# ---------------------------------------------------------------------------
+_API_KEY = os.getenv('API_KEY')
+
+@app.before_request
+def require_api_key():
+    """Reject requests that do not present the correct API key header."""
+    # Health check is exempt so load balancers / Docker health checks still work
+    from flask import request, jsonify
+    if request.path == '/health':
+        return  # exempt from auth
+
+    if not _API_KEY:
+        # Fail closed: if no API_KEY is configured, block all requests
+        return jsonify({"error": "API authentication not configured on server"}), 503
+
+    provided = request.headers.get('X-API-Key', '')
+    if provided != _API_KEY:
+        return jsonify({"error": "Unauthorized — provide a valid X-API-Key header"}), 401
+
 # Initialize Prometheus if available
 if HAS_PROMETHEUS:
     metrics = PrometheusMetrics(app)
