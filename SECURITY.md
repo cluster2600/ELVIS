@@ -3,6 +3,26 @@
 ## Overview
 ELVIS Trading Bot implements enterprise-grade security practices with HashiCorp Vault integration for secure secrets management and API key protection.
 
+## Sprint-1 Hardening Updates (2026-02-18)
+
+These security and exposure changes were shipped in the Sprint-1 hardening pass:
+
+- Removed hardcoded Vault token behavior.
+  - `VAULT_TOKEN` must now be provided externally when Vault-backed secret loading is required.
+- Removed hardcoded Postgres password fallback.
+  - `POSTGRES_PASSWORD` has no default and must be supplied via environment/secrets manager.
+- Changed Trade History API exposure to local-only by default.
+  - `TRADE_HISTORY_API_HOST` default: `127.0.0.1`
+  - `TRADE_HISTORY_API_PORT` default: `5050`
+- Added API key authentication to the Flask trade-history API (`X-API-Key` header).
+  - `/health` is exempt for health checks.
+
+Operational implications:
+- If Prometheus scrapes `/metrics` through the authenticated Flask API, you must either:
+  - configure Prometheus to send `X-API-Key`, or
+  - explicitly exempt `/metrics` in API auth middleware.
+- For remote/API access from outside localhost (for example in containerized deployments), set `TRADE_HISTORY_API_HOST=0.0.0.0` intentionally.
+
 ## 🔐 HashiCorp Vault Integration
 
 ### Security Architecture
@@ -195,8 +215,8 @@ def test_vault_security():
 
 ---
 
-**Last Updated**: July 20, 2025  
+**Last Updated**: February 18, 2026  
 **Security Review**: Complete  
-**Next Review**: January 20, 2026
+**Next Review**: August 18, 2026
 
 > **Note**: This security implementation represents enterprise-grade protection for cryptocurrency trading operations. All security measures are actively monitored and regularly audited.

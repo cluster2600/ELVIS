@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Introduction](#introduction)
+- [2026-02-18 Hardening Notes](#2026-02-18-hardening-notes)
 - [Security & Performance](#security--performance-breakthrough-new)
   - [Enterprise Security](#️-enterprise-grade-hashicorp-vault-integration)
   - [Maximum Speed Trading](#-maximum-speed-trading)
@@ -29,6 +30,21 @@
 ## Introduction
 
 The **ELVIS** (**E**nhanced **L**everaged **V**irtual **I**nvestment **S**ystem) Trading Bot is a sophisticated, modular algorithmic trading system that leverages machine learning models for automated cryptocurrency trading. The system integrates multiple ML architectures, real-time data processing, risk management, and execution modules to facilitate intelligent trading strategies with comprehensive monitoring and visualization capabilities.
+
+## 2026-02-18 Hardening Notes
+
+The February 18, 2026 hardening update closed issues `#9`, `#10`, `#11`, `#13`, and `#16` and changed runtime defaults in ways operators need to know:
+
+- `VAULT_TOKEN` is no longer hardcoded or auto-populated.
+- `POSTGRES_PASSWORD` no longer has a hardcoded default.
+- Trade History API bind is now local by default:
+  - `TRADE_HISTORY_API_HOST=127.0.0.1`
+  - `TRADE_HISTORY_API_PORT=5050`
+- Repository hygiene policy now ignores local virtualenv/build trees by default (`env*/`, `venv*/`, `.venv/`, `tensorflow/`).
+
+Operational runbook and troubleshooting:
+- `docs/ops/2026-02-18_container_observability_runbook.md`
+- `SECURITY.md`
 
 ## 🚀 Current Status (July 2025)
 
@@ -112,7 +128,8 @@ git clone https://github.com/cluster2600/ELVIS.git
 cd ELVIS/ansible
 chmod +x run_setup.sh
 ./run_setup.sh --docker
-# Access at http://localhost:5050 when ready
+# API health: http://localhost:5050/health
+# Grafana: http://localhost:3001
 ```
 
 **Option 2: Secure Development Setup**

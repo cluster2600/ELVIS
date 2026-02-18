@@ -6,6 +6,10 @@
 - **[SECURITY.md](../SECURITY.md)** - Complete security implementation with HashiCorp Vault
 - **[VAULT_SETUP.md](VAULT_SETUP.md)** - Step-by-step Vault configuration guide
 
+### 🧰 Operations Runbooks
+- **[2026-02-18 Container Observability Runbook](ops/2026-02-18_container_observability_runbook.md)** - Container startup, Grafana/Prometheus "No data" troubleshooting, and post-hardening env requirements
+- **[2026-02-10 ELVIS No Data Debug](ops/2026-02-10_elvis_no_data_debug.md)** - Prior investigation notes for dashboard data issues
+
 ### 📊 System Architecture
 - **[API Monitoring](../utils/api_connection_tester.py)** - Real-time API health monitoring
 - **[Console Dashboard](../utils/console_dashboard.py)** - Live trading dashboard with visual indicators
