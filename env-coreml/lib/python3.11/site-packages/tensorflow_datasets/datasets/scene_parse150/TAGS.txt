@@ -1,3 +1,0 @@
-content.data-type.image
-ml.task.image-to-image-translation
-ml.task.semantic-segmentation

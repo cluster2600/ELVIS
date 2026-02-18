@@ -1,3 +1,0 @@
-content.data-type.text
-content.monolingual
-ml.task.common-sense-reasoning

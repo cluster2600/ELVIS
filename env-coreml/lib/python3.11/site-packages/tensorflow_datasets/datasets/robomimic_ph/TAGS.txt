@@ -1,5 +1,0 @@
-ml.task.reinforcement-learning
-content.data-type.trajectory
-content.data-type.image
-content.data-type.time-series
-content.subject.computer-science

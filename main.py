@@ -15,12 +15,9 @@ load_dotenv()
 if not os.getenv('VAULT_ADDR'):
     os.environ['VAULT_ADDR'] = 'http://127.0.0.1:8200'
 if not os.getenv('VAULT_TOKEN'):
-    # ISSUE #10 FIX: Removed hardcoded Vault token 'trading-bot-token'.
-    # Hardcoded secrets in source code expose credentials to anyone with repo access.
-    # VAULT_TOKEN must be set as an environment variable before starting the bot.
-    raise EnvironmentError(
-        "VAULT_TOKEN environment variable is not set. "
-        "Export it before starting: export VAULT_TOKEN=<your-vault-token>"
+    # Vault token must be supplied externally when Vault-backed secret loading is used.
+    logging.getLogger(__name__).warning(
+        "VAULT_TOKEN is not set; Vault authentication will be unavailable."
     )
 
 from core.bootstrap import bootstrap_application
@@ -28,65 +25,18 @@ from core.di import container
 from core.events import event_bus, SystemEvent
 from utils.console_dashboard import ConsoleDashboard
 from trading.utils.trade_history_api import app as trade_history_app
+from trading.analysis.technical_indicators import add_technical_indicators
 import pandas as pd
-import ta
 
 
 def start_trade_history_server():
     """
     Start the Trade History Flask server in a separate thread.
     """
-    trade_history_app.run(host="0.0.0.0", port=5050)
-
-
-def add_technical_indicators(data: pd.DataFrame) -> pd.DataFrame:
-    """Add technical indicators to the price data."""
-    try:
-        if len(data) < 50:  # Need enough data for indicators
-            return data
-        
-        # Check if required columns exist
-        required_columns = ['close', 'high', 'low']
-        missing_columns = [col for col in required_columns if col not in data.columns]
-        if missing_columns:
-            logger = container.get_optional('logger', logging.getLogger(__name__))
-            logger.error(f"Missing required columns for technical indicators: {missing_columns}")
-            logger.info(f"Available columns: {list(data.columns)}")
-            return data
-            
-        # Ensure numeric types for calculations
-        for col in required_columns:
-            data[col] = pd.to_numeric(data[col], errors='coerce')
-            
-        # Add Simple Moving Averages
-        data['sma_20'] = ta.trend.sma_indicator(data['close'], window=20)
-        data['sma_50'] = ta.trend.sma_indicator(data['close'], window=50)
-        
-        # Add ADX
-        data['adx'] = ta.trend.adx(data['high'], data['low'], data['close'], window=14)
-        
-        # Add RSI
-        data['rsi'] = ta.momentum.rsi(data['close'], window=14)
-        
-        # Add MACD
-        macd = ta.trend.MACD(data['close'])
-        data['macd'] = macd.macd()
-        data['signal_line'] = macd.macd_signal()
-        
-        # Add Bollinger Bands
-        bollinger = ta.volatility.BollingerBands(data['close'])
-        data['lower_bb'] = bollinger.bollinger_lband()
-        data['sma_bb'] = bollinger.bollinger_mavg() 
-        data['upper_bb'] = bollinger.bollinger_hband()
-        
-        # Add other indicators that might be needed
-        data['atr'] = ta.volatility.average_true_range(data['high'], data['low'], data['close'])
-        
-        return data
-    except Exception as e:
-        logger = container.get_optional('logger', logging.getLogger(__name__))
-        logger.error(f"Error calculating technical indicators: {e}")
-        return data
+    # Secure by default: expose API only locally unless explicitly overridden.
+    api_host = os.getenv("TRADE_HISTORY_API_HOST", "127.0.0.1")
+    api_port = int(os.getenv("TRADE_HISTORY_API_PORT", "5050"))
+    trade_history_app.run(host=api_host, port=api_port)
 
 
 # Global shutdown flag
@@ -180,7 +130,9 @@ def main(mode: str, log_level: str):
     try:
         # Start Trade History Server in background
         threading.Thread(target=start_trade_history_server, daemon=True).start()
-        logger.info("Started Trade History Server on 0.0.0.0:5050...")
+        api_host = os.getenv("TRADE_HISTORY_API_HOST", "127.0.0.1")
+        api_port = os.getenv("TRADE_HISTORY_API_PORT", "5050")
+        logger.info(f"Started Trade History Server on {api_host}:{api_port}...")
         
         # Get dependencies from container
         strategy_manager = container.get('strategy_manager')
@@ -401,7 +353,7 @@ def main(mode: str, log_level: str):
                     if not data.empty:
                         # Calculate technical indicators for the data
                         logger.debug("Adding technical indicators...")
-                        data = add_technical_indicators(data)
+                        data = add_technical_indicators(data, logger)
                         logger.debug(f"Data with indicators shape: {data.shape}")
                         logger.debug(f"Available columns: {list(data.columns)}")
                         
@@ -1314,4 +1266,3 @@ if __name__ == "__main__":
 
     # Start the main bot
     main(mode=args.mode, log_level=args.log_level.upper())
-
