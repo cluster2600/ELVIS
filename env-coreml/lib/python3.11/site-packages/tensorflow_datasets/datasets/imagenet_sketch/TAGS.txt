@@ -1,2 +1,0 @@
-content.data-type.image
-ml.task.image-classification

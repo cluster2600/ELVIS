@@ -1,3 +1,0 @@
-content.data-type.image
-content.data-type.text
-ml.task.image-compression
