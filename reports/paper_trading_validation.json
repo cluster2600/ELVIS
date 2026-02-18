@@ -1,0 +1,110 @@
+{
+  "simulation_timestamp": "2026-02-18T06:55:08.975331+00:00",
+  "simulation_duration_secs": 61.45,
+  "symbol": "BTCUSDT",
+  "num_trades": 10,
+  "initial_balance_usdt": 10000.0,
+  "final_balance_usdt": 10006.7985,
+  "metrics": {
+    "sharpe": 0.6884,
+    "win_rate": 0.7,
+    "max_drawdown_pct": 0.0089,
+    "total_pnl": 3.5333
+  },
+  "thresholds": {
+    "sharpe_min": 0.5,
+    "max_drawdown_pct": 20.0
+  },
+  "trades": [
+    {
+      "trade_num": 1,
+      "buy_price": 65000.0,
+      "sell_price": 65715.0,
+      "move_pct": 1.1,
+      "quantity": 0.001,
+      "realised_pnl": 0.6887
+    },
+    {
+      "trade_num": 2,
+      "buy_price": 65715.0,
+      "sell_price": 66437.0,
+      "move_pct": 1.0987,
+      "quantity": 0.001,
+      "realised_pnl": 0.6954
+    },
+    {
+      "trade_num": 3,
+      "buy_price": 66437.0,
+      "sell_price": 66107.0,
+      "move_pct": -0.4967,
+      "quantity": 0.001,
+      "realised_pnl": -0.3564
+    },
+    {
+      "trade_num": 4,
+      "buy_price": 66200.0,
+      "sell_price": 66993.0,
+      "move_pct": 1.1979,
+      "quantity": 0.001,
+      "realised_pnl": 0.7662
+    },
+    {
+      "trade_num": 5,
+      "buy_price": 66993.0,
+      "sell_price": 67629.0,
+      "move_pct": 0.9494,
+      "quantity": 0.001,
+      "realised_pnl": 0.6089
+    },
+    {
+      "trade_num": 6,
+      "buy_price": 67629.0,
+      "sell_price": 67224.0,
+      "move_pct": -0.5989,
+      "quantity": 0.001,
+      "realised_pnl": -0.4319
+    },
+    {
+      "trade_num": 7,
+      "buy_price": 67300.0,
+      "sell_price": 68001.0,
+      "move_pct": 1.0416,
+      "quantity": 0.001,
+      "realised_pnl": 0.6738
+    },
+    {
+      "trade_num": 8,
+      "buy_price": 68001.0,
+      "sell_price": 68611.0,
+      "move_pct": 0.897,
+      "quantity": 0.001,
+      "realised_pnl": 0.5826
+    },
+    {
+      "trade_num": 9,
+      "buy_price": 68700.0,
+      "sell_price": 68356.0,
+      "move_pct": -0.5007,
+      "quantity": 0.001,
+      "realised_pnl": -0.3713
+    },
+    {
+      "trade_num": 10,
+      "buy_price": 68400.0,
+      "sell_price": 69105.0,
+      "move_pct": 1.0307,
+      "quantity": 0.001,
+      "realised_pnl": 0.6774
+    }
+  ],
+  "portfolio_summary": {
+    "balance_usdt": 10006.7985,
+    "initial_balance": 10000.0,
+    "realised_pnl": 3.5333,
+    "unrealised_pnl": 0.0,
+    "total_pnl": 3.5333,
+    "total_trades": 20,
+    "open_positions": [],
+    "kill_switch_active": false
+  }
+}
