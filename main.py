@@ -15,7 +15,13 @@ load_dotenv()
 if not os.getenv('VAULT_ADDR'):
     os.environ['VAULT_ADDR'] = 'http://127.0.0.1:8200'
 if not os.getenv('VAULT_TOKEN'):
-    os.environ['VAULT_TOKEN'] = 'trading-bot-token'
+    # ISSUE #10 FIX: Removed hardcoded Vault token 'trading-bot-token'.
+    # Hardcoded secrets in source code expose credentials to anyone with repo access.
+    # VAULT_TOKEN must be set as an environment variable before starting the bot.
+    raise EnvironmentError(
+        "VAULT_TOKEN environment variable is not set. "
+        "Export it before starting: export VAULT_TOKEN=<your-vault-token>"
+    )
 
 from core.bootstrap import bootstrap_application
 from core.di import container
