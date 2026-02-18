@@ -10,7 +10,7 @@ from collections import deque
 import psutil
 import pandas as pd
 import ta
-from utils.api_connection_tester import get_api_tester
+from utils.console_dashboard_support import LogHandler, create_api_tester
 
 # Add project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,20 +20,6 @@ if project_root not in sys.path:
 from utils.logging_utils import setup_logger
 from config.config import TRADING_CONFIG
 import numpy as np
-
-class LogHandler(logging.Handler):
-    """Custom log handler to capture logs for dashboard display"""
-    def __init__(self, dashboard):
-        super().__init__()
-        self.dashboard = dashboard
-        self.setLevel(logging.INFO)
-        
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            self.dashboard.add_log_message(msg)
-        except Exception:
-            pass  # Don't let logging errors crash the dashboard
 
 class ConsoleDashboard:
     """
@@ -68,24 +54,7 @@ class ConsoleDashboard:
         self.last_chart_data = None  # Cache last chart to reduce flashing
         self.chart_buffer = {}  # Store chart display buffer
         
-        # API Connection Tester - ensure Vault environment is set
-        import os
-        if not os.getenv('VAULT_ADDR'):
-            os.environ['VAULT_ADDR'] = 'http://127.0.0.1:8200'
-        if not os.getenv('VAULT_TOKEN'):
-            os.environ['VAULT_TOKEN'] = 'trading-bot-token'
-        
-        # Force a fresh API tester to pick up environment variables
-        from utils.api_connection_tester import APIConnectionTester
-        self.api_tester = APIConnectionTester(logger)
-        self.api_tester.start_monitoring()  # Start background monitoring
-        
-        # Force an immediate test of all APIs
-        try:
-            self.api_tester.test_all_apis()
-            logger.info("Initial API test completed")
-        except Exception as e:
-            logger.warning(f"Initial API test failed: {e}")
+        self.api_tester = create_api_tester(logger)
         
         # Set up log handler to capture logs
         self.log_handler = LogHandler(self)
