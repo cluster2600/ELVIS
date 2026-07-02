@@ -1,5 +1,5 @@
 # Minimal ELVIS Container - Core Trading Only
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONPATH=/app
@@ -13,16 +13,13 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install minimal Python packages for core functionality
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    numpy pandas requests Flask Flask-CORS \
-    redis psycopg2-binary SQLAlchemy websocket-client \
-    psutil python-dotenv ccxt python-binance \
-    colorlog pyyaml tqdm ta keyring
-
 # Copy application code
 COPY . /app
+
+# Install project dependencies from canonical metadata
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --prefer-binary ta-lib && \
+    pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 # Create directories
 RUN mkdir -p /app/logs /app/models /app/data /app/tmp && \

@@ -186,7 +186,7 @@ class BinanceProcessor(BaseProcessor):
         self.data = self.data.drop_duplicates()
         
         # Handle missing values
-        self.data = self.data.fillna(method='ffill')
+        self.data = self.data.ffill()
         
         # Filter by date range
         self.data = self.data[(self.data['date'] >= self.start_date) & (self.data['date'] <= self.end_date)]

@@ -7,7 +7,7 @@ all:
   vars:
     # Global variables for all hosts
     project_name: "elvis-trading-bot"
-    python_version: "3.11"
+    python_version: "3.14"
     node_version: "18"
     
     # Environment-specific variables

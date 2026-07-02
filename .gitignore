@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.container.example
 apikeys.txt
 secrets.txt
 
@@ -52,6 +53,8 @@ env-*/
 *.tfevents*
 models/checkpoints/
 models/logs/
+models/rl_agents_evaluation.json
+models/transformer_evaluation.json
 training/training_results/
 train_results/
 

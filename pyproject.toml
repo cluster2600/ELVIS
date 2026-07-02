@@ -46,6 +46,22 @@ dependencies = [
   "protobuf>=3.20.3,<6.0.0",
 ]
 
+[project.optional-dependencies]
+# ML add-ons used by the ensemble/DRL paths (all import-guarded in code).
+# ydf and tensorflow are intentionally absent: no Python 3.14 wheels yet
+# (checked 2026-07); the ensemble degrades gracefully without them.
+ml = [
+  "torch",
+  "coremltools",
+  "gymnasium",
+  "openai",
+  "TA-Lib",
+]
+test = [
+  "pytest",
+  "pytest-timeout",
+]
+
 [tool.setuptools.packages.find]
 include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "scripts*"]
 

@@ -485,7 +485,7 @@ async def test_llm_enhanced_training():
     print("=" * 40)
     
     # Create sample market data
-    dates = pd.date_range(start='2024-01-01', periods=20, freq='1H')
+    dates = pd.date_range(start='2024-01-01', periods=20, freq='1h')
     sample_data = pd.DataFrame({
         'timestamp': dates,
         'open': 65000 + np.random.randn(20) * 500,

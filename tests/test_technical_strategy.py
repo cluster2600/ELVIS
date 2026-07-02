@@ -37,7 +37,7 @@ class TestTechnicalStrategy(unittest.TestCase):
         
         # Set up test data
         self.test_data = pd.DataFrame({
-            'date': pd.date_range(start='2023-01-01', periods=5, freq='H'),
+            'date': pd.date_range(start='2023-01-01', periods=5, freq='h'),
             'open': [35000.0, 35500.0, 36000.0, 36500.0, 37000.0],
             'high': [36000.0, 36500.0, 37000.0, 37500.0, 38000.0],
             'low': [34000.0, 34500.0, 35000.0, 35500.0, 36000.0],

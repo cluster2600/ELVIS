@@ -1,5 +1,5 @@
 # Simple Dockerfile for ELVIS Trading Bot - Network Resilient Version
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Set environment variables for better package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,20 +19,13 @@ RUN apt-get update --fix-missing || true && \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt /app/requirements.txt
-
-# Install Python packages with retry and fallback
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --timeout 30 --retries 3 \
-    numpy pandas scipy scikit-learn matplotlib tqdm pyyaml requests \
-    Flask Flask-CORS prometheus-flask-exporter \
-    redis prometheus-client SQLAlchemy websocket-client psycopg2-binary \
-    psutil python-dotenv keyring ccxt python-binance python-telegram-bot \
-    colorlog ta hvac statsmodels coremltools torch
-
 # Copy application code
 COPY . /app
+
+# Install Python packages from project metadata
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --timeout 30 --retries 3 --prefer-binary ta-lib && \
+    pip install --no-cache-dir --timeout 30 --retries 3 --prefer-binary -r requirements.txt
 
 # Create necessary directories and set permissions
 RUN mkdir -p /app/logs /app/models /app/data /app/tmp && \

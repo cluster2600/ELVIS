@@ -12,13 +12,13 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}Starting ELVIS Trading Bot API...${NC}"
 
 # Check if virtual environment exists
-if [ ! -d "venv" ]; then
+if [ ! -d "venv314" ]; then
     echo -e "${YELLOW}Virtual environment not found. Creating one...${NC}"
-    python3 -m venv venv
+    python3 -m venv venv314
 fi
 
 # Activate virtual environment
-source venv/bin/activate
+source venv314/bin/activate
 
 # Install requirements if needed
 echo -e "${YELLOW}Checking dependencies...${NC}"

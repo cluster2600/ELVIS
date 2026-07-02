@@ -196,7 +196,7 @@ class LLMEnhancedStrategy(BaseStrategy):
             df['volume_ratio'] = 1.0
         
         # Fill NaN values
-        df.fillna(method='ffill', inplace=True)
+        df.ffill(inplace=True)
         df.fillna(0, inplace=True)
     
     def _add_llm_style_features(self, df: pd.DataFrame):
