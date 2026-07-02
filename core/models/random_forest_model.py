@@ -69,6 +69,54 @@ class RandomForestModel(BaseModel):
     def set_params(self, **params):
         self.model.set_params(**params)
 
+    def explain_predictions(self, X, path: str = None):
+        """Explainability (documented). Uses SHAP if installed, else falls back
+        to sklearn feature_importances_. Optionally writes a CSV to `path`.
+
+        Returns a DataFrame of feature -> importance/mean|SHAP|.
+        """
+        feature_names = list(getattr(X, "columns", range(getattr(X, "shape", [0, 0])[1])))
+        try:
+            import shap  # optional; no wheels on some Python versions
+            explainer = shap.TreeExplainer(self.model)
+            vals = np.abs(np.asarray(explainer.shap_values(X)))
+            score = vals.mean(axis=tuple(range(vals.ndim - 1)))
+            col = "mean_abs_shap"
+        except Exception:
+            score = self.model.feature_importances_
+            col = "importance"
+        df = pd.DataFrame({"feature": feature_names, col: score}).sort_values(col, ascending=False)
+        if path:
+            df.to_csv(path, index=False)
+        return df
+
+    def tune_hyperparameters(self, X, y, n_trials: int = 20):
+        """Hyperparameter tuning (documented). Uses Optuna if installed, else a
+        small sklearn GridSearchCV fallback. Applies and returns the best params.
+        """
+        try:
+            import optuna  # optional; no wheels on some Python versions
+
+            def objective(trial):
+                params = {
+                    "n_estimators": trial.suggest_int("n_estimators", 50, 300),
+                    "max_depth": trial.suggest_int("max_depth", 3, 20),
+                }
+                m = RandomForestClassifier(**params, random_state=42)
+                return cross_validate(m, X, y, cv=3, scoring="f1")["test_f1"].mean()
+
+            study = optuna.create_study(direction="maximize")
+            study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+            best = study.best_params
+        except Exception:
+            from sklearn.model_selection import GridSearchCV
+            grid = {"n_estimators": [50, 100, 200], "max_depth": [5, 10, None]}
+            gs = GridSearchCV(RandomForestClassifier(random_state=42), grid, cv=3, scoring="f1")
+            gs.fit(X, y)
+            best = gs.best_params_
+        self.model.set_params(**best)
+        return best
+
     def cross_validate(self, X, y, n_splits=5):
         """
         Perform cross-validation.

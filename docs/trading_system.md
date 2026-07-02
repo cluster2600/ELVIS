@@ -1,5 +1,8 @@
 # ELVIS Trading System - Trading Components Documentation
 
+> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
+
+
 ## Overview
 
 This document provides comprehensive documentation of the core trading components in the ELVIS trading system. It covers trading strategies, execution modules, risk management, and the complete trading workflow from signal generation to order execution.

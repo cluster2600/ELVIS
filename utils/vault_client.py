@@ -22,13 +22,13 @@ class VaultClient:
     def __init__(self, 
                  vault_url: str = None,
                  vault_token: str = None,
-                 mount_point: str = 'secret',
+                 mount_point: str = 'secrets',
                  logger: logging.Logger = None):
         """
         Initialize Vault client.
         
         Args:
-            vault_url: Vault server URL (defaults to env VAULT_URL)
+            vault_url: Vault server URL (defaults to env VAULT_ADDR or VAULT_URL)
             vault_token: Vault token (defaults to env VAULT_TOKEN)
             mount_point: KV secrets engine mount point
             logger: Logger instance
@@ -36,7 +36,7 @@ class VaultClient:
         self.logger = logger or logging.getLogger(__name__)
         
         # Configuration
-        self.vault_url = vault_url or os.getenv('VAULT_URL', 'http://localhost:8200')
+        self.vault_url = vault_url or os.getenv('VAULT_ADDR', os.getenv('VAULT_URL', 'http://localhost:8200'))
         self.vault_token = vault_token or os.getenv('VAULT_TOKEN')
         self.mount_point = mount_point
         

@@ -15,7 +15,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.vault_client import get_vault_client
-from utils.secrets_manager_enhanced import get_enhanced_secrets_manager
+from utils.secrets_manager import get_enhanced_secrets_manager
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

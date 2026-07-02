@@ -1,60 +1,47 @@
-# ELVIS v0.1.0
+# ELVIS v0.2.0
 
-First tagged release of the ELVIS trading bot (Enhanced Leveraged Virtual
-Investment System). This release makes the bot run cleanly, removes dead
-code, hardens security, and moves the runtime to Python 3.14.
+Documentation-audit release: verified 864 documented claims against the code,
+fixed real bugs the audit surfaced, and **built the code to match the docs**
+for the concrete capabilities they promised — each with tests and mermaid
+diagrams of the real architecture.
 
 ## Docker image
 
-Published to the GitHub Container Registry:
-
 ```bash
-docker pull ghcr.io/cluster2600/elvis:0.1.0   # or :latest
+docker pull ghcr.io/cluster2600/elvis:0.2.0   # or :latest
 ```
-
-Run in paper mode (needs Postgres + Redis; see `docker-compose.yml`):
-
-```bash
-docker run --rm \
-  -e POSTGRES_HOST=... -e POSTGRES_PASSWORD=... \
-  -e REDIS_HOST=... \
-  -p 5050:5050 \
-  ghcr.io/cluster2600/elvis:0.1.0
-```
-
-The image is a lean runtime built on `python:3.14-slim` (numpy/pandas/sklearn,
-Flask API, Binance/CCXT, Redis, Postgres, TA-Lib). Model files and secrets are
-**not** baked in — mount `models/` as a volume and supply credentials via
-environment variables or Vault. The container runs as a non-root `elvis` user
-and exposes a `/health` check on port 5050.
 
 ## What's in this release
 
-**Runtime**
-- Migrated to Python 3.14; all dependencies refreshed to current versions.
-- Fixed a macOS startup segfault (duplicate OpenMP runtimes) and pandas 3.0 API
-  removals (`fillna(method=)`, deprecated frequency aliases).
-- Hardened the macOS Keychain secret read against indefinite blocking.
+**Code bugs fixed (were crashing on import)**
+- `scripts/setup_vault.py` and `scripts/vault_admin.py` imported a nonexistent
+  `utils.secrets_manager_enhanced` → fixed to `utils.secrets_manager`.
+- `trading/api/app.py` imported a nonexistent `PaperTradeDB` class → added a thin
+  `PaperTradeDB` wrapper in `utils/paper_trade_db.py`; the trading API imports again.
 
-**Security**
-- Trading API refuses to start without `API_SECRET_KEY`; login fails closed
-  unless `API_USERNAME`/`API_PASSWORD` are configured (previously `admin`/`admin`
-  with a hard-coded JWT signing key).
-- `--mode` is restricted to `paper|live`; the committed Vault token file was
-  untracked. **Rotate any previously committed secrets.**
-- Default leverage reduced to 3x with a startup safety gate above 10x
-  (`OVERRIDE_HIGH_LEVERAGE=true` to bypass); kill-switch and Binance rate
-  limiting included.
+**Documented capabilities now implemented + tested**
+- `trading/risk/advanced_risk_manager.py` and `core/features/feature_pipeline.py`
+  — the import paths the docs reference now resolve to the real classes.
+- `core/viz/export_utils.py` — CSV / Prometheus / SHAP export helpers.
+- `trading_config.yaml` + `config.trading_config.load_trading_config()` — the
+  unified config the docs describe (trading / risk_management / execution / monitoring).
+- `RandomForestModel.explain_predictions()` and `.tune_hyperparameters()` — the
+  documented explainability/tuning, using SHAP/Optuna when installed and degrading
+  to `feature_importances_` / `GridSearchCV` otherwise (no 3.14 wheels for those).
+- New `tests/test_documented_features.py` (7 tests) covers all of the above.
 
-**Cleanup**
-- Removed ~113 verified-dead scripts/modules and large tracked artifacts, plus
-  long-tracked virtualenv directories. Historical status reports moved to
-  `docs/archive/`.
+**Docs**
+- Corrected the Vault instructions to the real `secrets` mount + `secrets/binance`
+  (`api_key`/`secret_key`) layout, the cooldown claim, and the RandomForest
+  (scikit-learn, not TFDF/SHAP) description.
+- Added a "partially outdated" banner to five deep-dive docs that still describe a
+  fictional architecture and need full rewrites.
+- New `docs/architecture.md` with mermaid diagrams of the **verified** system.
 
 ## Known limitations
 
-- `ydf` and `tensorflow` have no Python 3.14 wheels, and `coremltools` lacks
-  native bindings on 3.14. The ensemble runs on the scikit-learn / research /
-  torch members and skips the others via existing guards.
-- The Docker image is a lean runtime and does not bundle `torch`; the DRL/RL
-  strategies are skipped when torch is absent.
+- `shap`, `optuna`, `ydf`, `tensorflow` have no Python 3.14 wheels; the affected
+  features degrade gracefully via guards. Use the `[ml]` extra on Python 3.13 for
+  the full stack.
+- Five deep-dive docs remain substantially outdated (flagged with banners) and
+  need rewrites — not fixed in this release.

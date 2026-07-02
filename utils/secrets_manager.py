@@ -23,6 +23,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ELVIS secret name -> (KV path under the `secrets` mount, field). Matches the
+# native OpenBao convention (secrets/binance, secrets/binance_testnet) rather
+# than ELVIS's legacy trading/api-keys/binance-api-key scheme.
+_VAULT_KEY_MAP = {
+    'BINANCE_API_KEY': ('binance', 'api_key'),
+    'BINANCE_API_SECRET': ('binance', 'secret_key'),
+    'BINANCE_FUTURES_TESTNET_API_KEY': ('binance_testnet', 'api_key'),
+    'BINANCE_FUTURES_TESTNET_API_SECRET': ('binance_testnet', 'secret_key'),
+}
+
 
 class EnhancedSecretsManager:
     """Enhanced secrets manager with Vault integration and fallback support"""
@@ -131,8 +141,14 @@ class EnhancedSecretsManager:
         # Try Vault first if available
         if self.vault_client:
             try:
-                vault_path = self._category_to_vault_path(category)
-                field_name = name.lower().replace('_', '-')  # Convert to vault format
+                # Known secrets live under this OpenBao's native layout
+                # (mount `secrets`, one path per service). Fall back to the
+                # generic category/field derivation for anything unmapped.
+                if name in _VAULT_KEY_MAP:
+                    vault_path, field_name = _VAULT_KEY_MAP[name]
+                else:
+                    vault_path = self._category_to_vault_path(category)
+                    field_name = name.lower().replace('_', '-')  # Convert to vault format
                 value = self.vault_client.get_secret(vault_path, field_name)
                 if value:
                     self._secrets_cache[cache_key] = str(value)

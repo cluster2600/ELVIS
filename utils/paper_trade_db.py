@@ -624,3 +624,58 @@ def get_all_balances():
     except Exception as e:
         print(f"[ERROR] Error getting all balances: {e}")
         return {'USDT': 1000.0, 'BNB': 1000.0}
+
+def reset_trading_session():
+    """
+    Reset the trading session by creating a new reset timestamp.
+    This makes the bot start with 0 realized P&L for the next session
+    while preserving all historical trade data.
+    """
+    try:
+        conn = get_conn()
+        if conn is None:
+            print("[ERROR] Cannot reset trading session - database not available")
+            return False
+        
+        with conn.cursor() as c:
+            # Insert new reset timestamp
+            c.execute("""
+                INSERT INTO trading_session_resets (reset_timestamp, reason) 
+                VALUES (NOW(), 'Manual bot shutdown')
+            """)
+            
+            # Get the count of resets for logging
+            c.execute("SELECT COUNT(*) FROM trading_session_resets")
+            reset_count = c.fetchone()[0]
+            
+        conn.commit()
+        print(f"[INFO] Trading session reset #{reset_count} - P&L will start fresh next session")
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Error resetting trading session: {e}")
+        return False
+
+
+class PaperTradeDB:
+    """Thin object wrapper over this module's functions.
+
+    trading/api/app.py expects a PaperTradeDB() with method access; the storage
+    layer is otherwise function-based. This delegates the common operations so
+    the Flask API can import and run.
+    """
+
+    def get_all_trades(self, limit=100, exclude_test=False):
+        return get_all_trades(limit=limit, exclude_test=exclude_test)
+
+    def get_open_positions(self):
+        return get_open_positions()
+
+    def get_trade_count(self, exclude_test=False):
+        return get_trade_count(exclude_test=exclude_test)
+
+    def get_total_fees(self, exclude_test=False):
+        return get_total_fees(exclude_test=exclude_test)
+
+    def record_trade(self, symbol, side, price, quantity, pnl=0.0, fee=0.0):
+        return record_trade(symbol, side, price, quantity, pnl, fee)

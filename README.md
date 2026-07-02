@@ -589,7 +589,7 @@ Defines the abstract interface all models must implement, including methods for 
 
 ### RandomForestModel
 
-Implements a Random Forest classifier using TensorFlow Decision Forests. Supports training, evaluation, prediction, cross-validation with k-folds, and SHAP-based explainability. Includes robust error handling and logging.
+Implements a Random Forest classifier using scikit-learn (`RandomForestClassifier`), persisted with joblib. Supports training, evaluation, prediction, k-fold cross-validation, and Prometheus Pushgateway CV metrics. (SHAP/Optuna live only in `enhanced_random_forest_model.py`, not the base model.)
 
 ### NeuralNetworkModel
 
