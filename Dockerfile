@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for ELVIS Trading Bot
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Install system dependencies for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,9 +31,10 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
     rm -rf ta-lib ta-lib-0.4.0-src.tar.gz && \
     ldconfig
 
-# Copy requirements first for better caching
-COPY requirements.txt /app/requirements.txt
 WORKDIR /app
+
+# Copy source before dependency install because requirements.txt uses -e .
+COPY . /app
 
 # Install Python dependencies
 ENV TA_LIBRARY_PATH=/usr/lib
@@ -46,7 +47,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim AS production
+FROM python:3.14-slim AS production
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -60,7 +61,7 @@ COPY --from=builder /usr/lib/libta_lib* /usr/lib/
 COPY --from=builder /usr/include/ta-lib/ /usr/include/ta-lib/
 
 # Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Set working directory

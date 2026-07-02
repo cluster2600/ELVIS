@@ -31,7 +31,7 @@ This directory contains Ansible playbooks and configuration files to automate th
 The Ansible playbook automatically installs and configures:
 
 ### System Dependencies
-- **Python 3.11** - Core runtime environment
+- **Python 3.14** - Core runtime environment
 - **Build tools** - gcc, make, build-essential
 - **Development libraries** - SSL, FFI, HDF5, ATLAS for scientific computing
 - **Git** - Version control

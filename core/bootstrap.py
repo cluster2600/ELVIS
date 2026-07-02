@@ -235,7 +235,10 @@ class ApplicationBootstrapper:
             # Price Fetcher
             def create_price_fetcher():
                 logger = container.get('logger')
-                return PriceFetcher(logger, symbols=['BTCUSDT', 'BNBBTC'])
+                from config.config import SYMBOLS_CONFIG
+                primary_symbols = SYMBOLS_CONFIG.get('PRIMARY_SYMBOLS', ['BTCUSDT', 'BNBUSDT'])
+                logger.info(f"🔄 PriceFetcher initialized with symbols: {primary_symbols}")
+                return PriceFetcher(logger, symbols=primary_symbols)
             
             container.register_singleton('price_fetcher', create_price_fetcher)
         except ImportError as e:
@@ -446,12 +449,26 @@ class ApplicationBootstrapper:
                 
                 from trading.strategies.balanced_starter import BalancedStarterStrategy
                 return BalancedStarterStrategy(logger=logger)
+            elif strategy_mode == 'llm' or strategy_mode == 'llm_enhanced':
+                # Use LLM-enhanced strategy
+                logger.info("🧠 Creating LLM-Enhanced Strategy")
+                logger.info("🤖 Using pre-trained LLM models for trading decisions")
+                
+                from trading.strategies.llm_enhanced_strategy import LLMEnhancedStrategy
+                return LLMEnhancedStrategy(
+                    logger=logger,
+                    model_base_path="models",
+                    fallback_to_traditional=True
+                )
             else:
                 # Use ensemble strategy (default)
                 logger.info("🎯 Creating Ensemble Strategy")
+                from config.config import SYMBOLS_CONFIG
+                primary_symbols = SYMBOLS_CONFIG.get('PRIMARY_SYMBOLS', ['BTCUSDT', 'BNBUSDT'])
+                logger.info(f"🎯 Ensemble Strategy initialized with symbols: {primary_symbols}")
                 return EnsembleStrategy(
                     logger=logger,
-                    symbols=['BTCUSDT', 'BNBBTC'],  # Include BNBBTC for BNB→BTC trading
+                    symbols=primary_symbols,  # Use primary symbols from config: BTCUSDT, BNBUSDT
                     order_flow_analyzer=container.get('order_flow_analyzer'),
                     price_fetcher=container.get('price_fetcher'),
                     exchange_manager=container.get('exchange_manager')

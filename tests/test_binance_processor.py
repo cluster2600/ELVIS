@@ -87,7 +87,7 @@ class TestBinanceProcessor(unittest.TestCase):
         """
         # Set up data
         self.processor.data = pd.DataFrame({
-            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=5, freq='H')),
+            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=5, freq='h')),
             'open': [35000.0, 35500.0, 36000.0, 36500.0, 37000.0],
             'high': [36000.0, 36500.0, 37000.0, 37500.0, 38000.0],
             'low': [34000.0, 34500.0, 35000.0, 35500.0, 36000.0],
@@ -116,7 +116,7 @@ class TestBinanceProcessor(unittest.TestCase):
         """
         # Set up data
         self.processor.data = pd.DataFrame({
-            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=40, freq='H')),
+            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=40, freq='h')),
             'open': np.random.uniform(35000.0, 37000.0, 40),
             'high': np.random.uniform(36000.0, 38000.0, 40),
             'low': np.random.uniform(34000.0, 36000.0, 40),
@@ -144,7 +144,7 @@ class TestBinanceProcessor(unittest.TestCase):
         """
         # Set up data
         self.processor.data = pd.DataFrame({
-            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=20, freq='H')),
+            'date': pd.to_datetime(pd.date_range(start=self.start_date, periods=20, freq='h')),
             'open': np.random.uniform(35000.0, 37000.0, 20),
             'high': np.random.uniform(36000.0, 38000.0, 20),
             'low': np.random.uniform(34000.0, 36000.0, 20),

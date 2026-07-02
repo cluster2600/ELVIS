@@ -86,7 +86,7 @@ vault kv put secret/trading/api-keys \
     binance-api-secret=your-api-secret
 
 # Start with maximum security
-python main.py --mode dashboard  # Shows ✅ Vault connected
+python main.py --mode paper  # Shows ✅ Vault connected
 ```
 
 ### 🔬 **Research-Based Strategy (NEW!)**
@@ -149,7 +149,7 @@ vault kv put secret/trading/api-keys \
     binance-api-secret=your-binance-api-secret
 
 # 4. Start trading with enterprise security
-python main.py --mode dashboard
+python main.py --mode paper
 # ✅ Vault connected - Maximum speed trading enabled
 ```
 
@@ -735,7 +735,7 @@ flowchart TD
     Security --> Complete([Deployment Complete])
     
     subgraph "System Dependencies"
-        Python311[Python 3.11]
+        Python314[Python 3.14]
         BuildTools[Build Tools]
         DevLibs[Development Libraries]
         Git[Git VCS]
@@ -808,7 +808,7 @@ The Docker deployment creates a complete ecosystem:
 **Access Points:**
 - Trading Bot API: http://localhost:5050/api/docs
 - Web Dashboard: http://localhost:8000
-- Grafana Monitoring: http://localhost:3000 (admin/admin)
+- Grafana Monitoring: http://localhost:3001
 - Prometheus Metrics: http://localhost:9090
 
 **Management Commands:**
@@ -845,7 +845,7 @@ After successful Ansible deployment:
    ```
 
 3. **Access Web Interfaces**:
-   - Grafana: http://localhost:3000
+   - Grafana: http://localhost:3001
    - API Documentation: http://localhost:5050/api/docs
    - Prometheus: http://localhost:9090
 
@@ -908,7 +908,7 @@ vault kv put secret/trading/api-keys \
     binance-api-secret=your-api-secret
 
 # 4. Verify security status
-python main.py --mode dashboard
+python main.py --mode paper
 # Dashboard shows: ✅ Vault 3ms (connected)
 ```
 

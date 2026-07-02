@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Activate virtual environment
-if [ -d "venv" ]; then
+if [ -d "venv314" ]; then
     echo "Activating virtual environment..."
-    source venv/bin/activate
+    source venv314/bin/activate
 fi
 
 # Run main.py with specified arguments

@@ -11,6 +11,10 @@ import numpy as np
 from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 
+import pytest
+
+pytest.importorskip("tensorflow", reason="NeuralNetworkModel/EnsembleModel require tensorflow, unavailable on this Python")
+
 from core.data.processors.binance_processor import BinanceProcessor
 from trading.strategies.technical_strategy import TechnicalStrategy
 from trading.strategies.mean_reversion_strategy import MeanReversionStrategy

@@ -431,7 +431,7 @@ class TradingFeaturePipeline:
         df = df.replace([np.inf, -np.inf], np.nan)
         
         # Fill NaN values with forward fill, then backward fill, then 0
-        df = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
+        df = df.ffill().bfill().fillna(0)
         
         # Drop columns with too many NaN values (>90%)
         threshold = len(df) * 0.1  # Keep columns with at least 10% valid data
@@ -467,7 +467,7 @@ class TradingFeaturePipeline:
             features_df['volatility_10'] = features_df['close'].rolling(10).std()
             
             # Clean minimal features
-            features_df = features_df.fillna(method='ffill').fillna(0)
+            features_df = features_df.ffill().fillna(0)
             
         except Exception as e:
             self.logger.error(f"Minimal feature generation failed: {e}")

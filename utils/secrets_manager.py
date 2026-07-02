@@ -56,24 +56,49 @@ class EnhancedSecretsManager:
     def _get_or_create_key(self) -> bytes:
         """Get or create encryption key from OS keyring"""
         key_name = f"{self.app_name}_MASTER_KEY"
-        
-        # Try to get existing key from keyring
-        stored_key = keyring.get_password(self.app_name, key_name)
-        
-        if stored_key:
-            return base64.b64decode(stored_key.encode())
-        
+
+        # macOS Keychain blocks forever on an interactive authorization
+        # prompt when this python binary isn't approved for the item yet
+        # (fresh venv, headless run). Read on a daemon thread with a timeout
+        # so we degrade to an ephemeral key instead of hanging the process.
+        import threading
+        result = []
+
+        def _read():
+            try:
+                result.append(keyring.get_password(self.app_name, key_name))
+            except Exception as e:
+                logger.warning(f"Keyring read failed: {e}")
+                result.append(None)
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=10)
+
+        if reader.is_alive():
+            logger.warning(
+                "Keychain access timed out (python binary not authorized yet?) - "
+                "using ephemeral key; local encrypted store is unavailable this run"
+            )
+            return Fernet.generate_key()
+
+        if result and result[0]:
+            return base64.b64decode(result[0].encode())
+
         # Generate new key
         logger.info("Generating new master encryption key...")
         key = Fernet.generate_key()
-        
+
         # Store in keyring
-        keyring.set_password(
-            self.app_name,
-            key_name,
-            base64.b64encode(key).decode()
-        )
-        
+        try:
+            keyring.set_password(
+                self.app_name,
+                key_name,
+                base64.b64encode(key).decode()
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist master key to keyring: {e}")
+
         return key
     
     def _get_cipher(self) -> Fernet:
@@ -116,20 +141,23 @@ class EnhancedSecretsManager:
             except Exception as e:
                 logger.warning(f"Failed to get {name} from Vault: {e}")
         
+        # Check environment variables before the encrypted file: reading the
+        # local store touches the macOS Keychain, which blocks on an
+        # interactive prompt for any not-yet-authorized python binary.
+        env_value = os.getenv(name)
+        if env_value:
+            logger.debug(f"Retrieved {name} from environment")
+            self._secrets_cache[cache_key] = env_value
+            return env_value
+
         # Load from encrypted file
         secrets = self._load_secrets()
-        
+
         if category in secrets and name in secrets[category]:
             value = secrets[category][name]
             self._secrets_cache[cache_key] = value
             return value
-        
-        # Check environment variable as fallback
-        env_value = os.getenv(name)
-        if env_value:
-            logger.debug(f"Retrieved {name} from environment")
-            return env_value
-        
+
         if warn_if_missing:
             logger.warning(f"Secret {name} not found in any source")
         return default

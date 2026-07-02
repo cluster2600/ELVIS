@@ -5,7 +5,7 @@
     project_name: "BTC_BOT"
     project_user: "{{ ansible_user_id }}"
     project_dir: "{{ playbook_dir }}/.."
-    python_version: "3.11"
+    python_version: "3.14"
     node_version: "18"
     
   tasks:
@@ -99,7 +99,7 @@
     - name: Install system dependencies (macOS)
       community.general.homebrew:
         name:
-          - python@3.11
+          - python@3.14
           - git
           - curl
           - wget

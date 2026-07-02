@@ -3,9 +3,9 @@
 echo "Installing Binance Futures Connector..."
 
 # Activate virtual environment if it exists
-if [ -d "venv_new" ]; then
-    echo "Activating venv_new..."
-    source venv_new/bin/activate
+if [ -d "venv314" ]; then
+    echo "Activating venv314..."
+    source venv314/bin/activate
 fi
 
 # Install the futures connector

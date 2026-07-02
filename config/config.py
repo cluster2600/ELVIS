@@ -36,6 +36,18 @@ TRADING_CONFIG = {
     'RISK_PER_TRADE': 0.02,
     'STOP_LOSS_PCT': 0.02,  # Added to fix the error; adjust as needed
     'TAKE_PROFIT_PCT': 0.02,  # Added to fix the current error; adjust as needed
+
+    # FEWER, BIGGER TRADES STRATEGY (local tuning kept alongside sprint-1 keys)
+    'MAX_LOSS_PER_TRADE_USD': 50.0,     # Larger stop: $50.00 loss per trade
+    'PROFIT_TARGET_USD': 25.0,          # Bigger target: $25.00 profit per trade
+    'MAX_DAILY_LOSS_USD': 150.0,        # Higher daily risk for bigger trades
+    'MAX_RISK_PER_TRADE_USD': 75.0,     # Much larger positions: $75.00 risk per trade
+    'MIN_SIGNAL_CONFIDENCE': 0.85,      # Higher threshold: 85% confidence for trades
+    'HIGH_CONFIDENCE_THRESHOLD': 0.92,   # 92%+ for maximum sizing
+    'CONFLUENCE_REQUIRED': 4,           # Stricter: 4/5 indicators must agree
+    'TRADE_COOLDOWN_MINUTES': 15,       # 15 min cooldown between trades
+    'MAX_DAILY_TRADES': 8,              # Fewer total trades per day
+
     'LEVERAGE_MAX': 125,      # Maximum leverage for futures
     'LEVERAGE_MIN': 1,        # Minimum leverage for futures
     # Issue #14: Default leverage reduced from 100x to 3x to prevent catastrophic
@@ -45,7 +57,7 @@ TRADING_CONFIG = {
     'DAILY_PROFIT_TARGET_USD': 100,  # Added to fix DAILY_PROFIT_TARGET_USD error
     'DAILY_LOSS_LIMIT_USD': 100,     # Added to fix DAILY_LOSS_LIMIT_USD error
     'MIN_CAPITAL_USD': 1000,         # Added to fix MIN_CAPITAL_USD error
-    'COOLDOWN': 0                    # No cooldown - maximum trading speed
+    'COOLDOWN': 0                    # No cooldown - cooldown manager governs trade spacing
 }
 
 # Paper Trading Configuration
@@ -87,13 +99,13 @@ BNB_CONFIG = {
 
 # Multi-Asset Trading Configuration  
 SYMBOLS_CONFIG = {
-    'PRIMARY_SYMBOLS': ['BTCUSDT', 'BNBUSDT'],     # Primary trading pairs
-    'SECONDARY_SYMBOLS': ['ETHUSDT', 'ADAUSDT'],    # Secondary pairs (optional)
-    'STABLE_PAIRS': ['BTCUSDT', 'ETHUSDT'],        # Stable, high-liquidity pairs
-    'FEE_OPTIMIZATION_PAIRS': ['BNBUSDT'],         # Pairs for fee optimization
-    'MAX_CONCURRENT_PAIRS': 3,                     # Maximum pairs to trade simultaneously
+    'PRIMARY_SYMBOLS': ['BTCUSDT', 'BNBUSDT'],           # Primary trading pairs - REMOVED BNBBTC due to pricing issues
+    'SECONDARY_SYMBOLS': ['ETHUSDT', 'ADAUSDT'],          # Secondary pairs (optional)
+    'STABLE_PAIRS': ['BTCUSDT', 'ETHUSDT'],              # Stable, high-liquidity pairs
+    'FEE_OPTIMIZATION_PAIRS': ['BNBUSDT'],               # Pairs for fee optimization - REMOVED BNBBTC
+    'MAX_CONCURRENT_PAIRS': 2,                           # Maximum pairs to trade simultaneously - REDUCED
+    'CROSS_ASSET_PAIRS': [],                             # REMOVED crypto-to-crypto pairs due to pricing issues
 }
-
 
 
 # ---------------------------------------------------------------------------
@@ -155,3 +167,4 @@ def validate_leverage_config(leverage: int = None) -> int:
         )
 
     return leverage
+

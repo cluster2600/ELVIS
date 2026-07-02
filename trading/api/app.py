@@ -35,8 +35,16 @@ CORS(app)
 # Register Swagger UI blueprint
 app.register_blueprint(swaggerui_blueprint)
 
+# Refuse to start with a forgeable default JWT signing key
+API_SECRET_KEY = os.environ.get('API_SECRET_KEY')
+if not API_SECRET_KEY:
+    raise RuntimeError(
+        "API_SECRET_KEY is not set. Generate one (e.g. `openssl rand -hex 32`) "
+        "and export it before starting the trading API."
+    )
+
 # Initialize WebSocket support
-socketio = init_websocket(app, os.getenv('API_SECRET_KEY', 'your-secret-key-here'))
+socketio = init_websocket(app, API_SECRET_KEY)
 
 # Rate limiting
 limiter = Limiter(
@@ -46,7 +54,7 @@ limiter = Limiter(
 )
 
 # Configuration
-app.config['SECRET_KEY'] = os.getenv('API_SECRET_KEY', 'your-secret-key-here')
+app.config['SECRET_KEY'] = API_SECRET_KEY
 app.config['JSON_SORT_KEYS'] = False
 
 # Global variables for bot state
@@ -113,9 +121,10 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    # Simple authentication (replace with proper auth in production)
-    if username == os.getenv('API_USERNAME', 'admin') and \
-       password == os.getenv('API_PASSWORD', 'admin'):
+    # Credentials must be configured; unset env vars mean login always fails
+    api_user = os.environ.get('API_USERNAME')
+    api_pass = os.environ.get('API_PASSWORD')
+    if api_user and api_pass and username == api_user and password == api_pass:
         
         # Generate token
         payload = {

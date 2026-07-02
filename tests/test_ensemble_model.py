@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from datetime import datetime
+
+pytest.importorskip("tensorflow", reason="NeuralNetworkModel/EnsembleModel require tensorflow, unavailable on this Python")
+
 from core.models.ensemble_model import EnsembleModel
 from core.models.random_forest_model import RandomForestModel
 from core.models.neural_network_model import NeuralNetworkModel

@@ -63,7 +63,7 @@
           - curl
           - wget
           - git
-          - python@3.11
+          - python@3.14
           - jq
         state: present
       when: ansible_os_family == "Darwin"

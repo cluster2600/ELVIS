@@ -54,6 +54,7 @@ class ConsoleDashboard:
         self.last_chart_data = None  # Cache last chart to reduce flashing
         self.chart_buffer = {}  # Store chart display buffer
         
+        # API monitoring lifecycle is centralized in helper module.
         self.api_tester = create_api_tester(logger)
         
         # Set up log handler to capture logs
@@ -375,7 +376,7 @@ class ConsoleDashboard:
         self.safe_addstr(y + 2, start_x, f"Unrealized PnL: ${unrealized_pnl:,.2f}", unrealized_color)
         self.safe_addstr(y + 3, start_x, f"Realized PnL: ${realized_pnl:,.2f}", realized_color)
 
-        # Positions (Live from Database with Real-time PnL)
+        # Positions (Live from Database with Real-time PnL) + Recently Closed
         y += 5
         self.safe_addstr(y, start_x, "--- Open Positions ---", curses.color_pair(3) | curses.A_BOLD)
         
@@ -503,10 +504,9 @@ class ConsoleDashboard:
                             size_display = f"{abs(size):.6f}"
                         self.safe_addstr(y + 2 + i, start_x, f"{symbol} {side} {size_display} @ ${entry_price:.2f}")
                 else:
-                    # Show diagnostic info
+                    # Show clean message for no positions
                     timestamp = datetime.now().strftime('%H:%M:%S')
-                    self.safe_addstr(y + 1, start_x, f"No positions at {timestamp}")
-                    self.safe_addstr(y + 2, start_x, "Checking database...")
+                    self.safe_addstr(y + 1, start_x, f"No open positions ({timestamp})")
                     
         except Exception as e:
             self.logger.warning(f"Error getting live positions: {e}")
@@ -553,8 +553,8 @@ class ConsoleDashboard:
                 self.safe_addstr(y + 1, start_x, f"Performance data error")
                 self.logger.debug(f"Performance metrics error: {e}")
 
-        # Recent Trades (Live from Database)
-        y += 6
+        # Recent Trades (Live from Database) - Shows all trading activity including closed positions
+        y += 3
         self.safe_addstr(y, start_x, "--- Recent Trades ---", curses.color_pair(3) | curses.A_BOLD)
         
         try:
@@ -603,14 +603,16 @@ class ConsoleDashboard:
                     trade_info = f"{side} {quantity:.4f} {symbol} @ ${price:.2f}"
                     self.safe_addstr(y + 1 + i, start_x, trade_info, side_color)
                     
-                    # Show P&L or trade value for context
+                    # Show P&L or trade value for context  
                     if pnl != 0.0:
                         pnl_color = curses.color_pair(1) if pnl >= 0 else curses.color_pair(2)
-                        self.safe_addstr(y + 1 + i, start_x + 25, f"PnL: ${pnl:.2f}", pnl_color)
+                        # Add emoji to make profitable closures more visible
+                        profit_icon = "💰" if pnl >= 0.10 else "💸" if pnl <= -5.0 else ""
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"{profit_icon} ${pnl:+.2f}", pnl_color)
                     else:
-                        # Show trade value instead of 0.00 P&L
+                        # Show trade value for position opens
                         trade_value = price * quantity
-                        self.safe_addstr(y + 1 + i, start_x + 25, f"Val: ${trade_value:.0f}")
+                        self.safe_addstr(y + 1 + i, start_x + 25, f"${trade_value:.0f}", curses.color_pair(7))
                         
             else:
                 self.safe_addstr(y + 1, start_x, "No recent trades")
@@ -1101,8 +1103,8 @@ class ConsoleDashboard:
                 total_position_value = 0.0
                 self.logger.debug(f"Live portfolio calculation error: {e}")
             
-            # Get aggressive leverage settings (50x or higher)
-            leverage = int(self.config.get('leverage', 50))  # Default to 50x leverage
+            # Get aggressive leverage settings (100x maximum power)
+            leverage = int(self.config.get('leverage', 100))  # Default to 100x leverage
             
             # Calculate live market volatility (simple estimate)
             volatility = 0.02  # Default 2%

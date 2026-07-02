@@ -59,7 +59,7 @@ vault kv put secret/trading/api-keys \
 
 #### 3. Start Trading Bot
 ```bash
-python main.py --mode dashboard
+python main.py --mode paper
 ```
 
 #### 4. Verify Security

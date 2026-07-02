@@ -161,7 +161,12 @@ class EventBus:
             else:
                 # Run in executor if no event loop
                 for handler in async_handlers:
-                    self._executor.submit(self._run_async_handler, handler, event)
+                    try:
+                        self._executor.submit(self._run_async_handler, handler, event)
+                    except RuntimeError:
+                        # Executor already shut down (e.g. event published from
+                        # the shutdown signal handler) - drop the event.
+                        self._logger.debug(f"Dropped {event.event_type}: executor shut down")
     
     async def publish_async(self, event: Event) -> None:
         """

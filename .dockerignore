@@ -2,6 +2,12 @@
 .git
 .gitignore
 
+# Environment files (do not bake secrets into images)
+.env
+.env.*
+!.env.example
+!.env.container.example
+
 # Docker
 Dockerfile
 .dockerignore

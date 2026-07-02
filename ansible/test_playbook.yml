@@ -4,7 +4,7 @@
   connection: local
   vars:
     project_dir: "{{ playbook_dir }}/.."
-    python_version: "3.11"
+    python_version: "3.14"
     
   tasks:
     - name: Display system information

@@ -27,14 +27,14 @@ for var in "${REQUIRED_VARS[@]}"; do
     fi
 done
 
-# --- venv_new setup ---
-if [ ! -d "venv_new" ]; then
-    echo "📦 Creating venv_new..."
-    python3.11 -m venv venv_new
+# --- venv314 setup ---
+if [ ! -d "venv314" ]; then
+    echo "📦 Creating venv314..."
+    python3.14 -m venv venv314
 fi
 
 echo "📄 Installing requirements..."
-source venv_new/bin/activate
+source venv314/bin/activate
 pip install --upgrade pip
 if [ -f requirements.txt ]; then
     pip install -r requirements.txt
@@ -44,8 +44,8 @@ else
     exit 1
 fi
 
-# --- Activate venv_new ---
-echo "🚀 Activating venv_new..."
+# --- Activate venv314 ---
+echo "🚀 Activating venv314..."
 echo "[DEBUG] Python: $(which python)"
 python --version
 
