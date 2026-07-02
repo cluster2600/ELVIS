@@ -1,35 +1,26 @@
 # Multi-stage Dockerfile for ELVIS Trading Bot
 FROM python:3.14-slim AS builder
 
+# buildx sets TARGETARCH to amd64/arm64 - used to pick the right TA-Lib package
+ARG TARGETARCH
+
 # Install system dependencies for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
-    unzip \
     gcc \
     g++ \
-    musl-dev \
     libffi-dev \
-    openssl \
     python3-dev \
-    cargo \
     pkg-config \
-    cmake \
-    autoconf \
-    automake \
-    libtool \
     && rm -rf /var/lib/apt/lists/*
 
-# Install TA-Lib with explicit build target
-RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
-    tar -xvzf ta-lib-0.4.0-src.tar.gz && \
-    cd ta-lib/ && \
-    ./configure --prefix=/usr && \
-    make && \
-    make install && \
-    cd .. && \
-    rm -rf ta-lib ta-lib-0.4.0-src.tar.gz && \
-    ldconfig
+# Install the TA-Lib C library from the official prebuilt per-arch package
+# (0.6.x; avoids the ancient 0.4.0 autotools that can't detect arm64).
+RUN wget -q "https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && dpkg -i "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && rm "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && ldconfig
 
 WORKDIR /app
 
@@ -49,16 +40,22 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Production stage
 FROM python:3.14-slim AS production
 
+ARG TARGETARCH
+
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     curl \
+    wget \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy TA-Lib from builder
-COPY --from=builder /usr/lib/libta_lib* /usr/lib/
-COPY --from=builder /usr/include/ta-lib/ /usr/include/ta-lib/
+# Install the TA-Lib C runtime (same package as the builder) so the talib
+# Python wheel can load its shared library at runtime.
+RUN wget -q "https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && dpkg -i "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && rm "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && ldconfig
 
 # Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
