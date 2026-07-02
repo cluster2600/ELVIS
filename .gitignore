@@ -2,9 +2,9 @@
 .env
 .env.*
 !.env.example
-!.env.container.example
 apikeys.txt
 secrets.txt
+setup_secure_config.sh
 
 # Python caches/build artifacts
 __pycache__/
@@ -20,21 +20,27 @@ htmlcov/
 build/
 dist/
 
-# Virtual environments
+# Virtual environments and local runtimes
 venv/
 venv*/
 env/
 env-*/
 .venv/
+DeepSeek-R1-Distill-Qwen-1.5B/
+
+# Vendored framework sources
+tensorflow/
 
 # OS/editor noise
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 
 # Logs and runtime files
 *.log
 *.log.*
+TradingBot_*.log
 *.pid
 *.sock
 
@@ -53,8 +59,6 @@ env-*/
 *.tfevents*
 models/checkpoints/
 models/logs/
-models/rl_agents_evaluation.json
-models/transformer_evaluation.json
 training/training_results/
 train_results/
 
@@ -63,7 +67,10 @@ data/5m_25000/
 data/processed/
 plots_and_metrics/
 
-# Tooling downloads
-tools/tools/
-tensorflow/
-DeepSeek-R1-Distill-Qwen-1.5B/
+# Backups/temp
+*.backup
+your_bot_script.py.bak
+tmp/
+temp/
+models/rl_agents_evaluation.json
+models/transformer_evaluation.json

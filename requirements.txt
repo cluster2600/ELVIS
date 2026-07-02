@@ -1,3 +1,50 @@
-# Canonical dependency metadata lives in pyproject.toml.
-# This file intentionally installs the project from source.
--e .
+# Retry / back-off (Issue #12 — Binance rate limiting)
+tenacity
+
+# Core dependencies
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+tqdm
+pyyaml
+ccxt
+ta
+requests
+
+# Web server and API
+Flask
+Flask-CORS
+Flask-SocketIO
+Flask-Limiter
+flask-swagger-ui
+PyJWT
+prometheus-flask-exporter
+
+# Basic stats
+statsmodels
+
+# Connectors and clients
+python-binance
+binance-futures-connector
+python-telegram-bot
+redis
+prometheus-client
+SQLAlchemy
+websocket-client
+ta
+psycopg2-binary
+
+# Other important libraries
+psutil
+colorlog
+python-dotenv
+keyring
+
+# HashiCorp Vault integration
+hvac
+cryptography
+
+# Protobuf compatibility fix for TensorFlow
+protobuf>=3.20.3,<6.0.0

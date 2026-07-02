@@ -18,17 +18,28 @@ from utils.paper_trade_db import record_trade, add_open_position, close_open_pos
 from trading.fees.binance_fee_calculator import BinanceFeeCalculator
 from datetime import datetime
 
+# Issue #12: Import rate-limit utilities (retry decorator + header checker).
+from utils.binance_rate_limiter import binance_retry, check_rate_limit_headers
+
 class BinanceExecutor(BaseExecutor):
-    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, use_futures: bool = False, default_leverage: int = 100, **kwargs):
+    # Issue #14: Default leverage reduced from 100x to 3x.  Callers may pass an
+    # explicit value, which is validated by validate_leverage_config() below.
+    def __init__(self, logger: logging.Logger = None, api_key: str = None, api_secret: str = None, is_testnet: bool = False, use_futures: bool = False, default_leverage: int = None, **kwargs):
         super().__init__(logger, **kwargs)
         self.client = None
         self.api_key = api_key
         self.api_secret = api_secret
         self.is_testnet = is_testnet
         self.use_futures = use_futures
-        self.default_leverage = default_leverage
         self.fee_calculator = BinanceFeeCalculator(logger)
         self.db_available = False
+
+        # Issue #14: Validate leverage before storing it.  Imports here to
+        # avoid circular-import issues at module load time.
+        from config.config import validate_leverage_config, TRADING_CONFIG
+        resolved_leverage = default_leverage if default_leverage is not None else TRADING_CONFIG['DEFAULT_LEVERAGE']
+        self.default_leverage = validate_leverage_config(resolved_leverage)
+
         if is_testnet:
             self._init_paper_trading_db()
 
@@ -70,19 +81,30 @@ class BinanceExecutor(BaseExecutor):
             self.logger.error(f"Failed to initialize BinanceExecutor: {e}")
             return False  # Failed due to other error
 
+    # Issue #12: Wrap each live Binance API call with @binance_retry so that
+    # transient failures (network blips, 429 rate-limit responses) are retried
+    # with exponential back-off instead of failing immediately.
+
     def get_balance(self) -> Dict[str, float]:
         if self.client is None or (self.is_testnet and not self.use_futures):
             return self._calculate_paper_balance()
         try:
             if FUTURES_AVAILABLE and isinstance(self.client, UMFutures):
-                account = self.client.balance()
+                @binance_retry
+                def _fetch():
+                    account = self.client.balance()
+                    account_info = self.client.account()
+                    return account, account_info
+                account, account_info = _fetch()
                 balances = {item['asset']: float(item['balance']) for item in account if float(item['balance']) > 0}
-                account_info = self.client.account()
                 wallet_balance = float(account_info['totalWalletBalance'])
                 self.logger.info(f"Futures account - Wallet Balance: ${wallet_balance:.2f}")
                 return {'USDT': wallet_balance, **balances}
             else:
-                account = self.client.get_account()
+                @binance_retry
+                def _fetch():
+                    return self.client.get_account()
+                account = _fetch()
                 return {item['asset']: float(item['free']) for item in account['balances']}
         except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting balance: {e}")
@@ -92,7 +114,10 @@ class BinanceExecutor(BaseExecutor):
         if self.client is None or not self.use_futures:
             return {}
         try:
-            positions = self.client.get_position_risk(symbol=symbol)
+            @binance_retry
+            def _fetch():
+                return self.client.get_position_risk(symbol=symbol)
+            positions = _fetch()
             return positions[0] if positions else {}
         except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting position for {symbol}: {e}")
@@ -103,9 +128,15 @@ class BinanceExecutor(BaseExecutor):
             return self._get_mock_price(symbol)
         try:
             if self.use_futures:
-                return float(self.client.ticker_price(symbol=symbol)['price'])
+                @binance_retry
+                def _fetch():
+                    return self.client.ticker_price(symbol=symbol)
+                return float(_fetch()['price'])
             else:
-                return float(self.client.get_symbol_ticker(symbol=symbol)['price'])
+                @binance_retry
+                def _fetch():
+                    return self.client.get_symbol_ticker(symbol=symbol)
+                return float(_fetch()['price'])
         except (ClientError if FUTURES_AVAILABLE else BinanceAPIException) as e:
             self.logger.error(f"Error getting current price for {symbol}: {e}")
             return 0.0
@@ -115,7 +146,10 @@ class BinanceExecutor(BaseExecutor):
             self.logger.info(f"Paper trading: Leverage set to {leverage}x for {symbol}")
             return
         try:
-            self.client.change_leverage(symbol=symbol, leverage=leverage)
+            @binance_retry
+            def _set():
+                return self.client.change_leverage(symbol=symbol, leverage=leverage)
+            _set()
             self.logger.info(f"Leverage for {symbol} set to {leverage}x.")
         except BinanceAPIException as e:
             self.logger.error(f"Error setting leverage for {symbol}: {e}")

@@ -1,0 +1,25 @@
+
+# BNBBTC Trading Patch
+# Add this to your main trading loop to enable BNBBTC trading
+
+# 1. Update symbols list in main.py
+symbols_to_trade = ['BTCUSDT', 'BNBBTC']
+
+# 2. Modify trading loop to handle multiple symbols
+for symbol in symbols_to_trade:
+    if symbol == 'BNBBTC':
+        # Use spot trading for BNBBTC (no futures)
+        data = price_fetcher.get_historical_klines(symbol, "1m")
+        if not data.empty:
+            # Generate signal for BNBBTC
+            signal = active_strategy.generate_signal(symbol, market_data)
+            if signal in ['BUY', 'SELL'] and confidence >= 0.8:
+                # Execute BNBBTC trade
+                executor.place_order(symbol, signal.lower(), position_size, current_price)
+    else:
+        # Continue with normal BTCUSDT trading
+        pass
+
+# 3. Update bootstrap.py symbols configuration
+# Change: symbols=['BTCUSDT']
+# To: symbols=['BTCUSDT', 'BNBBTC']
