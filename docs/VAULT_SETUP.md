@@ -309,4 +309,4 @@ If Vault is unavailable, ELVIS automatically:
 
 ---
 
-**Next Steps**: After setup, verify integration with `python main.py --mode dashboard` and check the API status widget shows ✅ Vault connected.
+**Next Steps**: After setup, verify integration with `python main.py --mode paper` and check the API status widget shows ✅ Vault connected.

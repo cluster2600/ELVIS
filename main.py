@@ -7,6 +7,12 @@ import time
 import curses
 import os
 
+# ponytail: torch, sklearn and skimage each bundle their own libomp.dylib; loading
+# them together segfaults during RL training on macOS. Must be set before any
+# ML import. Proper fix: single OpenMP runtime in the venv.
+os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+
 # Load environment variables first
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,6 +28,7 @@ from core.di import container
 from core.events import event_bus, SystemEvent
 from utils.console_dashboard import ConsoleDashboard
 from trading.utils.trade_history_api import app as trade_history_app
+from trading.cooldown.trade_cooldown_manager import TradeCooldownManager
 import pandas as pd
 import ta
 
@@ -114,6 +121,15 @@ def signal_handler(signum, frame):
                         logger.warning(f"⚠️ {exchange_name}: {len(results['errors'])} errors occurred")
         else:
             logger.warning("⚠️ No executors found - positions may remain open")
+    
+        # 🔄 RESET P&L: Create a new trading session reset point
+        try:
+            logger.info("🔄 Resetting P&L for next session...")
+            from utils.paper_trade_db import reset_trading_session
+            reset_trading_session()
+            logger.info("✅ P&L reset complete - next session will start fresh")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not reset P&L: {e}")
             
     except Exception as e:
         logger.error(f"❌ Error closing positions during shutdown: {e}")
@@ -155,6 +171,36 @@ def risk_management_loop(risk_manager, logger):
     
     logger.info("Risk management loop finished due to shutdown request")
 
+
+def _log_strategy_mode(strategy_mode: str, logger: logging.Logger):
+    if strategy_mode == 'research':
+        logger.info("🔬 Research-based strategy active - targeting 14.9% annual returns")
+        logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
+        logger.info("🎯 Following Bonenkamp (2021) research methodology")
+    elif strategy_mode == 'balanced':
+        logger.info("🎯 Balanced strategy active - EMERGENCY MODE")
+        logger.info("⚠️ Reduced trading frequency: 2 trades/hour max")
+        logger.info("💰 Higher profit targets: $1.00 per trade")
+        logger.info("⏱️ Cooldown enforcement: 10 minutes between trades")
+
+
+def _train_research_strategy_if_needed(active_strategy, price_fetcher, logger: logging.Logger):
+    if not hasattr(active_strategy, 'is_trained') or active_strategy.is_trained:
+        return
+
+    logger.info("🧠 Research model not found or loaded. Initiating pre-training...")
+    try:
+        logger.info("Fetching historical data for initial training...")
+        initial_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
+
+        if initial_data is not None and not initial_data.empty and len(initial_data) > 200:
+            logger.info(f"✅ Fetched {len(initial_data)} records for initial training.")
+            active_strategy.train_model(initial_data)
+        else:
+            logger.error("❌ Could not fetch sufficient initial data for training. Bot will not trade until trained.")
+    except Exception as e:
+        logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
+
 def main(mode: str, log_level: str):
     """
     Main entry point for the trading bot using dependency injection.
@@ -187,61 +233,11 @@ def main(mode: str, log_level: str):
         active_strategy = container.get('strategy')
         strategy_mode = os.getenv('STRATEGY_MODE', 'ensemble')
         logger.info(f"🎯 Active strategy: {type(active_strategy).__name__} (mode: {strategy_mode})")
-        
+
+        _log_strategy_mode(strategy_mode, logger)
         if strategy_mode == 'research':
-            logger.info("🔬 Research-based strategy active - targeting 14.9% annual returns")
-            logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
-            logger.info("🎯 Following Bonenkamp (2021) research methodology")
-        elif strategy_mode == 'balanced':
-            logger.info("🎯 Balanced strategy active - EMERGENCY MODE")
-            logger.info("⚠️ Reduced trading frequency: 2 trades/hour max")
-            logger.info("💰 Higher profit targets: $1.00 per trade")
-            logger.info("⏱️ Cooldown enforcement: 10 minutes between trades")
-            
-            # Initial training for research strategy if a saved model is not loaded
-            if hasattr(active_strategy, 'is_trained') and not active_strategy.is_trained:
-                logger.info("🧠 Research model not found or loaded. Initiating pre-training...")
-                try:
-                    # Fetch a good amount of historical data for robust initial training
-                    # The research uses 1 week of 5-min data, which is 2016 data points.
-                    logger.info("Fetching historical data for initial training...")
-                    initial_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
-                    
-                    if initial_data is not None and not initial_data.empty and len(initial_data) > 200:
-                        logger.info(f"✅ Fetched {len(initial_data)} records for initial training.")
-                        active_strategy.train_model(initial_data)
-                    else:
-                        logger.error(f"❌ Could not fetch sufficient initial data for training. Bot will not trade until trained.")
-                except Exception as e:
-                    logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
-        
-        # Initialize the console dashboard
-        price_fetcher = container.get('price_fetcher')
-        if strategy_mode == 'research':
-            logger.info("🔬 Research-based strategy active - targeting 14.9% annual returns")
-            logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
-            logger.info("🎯 Following Bonenkamp (2021) research methodology")
-            
-            # Initial training for research strategy if a saved model is not loaded
-            if hasattr(active_strategy, 'is_trained') and not active_strategy.is_trained:
-                logger.info("🧠 Research model not found or loaded. Initiating pre-training...")
-                try:
-                    # Fetch a good amount of historical data for robust initial training
-                    # The research uses 1 week of 5-min data, which is 2016 data points.
-                    logger.info("Fetching historical data for initial training...")
-                    initial_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
-                    
-                    if initial_data is not None and not initial_data.empty and len(initial_data) > 200:
-                        logger.info(f"✅ Fetched {len(initial_data)} records for initial training.")
-                        active_strategy.train_model(initial_data)
-                    else:
-                        logger.error(f"❌ Could not fetch sufficient initial data for training. Bot will not trade until trained.")
-                except Exception as e:
-                    logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
-        
-        # Initialize the console dashboard
-        price_fetcher = container.get('price_fetcher')
-        
+            _train_research_strategy_if_needed(active_strategy, price_fetcher, logger)
+
         # Initialize the console dashboard
         price_fetcher = container.get('price_fetcher')
         dashboard = ConsoleDashboard(
@@ -251,6 +247,7 @@ def main(mode: str, log_level: str):
                 'realized_pnl': 450.20,
                 'open_positions': [],
                 'recent_trades': [],
+                'leverage': 100,  # Set 100x leverage for dashboard display
                 'risk_manager': risk_manager,
                 'performance_monitor': container.get('performance_monitor'),
                 'trade_analyzer': container.get('trade_analyzer'),
@@ -289,6 +286,8 @@ def main(mode: str, log_level: str):
         # The main loop will now be managed by the strategy manager
         def trading_loop():
             global shutdown_requested
+            # Get executor for trade execution
+            executor = container.get('executor')
             while not shutdown_requested:
                 try:
                     # Get market data with detailed logging
@@ -445,14 +444,27 @@ def main(mode: str, log_level: str):
                                                         if price_fetcher:
                                                             current_price = price_fetcher.get_current_price(symbol)
                                                             if current_price is None:
-                                                                current_price = entry_price
+                                                                # Use executor's mock price for proper P&L calculation
+                                                                try:
+                                                                    current_price = executor._get_mock_price(symbol)
+                                                                    logger.debug(f"Dashboard using fallback price for {symbol}: ${current_price:.2f}")
+                                                                except:
+                                                                    current_price = entry_price
                                                             else:
                                                                 current_price = float(current_price)
                                                         else:
-                                                            current_price = entry_price
+                                                            # No price_fetcher, use executor's mock price
+                                                            try:
+                                                                current_price = executor._get_mock_price(symbol)
+                                                            except:
+                                                                current_price = entry_price
                                                     except Exception as price_err:
                                                         logger.warning(f"Could not fetch current price for {symbol}: {price_err}")
-                                                        current_price = entry_price
+                                                        # Fallback to executor's mock price
+                                                        try:
+                                                            current_price = executor._get_mock_price(symbol)
+                                                        except:
+                                                            current_price = entry_price
 
                                                     # Calculate comprehensive P&L
                                                     if hasattr(executor, 'calculate_open_position_pnl'):
@@ -514,7 +526,7 @@ def main(mode: str, log_level: str):
                                             if executor and hasattr(executor, 'default_leverage'):
                                                 dashboard.config['leverage'] = executor.default_leverage
                                             else:
-                                                dashboard.config['leverage'] = 10  # Default fallback
+                                                dashboard.config['leverage'] = 100  # Default to 100x leverage
                                             
                                             # Calculate total unrealized PnL with live prices
                                             total_unrealized_pnl = sum(pos['pnl'] for pos in open_positions)
@@ -764,6 +776,11 @@ def main(mode: str, log_level: str):
                         except Exception as balance_error:
                             logger.error(f"Could not check balance: {balance_error}")
                         
+                        # Initialize trade cooldown manager for fewer, bigger trades strategy
+                        if not hasattr(trading_loop, 'cooldown_manager'):
+                            trading_loop.cooldown_manager = TradeCooldownManager(logger, cooldown_minutes=15)
+                            logger.info("🕐 Trade Cooldown Manager initialized for FEWER, BIGGER trades")
+                        
                         # Use the active strategy (ensemble or research-based)
                         logger.info(f"Using strategy: {type(active_strategy).__name__}")
                         
@@ -834,7 +851,65 @@ def main(mode: str, log_level: str):
                                     # Generate signal for this symbol
                                     signal, confidence = active_strategy.generate_signal(symbol, market_data)
                                     
-                                    logger.info(f"🎉 {symbol} SIGNAL: {signal} with confidence {confidence:.3f}")
+                                    logger.info(f"🎉 {symbol} RAW SIGNAL: {signal} with confidence {confidence:.3f}")
+                                    
+                                    # 🎯 HIGH WIN RATE FILTERING SYSTEM
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.6:
+                                        try:
+                                            from trading.analysis.high_winrate_filter import HighWinRateFilter
+                                            from trading.analysis.market_regime_detector import MarketRegimeDetector
+                                            
+                                            # Initialize filters (cached for performance)
+                                            if not hasattr(main, '_winrate_filter'):
+                                                main._winrate_filter = HighWinRateFilter(logger)
+                                                main._regime_detector = MarketRegimeDetector(logger)
+                                            
+                                            # Convert current data to DataFrame for analysis
+                                            historical_df = data.tail(100).copy()
+                                            
+                                            # Analyze signal quality
+                                            filter_result = main._winrate_filter.analyze_signal_quality(
+                                                symbol, market_data, historical_df
+                                            )
+                                            
+                                            # Analyze market regime  
+                                            regime_result = main._regime_detector.detect_current_regime(historical_df)
+                                            
+                                            # Apply filtering logic
+                                            original_signal = signal
+                                            original_confidence = confidence
+                                            
+                                            if filter_result['trade_approved'] and regime_result['regime']['should_trade']:
+                                                # HIGH QUALITY SIGNAL - Enhance confidence
+                                                signal_quality = filter_result['confidence']
+                                                regime_quality = regime_result['regime']['confidence']
+                                                
+                                                # Combine confidences with weights
+                                                enhanced_confidence = (confidence * 0.4 + signal_quality * 0.4 + regime_quality * 0.2)
+                                                confidence = min(enhanced_confidence, 0.95)  # Cap at 95%
+                                                
+                                                logger.info(f"✅ {symbol} SIGNAL APPROVED: {signal} | Enhanced Confidence: {confidence:.3f}")
+                                                logger.info(f"   📊 Quality Score: {signal_quality:.2%} | Regime Score: {regime_quality:.2%}")
+                                                logger.info(f"   🎯 Regime: {regime_result['regime']['class']} | Action: {regime_result['trading_recommendation']['action']}")
+                                                
+                                            else:
+                                                # REJECT SIGNAL - Set to HOLD
+                                                rejection_reason = filter_result.get('rejection_reason', 'Unknown')
+                                                if not regime_result['regime']['should_trade']:
+                                                    rejection_reason = f"Unfavorable regime: {regime_result['regime']['class']}"
+                                                
+                                                signal = 'HOLD'
+                                                confidence = 0.3
+                                                
+                                                logger.warning(f"❌ {symbol} SIGNAL REJECTED: {original_signal} -> HOLD")
+                                                logger.warning(f"   🚫 Reason: {rejection_reason}")
+                                                logger.warning(f"   📉 Quality: {filter_result['confidence']:.2%} | Regime: {regime_result['regime']['class']}")
+                                                
+                                        except Exception as filter_error:
+                                            logger.error(f"⚠️ High win rate filter error: {filter_error}")
+                                            logger.info(f"Continuing with original signal: {signal}")
+                                    
+                                    logger.info(f"🎯 {symbol} FINAL SIGNAL: {signal} with confidence {confidence:.3f}")
                                     
                                     # 🤖 LLM SIGNAL ENHANCEMENT
                                     if llm_advisor and signal in ['BUY', 'SELL']:
@@ -878,7 +953,7 @@ def main(mode: str, log_level: str):
                                     logger.info(f"Final signal for {symbol}: {signal} (confidence: {confidence:.3f})")
                                     
                                     # Execute trades based on signals for this symbol
-                                    if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # High threshold for quality trades
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.60:  # Lowered threshold to allow more trades
                                         logger.info(f"🎯 High confidence {symbol} signal: {signal} with {confidence:.3f} confidence")
                                         
                                         try:
@@ -886,9 +961,41 @@ def main(mode: str, log_level: str):
                                             available_balance = executor.get_account_balance()
                                             logger.info(f"💰 Available balance: ${available_balance}")
                                             
-                                            # EMERGENCY RISK MANAGEMENT: Extremely conservative position sizing
-                                            max_risk_per_trade = 5.0  # Maximum $5 per trade
-                                            position_size = min(available_balance * 0.005, max_risk_per_trade) / current_price  # 0.5% of balance, max $5
+                                            # 🕐 CHECK TRADE COOLDOWN FIRST - FEWER TRADES STRATEGY
+                                            cooldown_check = trading_loop.cooldown_manager.can_trade(symbol, max_daily_trades=8)
+                                            
+                                            if not cooldown_check['can_trade']:
+                                                logger.warning(f"🚫 COOLDOWN ACTIVE: {cooldown_check['reason']}")
+                                                if cooldown_check.get('minutes_remaining'):
+                                                    logger.warning(f"   ⏰ Time remaining: {cooldown_check['minutes_remaining']:.1f} minutes")
+                                                continue  # Skip this symbol due to cooldown
+                                            
+                                            logger.info(f"✅ COOLDOWN CHECK PASSED: {cooldown_check['daily_trades_remaining']} trades remaining today")
+                                            
+                                            # 🎯 BIGGER TRADES STRATEGY - Larger positions, fewer trades
+                                            base_risk_per_trade = 75.0  # Base $75 risk per trade (increased)
+                                            
+                                            # Scale position size based on confidence (85% = 0.5x, 95% = 2.0x)
+                                            confidence_multiplier = 0.5 + (confidence - 0.85) * (1.5 / 0.10)  # Steeper scale
+                                            confidence_multiplier = max(0.5, min(2.0, confidence_multiplier))  # Cap between 0.5x - 2.0x
+                                            
+                                            # Scale based on regime quality if filter was used
+                                            regime_multiplier = 1.0
+                                            if 'filter_result' in locals() and 'regime_result' in locals():
+                                                if regime_result['trading_recommendation']['action'] == 'trade_aggressively':
+                                                    regime_multiplier = 1.2
+                                                elif regime_result['trading_recommendation']['action'] == 'trade_conservatively':
+                                                    regime_multiplier = 0.7
+                                                elif regime_result['trading_recommendation']['action'] == 'avoid_trading':
+                                                    regime_multiplier = 0.3
+                                            
+                                            # Calculate final position sizing
+                                            adjusted_risk = base_risk_per_trade * confidence_multiplier * regime_multiplier
+                                            adjusted_risk = max(25.0, min(150.0, adjusted_risk))  # Risk between $25-$150
+                                            
+                                            position_size = adjusted_risk / current_price  # Convert to crypto units
+                                            
+                                            logger.info(f"💰 ADAPTIVE SIZING: Base=${base_risk_per_trade:.0f} | Conf={confidence:.2%}({confidence_multiplier:.2f}x) | Regime=({regime_multiplier:.2f}x) | Final=${adjusted_risk:.0f}")
                                             
                                             if signal == 'BUY':
                                                 logger.info(f"🟢 [BUY] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}")
@@ -961,9 +1068,17 @@ def main(mode: str, log_level: str):
                                         if pos_symbol == symbol:
                                             position_current_price = current_price
                                         else:
+                                            # Try to get current price from price_fetcher
                                             position_current_price = price_fetcher.get_current_price(pos_symbol)
                                             if position_current_price is None:
-                                                continue
+                                                # Fallback to executor's mock price for proper P&L calculation
+                                                try:
+                                                    position_current_price = executor._get_mock_price(pos_symbol)
+                                                    logger.debug(f"Using fallback mock price for {pos_symbol}: ${position_current_price:.2f}")
+                                                except:
+                                                    # Final fallback - use entry price (no P&L change)
+                                                    position_current_price = entry_price
+                                                    logger.warning(f"Could not get price for {pos_symbol}, using entry price")
                                                 
                                         # Calculate P&L percentage
                                         if side.upper() == 'BUY':  # LONG position
@@ -971,15 +1086,17 @@ def main(mode: str, log_level: str):
                                         else:  # SHORT position
                                             pnl_pct = ((entry_price - position_current_price) / entry_price) * 100
                                         
-                                        # DYNAMIC STOP LOSS: Use risk manager if available
-                                        risk_manager = container.get_optional('risk_manager')
-                                        stop_loss_threshold = -1.0  # Default
+                                        # 🎯 HIGH WIN RATE STOP LOSS: Tighter stops for better win rate
+                                        stop_loss_threshold_usd = -15.0  # Max loss per position: $15.00
                                         
-                                        if risk_manager:
-                                            stop_loss_threshold = -(risk_manager.dynamic_stop_loss_pct * 100)
-                                            logger.debug(f"🔧 Dynamic stop loss threshold: {stop_loss_threshold:.1f}%")
-                                        if pnl_pct < stop_loss_threshold:
-                                            logger.warning(f"🛑 STOP LOSS triggered for {pos_symbol}: {pnl_pct:.2f}% loss")
+                                        # Calculate absolute dollar loss
+                                        if side.upper() == 'BUY':  # LONG position
+                                            absolute_loss = (position_current_price - entry_price) * quantity
+                                        else:  # SHORT position
+                                            absolute_loss = (entry_price - position_current_price) * quantity
+                                            
+                                        if absolute_loss < stop_loss_threshold_usd:
+                                            logger.warning(f"🛑 STOP LOSS triggered for {pos_symbol}: ${abs(absolute_loss):.2f} loss (limit: ${abs(stop_loss_threshold_usd):.2f})")
                                             try:
                                                 close_signal = 'SELL' if side.upper() == 'BUY' else 'BUY'
                                                 close_size = abs(quantity)
@@ -998,13 +1115,8 @@ def main(mode: str, log_level: str):
                                         else:  # SHORT position
                                             absolute_profit = (entry_price - position_current_price) * quantity
                                         
-                                        # UPDATED: Dynamic take profit based on Bitcoin price level
-                                        if position_current_price > 120000:  # High price Bitcoin
-                                            take_profit_threshold_usd = 5.00  # $5.00 profit target for high prices
-                                        elif position_current_price > 100000:  # Medium high Bitcoin
-                                            take_profit_threshold_usd = 2.50  # $2.50 profit target
-                                        else:  # Normal Bitcoin prices
-                                            take_profit_threshold_usd = 1.00  # $1.00 profit target
+                                        # 🎯 HIGH WIN RATE OPTIMIZED PROFIT TARGETS
+                                        take_profit_threshold_usd = 8.0  # $8.00 profit target (better win rate ratio)
                                         
                                         if absolute_profit >= take_profit_threshold_usd:
                                             logger.info(f"💰 TAKE PROFIT triggered for {pos_symbol}: ${absolute_profit:.4f} profit (${take_profit_threshold_usd} target)")
@@ -1029,7 +1141,7 @@ def main(mode: str, log_level: str):
                             current_time = time.time()
                             
                             # Execute trades based on signals with MUCH HIGHER threshold to stop overtrading
-                            if signal in ['BUY', 'SELL'] and confidence >= 0.90:  # CRITICAL: High threshold for quality trades only
+                            if signal in ['BUY', 'SELL'] and confidence >= 0.60:  # FIXED: Lowered threshold for more trades
                                 logger.info(f"🎯 High confidence signal detected: {signal} with {confidence:.3f} confidence")
                             
                             # Multi-symbol trading is now handled by the main loop above
@@ -1038,9 +1150,9 @@ def main(mode: str, log_level: str):
                             # Continue with execution logic
                             current_price = data.iloc[-1]['close']
                             
-                            # DYNAMIC RISK MANAGEMENT with x50 LEVERAGE ENFORCEMENT
+                            # DYNAMIC RISK MANAGEMENT with x100 LEVERAGE ENFORCEMENT
                             available_balance = executor.get_account_balance()
-                            base_leverage = getattr(executor, 'default_leverage', 50)  # Default to x50
+                            base_leverage = getattr(executor, 'default_leverage', 100)  # Default to x100
                             
                             # Get risk manager for dynamic calculations
                             risk_manager = container.get_optional('risk_manager')
@@ -1060,7 +1172,7 @@ def main(mode: str, log_level: str):
                                     logger.info(f"⚡ DYNAMIC: Leverage {leverage}x, Dynamic sizing used")
                                 else:
                                     # Fallback to strategy calculation with enforced leverage
-                                    leverage = max(base_leverage, 50.0)  # Ensure minimum x50
+                                    leverage = max(base_leverage, 100.0)  # Ensure minimum x100
                                     balance_info = executor.get_balance()
                                     position_size = active_strategy.calculate_position_size(
                                         data, 
@@ -1073,7 +1185,7 @@ def main(mode: str, log_level: str):
                             except Exception as e:
                                 logger.error(f"Error in position size calculation: {e}")
                                 # Emergency fallback position size with proper type conversion
-                                leverage = max(base_leverage, 50.0)  # Set leverage for emergency fallback
+                                leverage = max(base_leverage, 100.0)  # Set leverage for emergency fallback
                                 try:
                                     safe_balance = float(available_balance) if available_balance is not None else 1000.0
                                     safe_price = float(current_price) if current_price is not None else 97000.0
@@ -1085,7 +1197,7 @@ def main(mode: str, log_level: str):
                                     logger.error(f"   current_price: {current_price} (type: {type(current_price)})")
                                     position_size = 0.001  # Ultra-safe fallback
                                     if 'leverage' not in locals():
-                                        leverage = 50.0  # Default leverage
+                                        leverage = 100.0  # Default leverage
                                     logger.warning(f"🚨 Using ultra-safe fallback position size: {position_size:.6f} with leverage {leverage}x")
                             
                             # Position size calculated - ready for execution
@@ -1093,7 +1205,7 @@ def main(mode: str, log_level: str):
                             # Emergency check - force minimum position size if zero
                             if position_size <= 0:
                                 if 'leverage' not in locals():
-                                    leverage = max(base_leverage, 50.0)  # Ensure leverage is defined
+                                    leverage = max(base_leverage, 100.0)  # Ensure leverage is defined
                                 try:
                                     safe_balance = float(available_balance) if available_balance is not None else 1000.0
                                     safe_price = float(current_price) if current_price is not None else 97000.0
@@ -1125,6 +1237,9 @@ def main(mode: str, log_level: str):
                                 order_result = executor.place_order(symbol, 'buy', position_size, current_price)
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
+                                    
+                                    # 📝 RECORD TRADE IN COOLDOWN MANAGER
+                                    trading_loop.cooldown_manager.record_trade(symbol, 'BUY', position_size, confidence)
                                     
                                     # 💰 IMMEDIATE PROFIT CHECK: Check for profit-taking opportunities after every trade
                                     try:
@@ -1160,6 +1275,9 @@ def main(mode: str, log_level: str):
                                 if order_result:
                                     logger.info(f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}")
                                     
+                                    # 📝 RECORD TRADE IN COOLDOWN MANAGER
+                                    trading_loop.cooldown_manager.record_trade(symbol, 'SELL', position_size, confidence)
+                                    
                                     # 💰 IMMEDIATE PROFIT CHECK: Check for profit-taking opportunities after every trade
                                     try:
                                         if hasattr(executor, 'check_and_manage_positions'):
@@ -1190,7 +1308,7 @@ def main(mode: str, log_level: str):
                                 else:
                                     logger.error(f"❌ [FAIL] Failed to execute SELL order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}")
                             else:
-                                logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)")
+                                logger.info(f"📊 Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 60% threshold)")
                         else:
                             # Fallback for strategies without the new generate_signal method
                             logger.warning(f"Strategy {type(active_strategy).__name__} doesn't have generate_signal method - using old approach")
@@ -1202,7 +1320,7 @@ def main(mode: str, log_level: str):
                                     signal = signal_info.get('signal', 'HOLD')
                                     confidence = signal_info.get('confidence', 0.0)
                                     
-                                    if signal in ['BUY', 'SELL'] and confidence >= 0.90:
+                                    if signal in ['BUY', 'SELL'] and confidence >= 0.60:
                                         current_price = data.iloc[-1]['close']
                                         available_balance = executor.get_account_balance()
                                         position_size = active_strategy.calculate_position_size(
@@ -1300,7 +1418,7 @@ def main(mode: str, log_level: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ELVIS Trading Bot with Dependency Injection")
-    parser.add_argument("--mode", type=str, default="paper", 
+    parser.add_argument("--mode", type=str, default="paper", choices=["paper", "live"],
                        help="Trading mode: paper or live")
     parser.add_argument("--log-level", type=str, default="INFO", 
                        help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL")
@@ -1308,4 +1426,3 @@ if __name__ == "__main__":
 
     # Start the main bot
     main(mode=args.mode, log_level=args.log_level.upper())
-

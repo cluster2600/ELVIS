@@ -143,12 +143,6 @@ const LoginPage = () => {
                 {loading ? 'Signing In...' : 'Sign In'}
               </Button>
             </form>
-
-            <Box sx={{ mt: 3, textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Default credentials: admin / admin
-              </Typography>
-            </Box>
           </CardContent>
         </Card>
       </Fade>
