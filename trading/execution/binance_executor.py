@@ -7,11 +7,11 @@ try:
     from binance.error import ClientError
     FUTURES_AVAILABLE = True
 except ImportError:
-    from binance.client import Client
-    from binance.exceptions import BinanceAPIException
     FUTURES_AVAILABLE = False
+
+from binance.client import Client
     
-from config import API_CONFIG
+from config.config import API_CONFIG
 from trading.execution.base_executor import BaseExecutor
 from typing import Dict, Any
 from utils.paper_trade_db import record_trade, add_open_position, close_open_position, get_open_positions
@@ -141,25 +141,31 @@ class BinanceExecutor(BaseExecutor):
             should_execute = True
             
             if opposite_position:
-                # Calculate potential PnL before executing
+                # Calculate potential PnL for opposite position
                 potential_pnl = self._calculate_position_pnl(symbol, opposite_side, current_price, quantity)
                 
-                # 🛑 STOP LOSS: If losing more than $5, force close
-                if potential_pnl < -5.0:
-                    self.logger.warning(f"🛑 STOP LOSS: {symbol} {opposite_side} position losing ${abs(potential_pnl):.2f} - FORCE CLOSING")
+                # Only close opposite position if stop loss or profit taking conditions are met
+                close_opposite = False
+                
+                # 🎯 BIGGER TRADES OPTIMIZED RISK MANAGEMENT
+                stop_loss_threshold = -50.0  # Larger stop for bigger positions: $50.00 loss per position
+                profit_target = 25.0  # Bigger target for larger positions: $25.00 profit per position
+                
+                if potential_pnl < stop_loss_threshold:
+                    self.logger.warning(f"🛑 STOP LOSS: {symbol} {opposite_side} position losing ${abs(potential_pnl):.2f} (limit: ${abs(stop_loss_threshold):.2f}) - FORCE CLOSING")
+                    close_opposite = True
                     pnl = potential_pnl
-                    should_execute = True  # Force execute to close losing position
-                    
-                # 💰 ULTRA AGGRESSIVE PROFIT TAKING: If profit >= $0.10, close position immediately 
-                elif potential_pnl >= 0.10:
-                    self.logger.info(f"💰 IMMEDIATE PROFIT TAKING: {symbol} {opposite_side} position profit ${potential_pnl:.2f} - CLOSING NOW!")
+                elif potential_pnl >= profit_target:
+                    # 💰 PROFIT TAKING: Dollar-based targets
+                    self.logger.info(f"💰 PROFIT TARGET REACHED: {symbol} {opposite_side} position profit ${potential_pnl:.2f} (target: ${profit_target:.2f}) - CLOSING!")
+                    close_opposite = True
                     pnl = potential_pnl
-                    should_execute = True
-                    
                 else:
-                    pnl = potential_pnl
-                    
-                if should_execute:
+                    # 🚀 ALLOW MULTIPLE POSITIONS: Don't close opposite if no stop/profit trigger
+                    close_opposite = False
+                    pnl = 0.0  # New position, no P&L yet
+                
+                if close_opposite:
                     self.logger.info(f"[PAPER TRADE] Executing {side} to close {opposite_side} position for {symbol}")
                     if self.db_available:
                         record_trade(symbol, side, current_price, quantity, pnl, fee)
@@ -172,14 +178,28 @@ class BinanceExecutor(BaseExecutor):
                         else:
                             close_open_position(symbol, opposite_side)
                             add_open_position(symbol, opposite_side, float(opposite_position[3]), new_quantity, self.default_leverage)
+                else:
+                    # 🚀 OPEN NEW POSITION: Allow both BUY and SELL in same symbol  
+                    # Check balance for new position
+                    current_balance = self._calculate_paper_balance()
+                    usdt_balance = current_balance.get('USDT', 0)
+                    
+                    if usdt_balance >= 50:
+                        self.logger.info(f"[PAPER TRADE] Opening new {side} position for {symbol} (keeping existing {opposite_side})")
+                        if self.db_available:
+                            record_trade(symbol, side, current_price, quantity, 0.0, fee)
+                            add_open_position(symbol, side, current_price, quantity, self.default_leverage)
+                    else:
+                        self.logger.warning(f"🛑 RISK LIMIT: USDT balance ${usdt_balance:.2f} too low - NOT opening new {side} position")
+                        should_execute = False
                             
             else:
                 # Opening new position - check if we should (risk management)
                 current_balance = self._calculate_paper_balance()
                 usdt_balance = current_balance.get('USDT', 0)
                 
-                # 🛑 RISK MANAGEMENT: Don't open new positions if balance < $500
-                if usdt_balance < 500:
+                # 🛑 RISK MANAGEMENT: Don't open new positions if balance < $50 (lowered to allow more trading)
+                if usdt_balance < 50:
                     self.logger.warning(f"🛑 RISK LIMIT: USDT balance ${usdt_balance:.2f} too low - NOT opening new {side} position")
                     should_execute = False
                     
@@ -233,9 +253,9 @@ class BinanceExecutor(BaseExecutor):
         if symbol == 'BTCUSDT': 
             return 116500.0  # Current BTC price in USDT
         elif symbol == 'BNBUSDT':
-            return 600.0  # BNB price in USDT
+            return 844.58  # Updated BNB price in USDT (current market price)
         elif symbol == 'BNBBTC':
-            return 0.00515  # BNB price in BTC (realistic rate: 600/116500)
+            return 0.00725  # BNB price in BTC (realistic rate: 844.58/116500)
         else: 
             return 100.0
 
@@ -294,8 +314,8 @@ class BinanceExecutor(BaseExecutor):
         # USDT is pegged to USD (1 USDT ≈ 1 USD)
         # BNB and BTC amounts calculated to equal $1000 USD each
         
-        bnb_price_in_usdt = self._get_mock_price('BNBUSDT') or 600.0  # BNB price in USDT
-        btc_price_in_usdt = self._get_mock_price('BTCUSDT') or 116500.0  # BTC price in USDT
+        bnb_price_in_usdt = self._get_mock_price('BNBUSDT')  # BNB price in USDT (updated)
+        btc_price_in_usdt = self._get_mock_price('BTCUSDT')  # BTC price in USDT
         
         # Calculate crypto amounts that equal $1000 USD each
         initial_bnb_amount = 1000.0 / bnb_price_in_usdt  # Amount of BNB worth $1000 USD
@@ -372,14 +392,28 @@ class BinanceExecutor(BaseExecutor):
                 current_price = self._get_mock_price(symbol)
                 pnl = self._calculate_position_pnl(symbol, side, current_price, quantity)
                 
-                # Auto stop loss at -$5
-                if pnl < -5.0:
-                    self.logger.warning(f"🛑 AUTO STOP LOSS: {symbol} {side} losing ${abs(pnl):.2f}")
+                # 🎯 BIGGER TRADES OPTIMIZED STOPS
+                stop_loss_amount = -50.0  # Larger stop for bigger positions: -$50.00
+                profit_target = 25.0  # Bigger target for larger positions: +$25.00
+                
+                if pnl < stop_loss_amount:
+                    self.logger.warning(f"🛑 AUTO STOP LOSS: {symbol} {side} losing ${abs(pnl):.2f} (limit: ${abs(stop_loss_amount):.2f})")
                     close_side = 'SELL' if side == 'BUY' else 'BUY' 
                     self._execute_paper_trade(symbol, close_side, quantity, current_price)
                     
-                # Auto take profit at +$0.10 (ULTRA AGGRESSIVE)
-                elif pnl >= 0.10:
+                # 💰 DOLLAR-BASED TAKE PROFIT: $1-$10 range
+                elif pnl >= profit_target:
+                    # Check if position is very new (less than 30 seconds) - let it show in dashboard briefly
+                    try:
+                        if len(position) >= 7:  # Has timestamp
+                            position_age = time.time() - position[6].timestamp()
+                            if position_age < 30:  # Less than 30 seconds old
+                                self.logger.info(f"💰 PROFITABLE POSITION: {symbol} {side} profit ${pnl:.2f} - waiting 30s for dashboard visibility")
+                                continue  # Skip this iteration, let it show in dashboard
+                    except Exception as e:
+                        self.logger.debug(f"Position age check error: {e}")
+                        pass  # If timestamp check fails, proceed with closure
+                        
                     self.logger.info(f"💰 AGGRESSIVE AUTO TAKE PROFIT: {symbol} {side} profit ${pnl:.2f} - CLOSING IMMEDIATELY!")
                     close_side = 'SELL' if side == 'BUY' else 'BUY'
                     self._execute_paper_trade(symbol, close_side, quantity, current_price)
