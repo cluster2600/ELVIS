@@ -46,8 +46,10 @@ def create_mock_ohlc_data():
     return pd.DataFrame(data)
 
 
-def test_dashboard(stdscr):
-    """Test dashboard with candlestick chart"""
+def run_candlestick_dashboard(stdscr):
+    """Interactive curses candlestick-dashboard demo (run via __main__, not a
+    pytest test — renamed off the test_ prefix so pytest doesn't try to collect
+    it as a test and fail on the missing 'stdscr' fixture)."""
 
     # Setup logging
     logger = setup_logging("CandlestickTest", log_level="INFO")
@@ -123,7 +125,7 @@ if __name__ == "__main__":
     time.sleep(3)
 
     try:
-        curses.wrapper(test_dashboard)
+        curses.wrapper(run_candlestick_dashboard)
     except Exception as e:
         print(f"Error running dashboard: {e}")
         print("Make sure you're running in a proper terminal with color support")
