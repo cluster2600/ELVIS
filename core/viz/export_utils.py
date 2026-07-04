@@ -3,6 +3,7 @@
 CSV and Prometheus are always available; SHAP is optional (no wheels on some
 Python versions) and degrades to feature-importance export when absent.
 """
+
 import csv
 import logging
 from typing import Any, Dict, Sequence
@@ -23,11 +24,16 @@ def export_to_csv(rows: Sequence[Dict[str, Any]], path: str) -> str:
     return path
 
 
-def push_metrics_to_prometheus(metrics: Dict[str, float], job_name: str,
-                               gateway: str = "localhost:9091", prefix: str = "rf_") -> bool:
+def push_metrics_to_prometheus(
+    metrics: Dict[str, float],
+    job_name: str,
+    gateway: str = "localhost:9091",
+    prefix: str = "rf_",
+) -> bool:
     """Push a dict of metrics to a Prometheus Pushgateway. Returns success."""
     try:
         from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+
         reg = CollectorRegistry()
         for k, v in metrics.items():
             Gauge(f"{prefix}{k}", f"{k} metric", registry=reg).set(float(v))
@@ -54,13 +60,24 @@ def export_shap_summary(model, X, path: str, feature_names=None) -> str:
         import shap  # optional dependency
     except ImportError:
         logger.info("shap not installed - exporting feature importances instead")
-        names = feature_names if feature_names is not None else list(getattr(X, "columns", range(X.shape[1])))
+        names = (
+            feature_names
+            if feature_names is not None
+            else list(getattr(X, "columns", range(X.shape[1])))
+        )
         return export_feature_importance(model, names, path)
     explainer = shap.TreeExplainer(model)
     vals = explainer.shap_values(X)
     import numpy as np
-    mean_abs = np.abs(np.asarray(vals)).mean(axis=tuple(range(np.asarray(vals).ndim - 1)))
-    names = feature_names if feature_names is not None else list(getattr(X, "columns", range(len(mean_abs))))
+
+    mean_abs = np.abs(np.asarray(vals)).mean(
+        axis=tuple(range(np.asarray(vals).ndim - 1))
+    )
+    names = (
+        feature_names
+        if feature_names is not None
+        else list(getattr(X, "columns", range(len(mean_abs))))
+    )
     rows = [{"feature": n, "mean_abs_shap": float(v)} for n, v in zip(names, mean_abs)]
     rows.sort(key=lambda r: r["mean_abs_shap"], reverse=True)
     return export_to_csv(rows, path)

@@ -2,10 +2,8 @@ import multiprocessing as mp
 import sys
 
 import torch
-
 from elegantrl.train.config import build_env
-from elegantrl.train.utils import act_dict_to_device, trajectory_to_device
-from elegantrl.train.utils import init_agent
+from elegantrl.train.utils import act_dict_to_device, init_agent, trajectory_to_device
 
 
 class PipeWorker:
@@ -17,9 +15,11 @@ class PipeWorker:
 
     def explore(self, agent):
         act_dict = agent.act.state_dict()
-        act_dict_to_device(
-            act_dict, torch.device("cpu")
-        ) if sys.platform == "win32" else None
+        (
+            act_dict_to_device(act_dict, torch.device("cpu"))
+            if sys.platform == "win32"
+            else None
+        )
         # Avoid CUDA runtime error (801). WinOS Python<3.9, pipe can't send torch.tensor_gpu, but tensor_cpu can.
 
         for worker_id in range(self.worker_num):
@@ -43,17 +43,21 @@ class PipeWorker:
         torch.set_grad_enabled(False)
         while True:
             act_dict = self.pipes[worker_id][0].recv()
-            act_dict_to_device(
-                act_dict, agent.device
-            ) if sys.platform == "win32" else None
+            (
+                act_dict_to_device(act_dict, agent.device)
+                if sys.platform == "win32"
+                else None
+            )
             # Avoid CUDA runtime error (801). WinOS Python<3.9, pipe can't send torch.tensor_gpu, but tensor_cpu can.
 
             agent.act.load_state_dict(act_dict)
 
             trajectory = agent.explore_env(env, target_step)
-            trajectory_to_device(
-                trajectory, torch.device("cpu")
-            ) if sys.platform == "win32" else None
+            (
+                trajectory_to_device(trajectory, torch.device("cpu"))
+                if sys.platform == "win32"
+                else None
+            )
             # Avoid CUDA runtime error (801). WinOS Python<3.9, pipe can't send torch.tensor_gpu, but tensor_cpu can.
 
             self.pipes[worker_id][0].send(trajectory)

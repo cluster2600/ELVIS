@@ -1,5 +1,5 @@
-
 import logging
+
 
 class TradingDashboard:
     def __init__(self, logger=None):
@@ -15,6 +15,7 @@ class TradingDashboard:
         # Here would be the actual dashboard logic
         while True:
             pass  # Simulate dashboard loop
+
 
 if __name__ == "__main__":
     dashboard = TradingDashboard()

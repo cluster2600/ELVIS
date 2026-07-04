@@ -1,5 +1,6 @@
-from trading.strategies.base_strategy import BaseStrategy
 from trading.market_regime_detector import MarketRegimeDetector
+from trading.strategies.base_strategy import BaseStrategy
+
 
 class StrategyManager:
     """
@@ -23,11 +24,11 @@ class StrategyManager:
         Get the active strategy based on the current market regime.
         """
         regime = self.market_regime_detector.get_regime(data)
-        
+
         if regime in self.strategies:
             self.active_strategy = self.strategies[regime]
         else:
             # Default to a base strategy if no specific strategy for the regime
-            self.active_strategy = self.strategies.get('default')
-            
+            self.active_strategy = self.strategies.get("default")
+
         return self.active_strategy

@@ -1,8 +1,8 @@
+from drl_agents.agents.AgentBase import AgentBase
 from drl_agents.agents.net import (
     ActorSAC,
     CriticTwin,
 )
-from drl_agents.agents.AgentBase import AgentBase
 
 
 class AgentDDPG(AgentBase):

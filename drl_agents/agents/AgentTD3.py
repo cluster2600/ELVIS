@@ -1,6 +1,7 @@
 import torch
-from drl_agents.agents.net import Actor, CriticTwin
+
 from drl_agents.agents.AgentDDPG import AgentDDPG
+from drl_agents.agents.net import Actor, CriticTwin
 
 
 class AgentTD3(AgentDDPG):

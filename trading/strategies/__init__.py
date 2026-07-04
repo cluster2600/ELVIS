@@ -17,7 +17,9 @@ except ImportError as e:
 try:
     from .mean_reversion_strategy import MeanReversionStrategy
 except ImportError as e:
-    print(f"Warning: MeanReversionStrategy not available due to missing dependency: {e}")
+    print(
+        f"Warning: MeanReversionStrategy not available due to missing dependency: {e}"
+    )
     MeanReversionStrategy = None
 
 try:
@@ -35,5 +37,7 @@ except ImportError as e:
 try:
     from .trend_following_strategy import TrendFollowingStrategy
 except ImportError as e:
-    print(f"Warning: TrendFollowingStrategy not available due to missing dependency: {e}")
+    print(
+        f"Warning: TrendFollowingStrategy not available due to missing dependency: {e}"
+    )
     TrendFollowingStrategy = None

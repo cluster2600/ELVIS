@@ -1,8 +1,9 @@
 import sys
+
 import gym
-from elegantrl.train.run import *
 from elegantrl.agents import *
 from elegantrl.train.config import Arguments
+from elegantrl.train.run import *
 
 """custom env"""
 

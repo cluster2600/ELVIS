@@ -68,3 +68,10 @@ include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+line_length = 88

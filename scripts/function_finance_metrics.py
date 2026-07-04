@@ -19,35 +19,34 @@ plots the probability density function of the sharpe ratio for the provided list
 Etcetera... take your pick
 """
 
+import warnings
 
-
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import scipy.stats
 import scipy.stats as ss
 import statsmodels.tsa.stattools as sts
-import warnings
-import scipy.stats
 
 # default no. of trading days in a year, 252.
 trading_days = 365
 
 
 def compute_data_points_per_year(timeframe):
-    if timeframe == '1m':
+    if timeframe == "1m":
         data_points_per_year = 60 * 24 * 365
-    elif timeframe == '5m':
+    elif timeframe == "5m":
         data_points_per_year = 12 * 24 * 365
-    elif timeframe == '10m':
+    elif timeframe == "10m":
         data_points_per_year = 6 * 24 * 365
-    elif timeframe == '30m':
+    elif timeframe == "30m":
         data_points_per_year = 2 * 24 * 365
-    elif timeframe == '1h':
+    elif timeframe == "1h":
         data_points_per_year = 24 * 365
-    elif timeframe == '1d':
+    elif timeframe == "1d":
         data_points_per_year = 365
     else:
-        raise ValueError('Timeframe not supported yet, please manually add!')
+        raise ValueError("Timeframe not supported yet, please manually add!")
     return data_points_per_year
 
 
@@ -73,7 +72,7 @@ def aggregate_performance_array(drl_rets_arr, factor):
 def proba_density_function(x):
     mean = np.mean(x)
     std = np.std(x)
-    y_out = 1 / (std * np.sqrt(2 * np.pi)) * np.exp(- (x - mean) ** 2 / (2 * std ** 2))
+    y_out = 1 / (std * np.sqrt(2 * np.pi)) * np.exp(-((x - mean) ** 2) / (2 * std**2))
     return y_out
 
 
@@ -81,7 +80,7 @@ def mean_confidence_interval(data, confidence=0.95):
     a = 1.0 * np.array(data)
     n = len(data)
     m, se = np.mean(a), scipy.stats.sem(a)
-    h = se * scipy.stats.t.ppf((1 + confidence) / 2., n - 1)
+    h = se * scipy.stats.t.ppf((1 + confidence) / 2.0, n - 1)
     return m, h
 
 
@@ -94,29 +93,46 @@ def plot_pdf(sharpe_list_drl, sharpe_hodl, name, if_range_hodl=False):
         sharpe_list_hodl = sorted(sharpe_hodl)
         y_eqw = proba_density_function(np.array(sharpe_list_hodl))
 
-    plt.style.use('seaborn')
+    plt.style.use("seaborn")
     plt.figure(figsize=(6, 6))
-    plt.plot(sharpe_list_drl, y_drl, color='red', linestyle='dashed')
+    plt.plot(sharpe_list_drl, y_drl, color="red", linestyle="dashed")
     if if_range_hodl:
-        plt.plot(sharpe_list_hodl, y_eqw, color='blue', linestyle='dashed')
-    plt.axvline(x=np.mean(sharpe_list_drl), color='r', linestyle='-', label='DRL avg. Sharpe ratio')
+        plt.plot(sharpe_list_hodl, y_eqw, color="blue", linestyle="dashed")
+    plt.axvline(
+        x=np.mean(sharpe_list_drl),
+        color="r",
+        linestyle="-",
+        label="DRL avg. Sharpe ratio",
+    )
     if if_range_hodl:
-        plt.axvline(x=np.mean(sharpe_list_hodl), color='b', linestyle='-', label='HODL avg. Sharpe ratio')
+        plt.axvline(
+            x=np.mean(sharpe_list_hodl),
+            color="b",
+            linestyle="-",
+            label="HODL avg. Sharpe ratio",
+        )
     else:
-        plt.axvline(x=sharpe_hodl, color='b', linestyle='-', label='HODL avgVal. Sharpe ratio')
+        plt.axvline(
+            x=sharpe_hodl, color="b", linestyle="-", label="HODL avgVal. Sharpe ratio"
+        )
     plt.legend(loc="upper left", shadow=True)
-    plt.xlabel('Sharpe ratio')
-    plt.ylabel('Density')
-    plt.scatter(sharpe_list_drl, y_drl, marker='o', s=25, color='red')
+    plt.xlabel("Sharpe ratio")
+    plt.ylabel("Density")
+    plt.scatter(sharpe_list_drl, y_drl, marker="o", s=25, color="red")
     if if_range_hodl:
-        plt.scatter(sharpe_list_hodl, y_eqw, marker='x', s=25, color='blue')
+        plt.scatter(sharpe_list_hodl, y_eqw, marker="x", s=25, color="blue")
     plt.savefig(name + ".png")
 
 
 def compute_eqw(price_ary, indx1, indx2):
     # compute eqw
     initial_prices = price_ary[0, :]
-    equal_weight = np.array([1e6 / len(initial_prices) / initial_prices[i] for i in range(len(initial_prices))])
+    equal_weight = np.array(
+        [
+            1e6 / len(initial_prices) / initial_prices[i]
+            for i in range(len(initial_prices))
+        ]
+    )
     account_value_eqw = []
     for i in range(0, price_ary.shape[0]):
         account_value_eqw.append(np.sum(equal_weight * price_ary[i]))
@@ -138,6 +154,7 @@ def calc_annualized_volatility(rets, factor=1):
 
 
 ################################################# PBO METRICS ########################################
+
 
 def _is_pandas(d):
     return isinstance(d, pd.DataFrame) or isinstance(d, pd.Series)
@@ -268,7 +285,9 @@ def pct_to_log_return(pct_returns, fillna=True):
     if _is_pandas(pct_returns):
         if fillna:
             pct_returns = pct_returns.fillna(0)
-        return np.where(1 + pct_returns > 0, np.log(1 + pct_returns), 0)  # Return 0 for non-positive inputs
+        return np.where(
+            1 + pct_returns > 0, np.log(1 + pct_returns), 0
+        )  # Return 0 for non-positive inputs
     else:
         if fillna:
             pct_returns = np.nan_to_num(pct_returns)
@@ -277,6 +296,7 @@ def pct_to_log_return(pct_returns, fillna=True):
 
 def log_to_pct_return(log_returns):
     return np.exp(log_returns) - 1
+
 
 def maxzero(x):
     return np.maximum(x, 0)
@@ -326,9 +346,7 @@ def kappa(returns, target_rtn, moment, log=True):
     else:
         mean = np.nanmean(excess)
 
-    kappa = mean / np.power(
-        LPM(returns, target_rtn, moment=moment), 1.0 / moment
-    )
+    kappa = mean / np.power(LPM(returns, target_rtn, moment=moment), 1.0 / moment)
     return kappa
 
 
@@ -354,17 +372,11 @@ def sortino(returns, target_rtn=0, factor=1, log=True):
 
     if _is_pandas(returns):
         # return (returns.mean() - target_rtn) / \
-        return (
-                excess.mean()
-                / np.sqrt(LPM(returns, target_rtn, 2))
-                * np.sqrt(factor)
-        )
+        return excess.mean() / np.sqrt(LPM(returns, target_rtn, 2)) * np.sqrt(factor)
     else:
         # return np.nanmean(returns - target_rtn) / \
         return (
-                np.nanmean(excess)
-                / np.sqrt(LPM(returns, target_rtn, 2))
-                * np.sqrt(factor)
+            np.nanmean(excess) / np.sqrt(LPM(returns, target_rtn, 2)) * np.sqrt(factor)
         )
 
 
@@ -463,12 +475,13 @@ def sharpe_iid(rtns, bench=0, factor=1, log=True):
     else:
         # numpy way
         excess_mean = np.nanmean(excess, axis=0)
-        sharpe =  np.sqrt(factor) * excess_mean / np.nanstd(excess, axis=0, ddof=1)
+        sharpe = np.sqrt(factor) * excess_mean / np.nanstd(excess, axis=0, ddof=1)
         vol = np.nanstd(excess, axis=0, ddof=1)
         return sharpe, vol
 
+
 def sharpe_iid_rolling(
-        rtns, window: int, min_periods: int, bench=0, factor=1, log=True
+    rtns, window: int, min_periods: int, bench=0, factor=1, log=True
 ):
     """
     Rolling sharpe ratio, unadjusted by time aggregation.
@@ -519,9 +532,7 @@ def sharpe_iid_adjusted(rtns, bench=0, factor=1, log=True):
         excess_kurt = rtns.kurtosis()
     else:
         skew = ss.skew(rtns, bias=False, nan_policy="omit")
-        excess_kurt = ss.kurtosis(
-            rtns, bias=False, fisher=True, nan_policy="omit"
-        )
+        excess_kurt = ss.kurtosis(rtns, bias=False, fisher=True, nan_policy="omit")
     return adjusted_sharpe(sr, skew, excess_kurt) * np.sqrt(factor)
 
 
@@ -539,7 +550,7 @@ def adjusted_sharpe(sr, skew, excess_kurtosis):
             return series excess kurtosis
     """
     # return sr * (1 + (skew / 6.0) * sr + (kurtosis - 3) / 24.0 * sr**2)
-    return sr * (1 + (skew / 6.0) * sr + excess_kurtosis / 24.0 * sr ** 2)
+    return sr * (1 + (skew / 6.0) * sr + excess_kurtosis / 24.0 * sr**2)
 
 
 def sharpe_non_iid(rtns, bench=0, q=trading_days, p_critical=0.05, log=True):
@@ -816,12 +827,24 @@ def calmar_ratio(returns, factor=trading_days, log=True):
     return annual_return / max_dd
 
 
-def write_metrics_to_results(name, file_path, drl_cumrets, drl_annual_ret, drl_annual_vol, drl_sharpe_rat, vol,
-                             append_write):
+def write_metrics_to_results(
+    name,
+    file_path,
+    drl_cumrets,
+    drl_annual_ret,
+    drl_annual_vol,
+    drl_sharpe_rat,
+    vol,
+    append_write,
+):
     with open(file_path, append_write) as f:
-        f.write('\n################################## ' + name + ' ####################################\n')
-        f.write('Cumulative return:           ' + str(drl_cumrets[-1] * 100) + '\n')
-        f.write('Annual return:               ' + str(drl_annual_ret) + '\n')
-        f.write('Annual volatility:           ' + str(drl_annual_vol) + '\n')
-        f.write('Sharpe ratio:                ' + str(drl_sharpe_rat) + '\n')
-        f.write('Volatiltiy:                  ' + "{:e}".format(vol) + '\n')
+        f.write(
+            "\n################################## "
+            + name
+            + " ####################################\n"
+        )
+        f.write("Cumulative return:           " + str(drl_cumrets[-1] * 100) + "\n")
+        f.write("Annual return:               " + str(drl_annual_ret) + "\n")
+        f.write("Annual volatility:           " + str(drl_annual_vol) + "\n")
+        f.write("Sharpe ratio:                " + str(drl_sharpe_rat) + "\n")
+        f.write("Volatiltiy:                  " + "{:e}".format(vol) + "\n")

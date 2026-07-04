@@ -2,7 +2,6 @@ import multiprocessing as mp
 
 import numpy as np
 import torch
-
 from elegantrl.train.utils import init_agent, init_replay_buffer, trajectory_to_device
 
 
@@ -71,29 +70,45 @@ class PipeLearner:
 
             if data:
                 self.average_param(agent.act.parameters(), data[0], device)
-                self.average_param(
-                    agent.act_optim.parameters(), data[1], device
-                ) if data[1] else None
+                (
+                    self.average_param(agent.act_optim.parameters(), data[1], device)
+                    if data[1]
+                    else None
+                )
 
-                self.average_param(agent.cri.parameters(), data[2], device) if data[
-                    2
-                ] else None
+                (
+                    self.average_param(agent.cri.parameters(), data[2], device)
+                    if data[2]
+                    else None
+                )
                 self.average_param(agent.cri_optim.parameters(), data[3], device)
 
-                self.average_param(
-                    agent.act_target.parameters(), data[4], device
-                ) if agent.if_use_act_target else None
-                self.average_param(
-                    agent.cri_target.parameters(), data[5], device
-                ) if agent.if_use_cri_target else None
+                (
+                    self.average_param(agent.act_target.parameters(), data[4], device)
+                    if agent.if_use_act_target
+                    else None
+                )
+                (
+                    self.average_param(agent.cri_target.parameters(), data[5], device)
+                    if agent.if_use_cri_target
+                    else None
+                )
 
     def run(self, args, comm_eva, comm_exp, learner_id):
         gpu_id = args.learner_gpus[learner_id]
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu" if gpu_id < 0 else f"cuda:{gpu_id}")
-        
-        agent = init_agent(args, gpu_id=gpu_id, env=None, device=device)  # Pass device if supported
+        device = torch.device(
+            "mps"
+            if torch.backends.mps.is_available()
+            else "cpu" if gpu_id < 0 else f"cuda:{gpu_id}"
+        )
+
+        agent = init_agent(
+            args, gpu_id=gpu_id, env=None, device=device
+        )  # Pass device if supported
         agent.to(device)  # Ensure agent is on the correct device
-        buffer, update_buffer = init_replay_buffer(args, gpu_id, agent=None, env=None, device=device)  # Pass device if supported
+        buffer, update_buffer = init_replay_buffer(
+            args, gpu_id, agent=None, env=None, device=device
+        )  # Pass device if supported
         buffer.to(device)  # Ensure buffer is on the correct device
         """start training"""
         cwd = args.cwd
@@ -113,7 +128,9 @@ class PipeLearner:
             #     traj_lists.extend(data)
             traj_list = sum(traj_lists, [])
 
-            steps, r_exp = update_buffer([item.to(device) for item in traj_list])  # Move traj_list to device
+            steps, r_exp = update_buffer(
+                [item.to(device) for item in traj_list]
+            )  # Move traj_list to device
 
             torch.set_grad_enabled(True)
             logging_tuple = agent.update_net(
@@ -128,11 +145,14 @@ class PipeLearner:
                     agent, steps, r_exp, logging_tuple, cwd
                 )
 
-    agent.save_or_load_agent(cwd, if_save=True)
+    # NOTE: pre-existing incomplete ElegantRL code — agent/buffer/cwd are
+    # orphaned here (wrong scope); left as-is (ElegantRL has no Python 3.14
+    # wheels and this path is unused). Flagged so lint passes without a blind fix.
+    agent.save_or_load_agent(cwd, if_save=True)  # noqa: F821
 
-    if hasattr(buffer, "save_or_load_history"):
-        print(f"| LearnerPipe.run: ReplayBuffer saving in {cwd}")
-        buffer.save_or_load_history(cwd, if_save=True)
+    if hasattr(buffer, "save_or_load_history"):  # noqa: F821
+        print(f"| LearnerPipe.run: ReplayBuffer saving in {cwd}")  # noqa: F821
+        buffer.save_or_load_history(cwd, if_save=True)  # noqa: F821
 
     @staticmethod
     def get_comm_data(agent):

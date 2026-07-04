@@ -8,53 +8,36 @@ This module provides sophisticated order types for professional trading:
 - TWAP (Time-Weighted Average Price): Executes orders over time periods
 """
 
+from .advanced_order_manager import AdvancedOrderManager
 from .base_order import (
     BaseOrder,
-    SimpleOrder,
-    OrderStatus,
     OrderSide,
+    OrderStatus,
     OrderType,
-    TimeInForce
+    SimpleOrder,
+    TimeInForce,
 )
-
-from .oco_order import (
-    OCOOrder,
-    OCOOrderManager
-)
-
-from .iceberg_order import (
-    IcebergOrder,
-    IcebergOrderManager
-)
-
-from .twap_order import (
-    TWAPOrder,
-    TWAPOrderManager
-)
-
-from .advanced_order_manager import AdvancedOrderManager
+from .iceberg_order import IcebergOrder, IcebergOrderManager
+from .oco_order import OCOOrder, OCOOrderManager
+from .twap_order import TWAPOrder, TWAPOrderManager
 
 __all__ = [
     # Base classes and enums
-    'BaseOrder',
-    'SimpleOrder',
-    'OrderStatus',
-    'OrderSide',
-    'OrderType',
-    'TimeInForce',
-    
+    "BaseOrder",
+    "SimpleOrder",
+    "OrderStatus",
+    "OrderSide",
+    "OrderType",
+    "TimeInForce",
     # OCO Orders
-    'OCOOrder',
-    'OCOOrderManager',
-    
+    "OCOOrder",
+    "OCOOrderManager",
     # Iceberg Orders
-    'IcebergOrder',
-    'IcebergOrderManager',
-    
+    "IcebergOrder",
+    "IcebergOrderManager",
     # TWAP Orders
-    'TWAPOrder',
-    'TWAPOrderManager',
-    
+    "TWAPOrder",
+    "TWAPOrderManager",
     # Unified Manager
-    'AdvancedOrderManager'
+    "AdvancedOrderManager",
 ]

@@ -1,7 +1,9 @@
 # trading/utils/telegram_notifier.py
 
-import requests
 import logging
+
+import requests
+
 
 class TelegramNotifier:
     """
@@ -11,7 +13,7 @@ class TelegramNotifier:
     def __init__(self, bot_token: str, chat_id: str, logger: logging.Logger = None):
         """
         Initialize the TelegramNotifier.
-        
+
         Args:
             bot_token (str): Telegram bot token.
             chat_id (str): Telegram chat ID.
@@ -30,15 +32,13 @@ class TelegramNotifier:
             message (str): The message text to send.
         """
         try:
-            payload = {
-                "chat_id": self.chat_id,
-                "text": message,
-                "parse_mode": "HTML"
-            }
+            payload = {"chat_id": self.chat_id, "text": message, "parse_mode": "HTML"}
             response = requests.post(self.api_url, json=payload, timeout=5)
 
             if response.status_code != 200:
-                self.logger.error(f"Telegram API error: {response.status_code} - {response.text}")
+                self.logger.error(
+                    f"Telegram API error: {response.status_code} - {response.text}"
+                )
             else:
                 self.logger.debug(f"Telegram message sent: {message}")
         except Exception as e:

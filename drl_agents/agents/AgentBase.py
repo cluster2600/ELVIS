@@ -1,8 +1,9 @@
 import os
-import torch
+from copy import deepcopy
+
 import numpy as np
 import numpy.random as rd
-from copy import deepcopy
+import torch
 
 
 class AgentBase:
@@ -224,7 +225,7 @@ class AgentBase:
             reward, mask, action, state, next_s = buffer.sample_batch(batch_size)
             next_a = self.act_target(next_s)
             critic_targets: torch.Tensor = self.cri_target(next_s, next_a)
-            (next_q, min_indices) = torch.min(critic_targets, dim=1, keepdim=True)
+            next_q, min_indices = torch.min(critic_targets, dim=1, keepdim=True)
             q_label = reward + mask * next_q
 
         q = self.cri(state, action)
@@ -247,7 +248,7 @@ class AgentBase:
             next_a = self.act_target(next_s)
             critic_targets: torch.Tensor = self.cri_target(next_s, next_a)
             # taking a minimum while preserving the dimension for possible twin critics
-            (next_q, min_indices) = torch.min(critic_targets, dim=1, keepdim=True)
+            next_q, min_indices = torch.min(critic_targets, dim=1, keepdim=True)
             q_label = reward + mask * next_q
 
         q = self.cri(state, action)
@@ -256,7 +257,7 @@ class AgentBase:
 
         buffer.td_error_update(td_error.detach())
         return obj_critic, state
-    
+
     def get_buf_h_term(self, buf_state, buf_action, buf_r_sum):
         """
         Prepare the hamiltonian buffer.
@@ -267,8 +268,13 @@ class AgentBase:
         :return: None.
         """
         buf_r_norm = buf_r_sum - buf_r_sum.mean()
-        buf_r_diff = torch.where(buf_r_norm[:-1] * buf_r_norm[1:] <= 0)[0].detach().cpu().numpy() + 1
-        buf_r_diff = list(buf_r_diff) + [buf_r_norm.shape[0], ]
+        buf_r_diff = (
+            torch.where(buf_r_norm[:-1] * buf_r_norm[1:] <= 0)[0].detach().cpu().numpy()
+            + 1
+        )
+        buf_r_diff = list(buf_r_diff) + [
+            buf_r_norm.shape[0],
+        ]
 
         step_i = 0
         min_len = 16
@@ -289,10 +295,15 @@ class AgentBase:
             q_min = ten_r_sum.min().item()
             q_max = ten_r_sum.max().item()
 
-            self.h_term_buffer.append((ten_state, ten_action, ten_r_sum, q_avg, q_min, q_max))
+            self.h_term_buffer.append(
+                (ten_state, ten_action, ten_r_sum, q_avg, q_min, q_max)
+            )
 
         q_arg_sort = np.argsort([item[3] for item in self.h_term_buffer])
-        self.h_term_buffer = [self.h_term_buffer[i] for i in q_arg_sort[max(0, len(self.h_term_buffer) // 4 - 1):]]
+        self.h_term_buffer = [
+            self.h_term_buffer[i]
+            for i in q_arg_sort[max(0, len(self.h_term_buffer) // 4 - 1) :]
+        ]
 
         q_min = np.min(np.array([item[4] for item in self.h_term_buffer]))
         q_max = np.max(np.array([item[5] for item in self.h_term_buffer]))
@@ -317,22 +328,24 @@ class AgentBase:
         ten_action = torch.vstack(ten_action)  # ten_action.shape == (-1, action_dim)
         ten_r_sum = torch.hstack(ten_r_sum)  # ten_r_sum.shape == (-1, )
 
-        '''random sample'''
+        """random sample"""
         ten_size = ten_state.shape[0]
-        indices = torch.randint(ten_size, size=(ten_size // 2,), requires_grad=False, device=self.device)
+        indices = torch.randint(
+            ten_size, size=(ten_size // 2,), requires_grad=False, device=self.device
+        )
         ten_state = ten_state[indices]
         ten_action = ten_action[indices]
         ten_r_sum = ten_r_sum[indices]
 
-        '''hamiltonian'''
-        _,ten_logprob = self.act.get_old_logprob(ten_state, ten_action)
-        #print(ten_logprob)
+        """hamiltonian"""
+        _, ten_logprob = self.act.get_old_logprob(ten_state, ten_action)
+        # print(ten_logprob)
         ten_hamilton = ten_logprob.exp().prod(dim=1)
 
         n_min, n_max = self.h_term_r_min_max
         ten_r_norm = (ten_r_sum - n_min) / (n_max - n_min)
         return -(ten_hamilton * ten_r_norm).mean() * self.lambda_h_term
-  
+
     @staticmethod
     def optimizer_update(optimizer, objective):
         """minimize the optimization objective via update the network parameters

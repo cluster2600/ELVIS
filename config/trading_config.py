@@ -1,8 +1,12 @@
 """Loader for the unified trading_config.yaml documented in docs/trading_system.md."""
+
 import os
+
 import yaml
 
-_DEFAULT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trading_config.yaml")
+_DEFAULT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trading_config.yaml"
+)
 
 
 def load_trading_config(path: str = None) -> dict:

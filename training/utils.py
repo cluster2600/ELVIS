@@ -6,7 +6,6 @@ import time
 import numpy as np
 import numpy.random as rd
 import torch
-
 from elegantrl.train.config import build_env
 from elegantrl.train.evaluator import Evaluator
 from elegantrl.train.replay_buffer import ReplayBuffer, ReplayBufferMP

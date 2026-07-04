@@ -3,9 +3,9 @@
 Script to enable BNB trading and fee optimization in the trading bot
 """
 
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
 
 # Add project root to path
@@ -13,23 +13,26 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Set environment
-os.environ['VAULT_ENABLED'] = 'false'
+os.environ["VAULT_ENABLED"] = "false"
+
 
 def update_trading_config():
     """Update trading configuration to support BNB"""
-    
-    config_path = Path(__file__).parent / 'config' / 'config.py'
-    
+
+    config_path = Path(__file__).parent / "config" / "config.py"
+
     # Read current config
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         content = f.read()
-    
+
     # Add BNB-specific configuration
-    bnb_config = '''
+    bnb_config = """
 # BNB Trading and Fee Optimization Configuration
 BNB_CONFIG = {
     'ENABLE_BNB_FEES': True,           # Use BNB to pay trading fees (10% discount on futures, 25% on spot)
@@ -40,10 +43,10 @@ BNB_CONFIG = {
     'BNB_SYMBOLS': ['BNBUSDT', 'BNBBTC'],  # Available BNB trading pairs
     'BNB_REBALANCE_THRESHOLD': 0.05,  # Rebalance when BNB balance drops below this
 }
-'''
-    
+"""
+
     # Add symbols configuration
-    symbols_config = '''
+    symbols_config = """
 # Multi-Asset Trading Configuration  
 SYMBOLS_CONFIG = {
     'PRIMARY_SYMBOLS': ['BTCUSDT', 'BNBUSDT'],     # Primary trading pairs
@@ -52,34 +55,35 @@ SYMBOLS_CONFIG = {
     'FEE_OPTIMIZATION_PAIRS': ['BNBUSDT'],         # Pairs for fee optimization
     'MAX_CONCURRENT_PAIRS': 3,                     # Maximum pairs to trade simultaneously
 }
-'''
-    
+"""
+
     # Check if BNB config already exists
-    if 'BNB_CONFIG' not in content:
+    if "BNB_CONFIG" not in content:
         # Add BNB config before the last line
-        lines = content.split('\n')
+        lines = content.split("\n")
         insert_pos = len(lines) - 1  # Before last line
-        
-        lines.insert(insert_pos, '')
+
+        lines.insert(insert_pos, "")
         lines.insert(insert_pos + 1, bnb_config)
-        lines.insert(insert_pos + 2, '')
+        lines.insert(insert_pos + 2, "")
         lines.insert(insert_pos + 3, symbols_config)
-        
-        new_content = '\n'.join(lines)
-        
+
+        new_content = "\n".join(lines)
+
         # Write updated config
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             f.write(new_content)
-        
+
         logger.info("✅ Updated config.py with BNB trading configuration")
         return True
     else:
         logger.info("ℹ️ BNB configuration already exists in config.py")
         return False
 
+
 def create_bnb_strategy():
     """Create a simple BNB-aware trading strategy"""
-    
+
     strategy_content = '''#!/usr/bin/env python3
 """
 BNB-aware trading strategy that optimizes fees and includes BNB trading
@@ -263,78 +267,86 @@ class BNBAwareStrategy(BaseStrategy):
         
         return validation
 '''
-    
-    strategy_path = Path(__file__).parent / 'trading' / 'strategies' / 'bnb_aware_strategy.py'
-    
+
+    strategy_path = (
+        Path(__file__).parent / "trading" / "strategies" / "bnb_aware_strategy.py"
+    )
+
     # Create strategy file
-    with open(strategy_path, 'w') as f:
+    with open(strategy_path, "w") as f:
         f.write(strategy_content)
-    
+
     logger.info("✅ Created BNB-aware trading strategy")
+
 
 def test_bnb_integration():
     """Test the BNB integration with current setup"""
     try:
         from trading.execution.enhanced_binance_executor import EnhancedBinanceExecutor
-        
+
         logger.info("🧪 Testing BNB integration...")
-        
+
         # Test enhanced executor
         executor = EnhancedBinanceExecutor(
             logger=logger,
             is_testnet=True,
             use_futures=True,
             enable_bnb_fees=True,
-            bnb_trading_enabled=True
+            bnb_trading_enabled=True,
         )
-        
+
         executor.initialize()
-        
+
         # Test fee calculation
         trade_value = 5000  # $5000 trade
         fee_analysis = executor.calculate_fee_with_bnb(trade_value, is_futures=True)
-        
+
         logger.info(f"💰 Fee Analysis for ${trade_value:,} trade:")
         logger.info(f"   Standard fee: ${fee_analysis['standard_fee_usdt']:.2f}")
         logger.info(f"   With BNB: ${fee_analysis['discounted_fee_usdt']:.2f}")
-        logger.info(f"   Savings: ${fee_analysis['savings_usdt']:.2f} ({fee_analysis['discount_percent']:.0f}%)")
-        
+        logger.info(
+            f"   Savings: ${fee_analysis['savings_usdt']:.2f} ({fee_analysis['discount_percent']:.0f}%)"
+        )
+
         # Test BNB auto-buy logic
         bnb_analysis = executor.should_auto_buy_bnb(trade_value)
         logger.info(f"🔄 BNB Analysis:")
         logger.info(f"   Should auto-buy: {bnb_analysis['should_buy']}")
-        
-        if bnb_analysis['should_buy']:
-            logger.info(f"   Recommended BNB purchase: {bnb_analysis['buy_amount_bnb']:.6f} BNB")
+
+        if bnb_analysis["should_buy"]:
+            logger.info(
+                f"   Recommended BNB purchase: {bnb_analysis['buy_amount_bnb']:.6f} BNB"
+            )
             logger.info(f"   Cost: ${bnb_analysis['buy_cost_usdt']:.2f}")
-        
+
         return True
-        
+
     except Exception as e:
         logger.error(f"❌ BNB integration test failed: {e}")
         return False
 
+
 def main():
     """Main function to enable BNB trading"""
     logger.info("🪙 Enabling BNB Trading and Fee Optimization")
-    logger.info("="*60)
-    
+    logger.info("=" * 60)
+
     # 1. Update configuration
     config_updated = update_trading_config()
-    
+
     # 2. Create BNB strategy
     create_bnb_strategy()
-    
+
     # 3. Test integration
     test_success = test_bnb_integration()
-    
+
     # Summary
-    logger.info("="*60)
+    logger.info("=" * 60)
     logger.info("📋 BNB INTEGRATION SUMMARY:")
     logger.info(f"   Config updated: {'✅' if config_updated else 'ℹ️ Already exists'}")
     logger.info(f"   Strategy created: ✅")
     logger.info(f"   Integration test: {'✅' if test_success else '❌'}")
-    
+
     if test_success:
         logger.info("\n🎉 BNB TRADING SUCCESSFULLY ENABLED!")
         logger.info("\n💡 Benefits now available:")
@@ -343,15 +355,18 @@ def main():
         logger.info("   • Automatic BNB balance management")
         logger.info("   • BNB trading opportunities")
         logger.info("   • Multi-asset portfolio optimization")
-        
+
         logger.info("\n🚀 Next steps:")
-        logger.info("   1. Update your main trading script to use EnhancedBinanceExecutor")
+        logger.info(
+            "   1. Update your main trading script to use EnhancedBinanceExecutor"
+        )
         logger.info("   2. Consider adding BNBUSDT to your trading symbols")
         logger.info("   3. Monitor BNB balance for optimal fee savings")
     else:
         logger.warning("\n⚠️ Some issues found - please check the errors above")
-    
-    logger.info("="*60)
+
+    logger.info("=" * 60)
+
 
 if __name__ == "__main__":
     main()

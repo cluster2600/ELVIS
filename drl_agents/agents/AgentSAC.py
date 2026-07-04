@@ -1,8 +1,10 @@
+from copy import deepcopy
+
 import numpy as np
 import torch
-from copy import deepcopy
-from drl_agents.agents.net import ActorSAC, ActorFixSAC, CriticTwin, ShareSPG
+
 from drl_agents.agents.AgentBase import AgentBase
+from drl_agents.agents.net import ActorFixSAC, ActorSAC, CriticTwin, ShareSPG
 
 
 class AgentSAC(AgentBase):
@@ -248,7 +250,9 @@ class AgentShareSAC(AgentSAC):
     def __init__(self, net_dim, state_dim, action_dim, gpu_id=0, args=None):
         self.obj_critic = (-np.log(0.5)) ** 0.5  # for reliable_lambda
         self.if_use_act_target = True
-        self.device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
+        )
         self.alpha_log = torch.tensor(
             (-np.log(action_dim) * np.e,),
             dtype=torch.float32,
@@ -290,7 +294,9 @@ class AgentShareSAC(AgentSAC):
         obj_critic = (self.criterion(q1, q_label) + self.criterion(q2, q_label)) / 2
         return obj_critic, state
 
-    def update_net(self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None):
+    def update_net(
+        self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None
+    ):
         """
         Update the shared-parameter SAC networks.
         """
@@ -336,4 +342,8 @@ class AgentShareSAC(AgentSAC):
             if self.if_use_act_target:
                 self.soft_update(self.act_target, self.act, soft_update_tau)
 
-        return self.obj_critic, (obj_actor.item() if obj_actor is not None else 0.0), alpha.item()
+        return (
+            self.obj_critic,
+            (obj_actor.item() if obj_actor is not None else 0.0),
+            alpha.item(),
+        )

@@ -1,10 +1,13 @@
-from typing import Dict, Optional, List, Any
+from typing import Any, Dict, List, Optional
+
 import torch
+
 
 class MetaLearningAgent:
     """
     Base class for meta-learning agents such as MAML or RL².
     """
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         # Initialize meta-learning specific parameters here
@@ -80,6 +83,7 @@ class MarketMakerAgent:
     """
     Specialized agent simulating a market maker role.
     """
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         # Initialize market maker specific parameters
@@ -101,6 +105,7 @@ class TakerAgent:
     """
     Specialized agent simulating a market taker role.
     """
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         # Initialize market taker specific parameters
@@ -123,7 +128,14 @@ class MultiAgentTradingSystem:
     Multi-agent RL system supporting meta-learning, multi-agent interactions,
     transfer learning, and hardware acceleration.
     """
-    def __init__(self, env_config: Dict, n_agents: int = 1, agent_types: Optional[List[str]] = None, device: str = "cpu"):
+
+    def __init__(
+        self,
+        env_config: Dict,
+        n_agents: int = 1,
+        agent_types: Optional[List[str]] = None,
+        device: str = "cpu",
+    ):
         self.env_config = env_config
         self.n_agents = n_agents
         self.agent_types = agent_types or ["default"] * n_agents
@@ -160,7 +172,7 @@ class MultiAgentTradingSystem:
             historical_data: Historical market data.
         """
         for agent in self.agents:
-            if hasattr(agent, 'pretrain'):
+            if hasattr(agent, "pretrain"):
                 agent.pretrain(historical_data)
 
     def finetune_agents(self, recent_data):
@@ -171,7 +183,7 @@ class MultiAgentTradingSystem:
             recent_data: Recent or streaming market data.
         """
         for agent in self.agents:
-            if hasattr(agent, 'finetune'):
+            if hasattr(agent, "finetune"):
                 agent.finetune(recent_data)
 
     def train(self, total_timesteps: int, eval_freq: int, n_eval_episodes: int):
