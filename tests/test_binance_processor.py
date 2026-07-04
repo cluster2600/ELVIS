@@ -9,6 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
+
+# talib is absent in the minimal CI env; add_technical_indicator calls it
+# directly (talib.MACD/RSI/BBANDS), so skip the whole file when unavailable.
+pytest.importorskip("talib")
 
 from core.data.processors.binance_processor import BinanceProcessor
 

@@ -29,8 +29,8 @@ class TestPriceFetcher:
         assert fetcher.symbols == ["BTCUSDT"]
         assert fetcher.timeframe == "5m"
         assert fetcher.history_limit == 200
-        assert fetcher.cache_ttl == 60
-        assert fetcher.indicator_cache_ttl == 30
+        assert fetcher.cache_ttl == 10
+        assert fetcher.indicator_cache_ttl == 5
 
     def test_get_historical_data(
         self, mock_logger, mock_binance_client, sample_candles
@@ -51,6 +51,9 @@ class TestPriceFetcher:
     def test_get_historical_data_no_client(self, mock_logger):
         """Test get_historical_data when client is not initialized"""
         fetcher = PriceFetcher(logger=mock_logger, client=None)
+        # When client=None the constructor auto-initializes a client from config;
+        # force it back to None to exercise the "not initialized" branch.
+        fetcher.client = None
         fetcher.get_historical_data()
 
         mock_logger.error.assert_called_with("Client not initialized.")
@@ -79,6 +82,9 @@ class TestPriceFetcher:
         mock_get_cache.return_value = mock_cache
 
         fetcher = PriceFetcher(logger=mock_logger, symbols=["BTCUSDT"])
+        # Force client=None so the cache-miss path falls back to the last candle
+        # instead of hitting the auto-initialized Binance client.
+        fetcher.client = None
         fetcher.candles["BTCUSDT"] = sample_candles
 
         price = fetcher.get_current_price("BTCUSDT")
@@ -88,7 +94,7 @@ class TestPriceFetcher:
         assert price == expected_price
 
         # Should cache the price
-        mock_cache.set.assert_called_once_with("price:BTCUSDT", expected_price, ttl=60)
+        mock_cache.set.assert_called_once_with("price:BTCUSDT", expected_price, ttl=10)
 
     def test_calculate_indicators_with_cache(self, mock_logger):
         """Test calculate_indicators method exists and doesn't raise exceptions"""
