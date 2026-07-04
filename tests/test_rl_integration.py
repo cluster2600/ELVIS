@@ -9,6 +9,11 @@ import sys
 from datetime import datetime
 
 import pandas as pd
+import pytest
+
+pytest.importorskip(
+    "torch", reason="RL model/strategy require torch, unavailable in this env"
+)
 
 from core.models.trading_rl_model import TradingRLModel
 from trading.strategies.ensemble_strategy import EnsembleStrategy

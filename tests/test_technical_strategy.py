@@ -8,6 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
+
+pytest.importorskip(
+    "talib", reason="TechnicalStrategy requires TA-Lib, unavailable in this env"
+)
 
 from trading.strategies.technical_strategy import TechnicalStrategy
 
