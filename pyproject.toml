@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elvis-trading-bot"
-version = "0.1.0"
+version = "0.2.0"
 description = "ELVIS algorithmic trading bot"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -68,3 +68,10 @@ include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+line_length = 88

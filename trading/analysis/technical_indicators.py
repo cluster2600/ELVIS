@@ -4,7 +4,9 @@ import pandas as pd
 import ta
 
 
-def add_technical_indicators(data: pd.DataFrame, logger: logging.Logger | None = None) -> pd.DataFrame:
+def add_technical_indicators(
+    data: pd.DataFrame, logger: logging.Logger | None = None
+) -> pd.DataFrame:
     """
     Add technical indicators to price data.
     """
@@ -16,7 +18,9 @@ def add_technical_indicators(data: pd.DataFrame, logger: logging.Logger | None =
         missing_columns = [col for col in required_columns if col not in data.columns]
         if missing_columns:
             if logger:
-                logger.error(f"Missing required columns for technical indicators: {missing_columns}")
+                logger.error(
+                    f"Missing required columns for technical indicators: {missing_columns}"
+                )
                 logger.info(f"Available columns: {list(data.columns)}")
             return data
 
@@ -36,7 +40,9 @@ def add_technical_indicators(data: pd.DataFrame, logger: logging.Logger | None =
         data["lower_bb"] = bollinger.bollinger_lband()
         data["sma_bb"] = bollinger.bollinger_mavg()
         data["upper_bb"] = bollinger.bollinger_hband()
-        data["atr"] = ta.volatility.average_true_range(data["high"], data["low"], data["close"])
+        data["atr"] = ta.volatility.average_true_range(
+            data["high"], data["low"], data["close"]
+        )
 
         return data
     except Exception as exc:

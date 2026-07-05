@@ -1,0 +1,31 @@
+# Unified ELVIS trading configuration (documented in docs/trading_system.md).
+# Composes the operational knobs previously split across config/config.py and
+# trading/config/*.yaml. Load with config.trading_config.load_trading_config().
+
+trading:
+  symbol: BTCUSDT
+  mode: paper                # paper | live
+  default_leverage: 3        # env DEFAULT_LEVERAGE overrides; >10x needs OVERRIDE_HIGH_LEVERAGE=true
+  strategy: ensemble
+
+risk_management:
+  max_position_size: 0.1     # fraction of portfolio
+  min_position_size: 0.01
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.02
+  max_daily_loss: 0.05       # fraction
+  max_daily_loss_usd: 150.0
+  max_drawdown: 0.2
+  leverage_max: 125
+  leverage_min: 1
+
+execution:
+  max_daily_trades: 8
+  max_trades_per_day: 10
+  trade_cooldown_minutes: 15
+  taker_fee: 0.0004
+
+monitoring:
+  trade_history_port: 5050
+  prometheus_pushgateway: localhost:9091
+  grafana_port: 3001

@@ -16,7 +16,7 @@
 - **[Secrets Management](../utils/secrets_manager.py)** - Multi-layer security with Vault integration
 
 ### 🚀 Trading Features
-- **Maximum Speed Trading** - Zero cooldowns for ultra-fast execution
+- **Fast trading loop** - no per-iteration sleep, with a configurable inter-trade cooldown (default ~10-15 min) enforced by TradeCooldownManager
 - **Real-time Monitoring** - Live API status with response time tracking
 - **Enterprise Security** - Vault-based secrets management with encryption
 
@@ -52,9 +52,12 @@ export VAULT_TOKEN=trading-bot-token
 
 #### 2. Initialize Secrets
 ```bash
-vault kv put secret/trading/api-keys \
-    binance-api-key=your-api-key \
-    binance-api-secret=your-api-secret
+# ELVIS reads Binance creds from the `secrets` KV v2 mount, path `binance`,
+# fields api_key / secret_key (see utils/secrets_manager.py _VAULT_KEY_MAP).
+bao kv put -mount=secrets binance \
+    api_key=your-api-key \
+    secret_key=your-api-secret
+# Testnet: bao kv put -mount=secrets binance_testnet api_key=... secret_key=...
 ```
 
 #### 3. Start Trading Bot

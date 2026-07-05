@@ -1,5 +1,8 @@
 # ELVIS Trading System - Data Processing Documentation
 
+> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
+
+
 ## Overview
 
 This document provides comprehensive documentation of the data processing pipeline in the ELVIS trading system. It covers data acquisition, cleaning, feature engineering, technical indicators, and data transformation processes that feed into the machine learning models and trading strategies.

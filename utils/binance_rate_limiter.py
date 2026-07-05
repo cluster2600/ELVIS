@@ -17,18 +17,18 @@ Usage:
         return client.some_endpoint()
 """
 
+import functools
 import logging
 import time
-import functools
-from typing import Callable, Any, Optional
+from typing import Any, Callable, Optional
 
 from tenacity import (
+    RetryCallState,
+    before_sleep_log,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-    RetryCallState,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,12 @@ except ImportError:
     BinanceRequestException = Exception
 
 # Build the tuple of retriable exception types dynamically.
-_RETRIABLE_EXCEPTIONS = [BinanceAPIException, BinanceRequestException, ConnectionError, TimeoutError]
+_RETRIABLE_EXCEPTIONS = [
+    BinanceAPIException,
+    BinanceRequestException,
+    ConnectionError,
+    TimeoutError,
+]
 if BinanceFuturesClientError is not None:
     _RETRIABLE_EXCEPTIONS.append(BinanceFuturesClientError)
 
@@ -81,7 +86,9 @@ def _is_retriable(exc: BaseException) -> bool:
         return True
 
     # Binance futures ClientError carries an HTTP status code.
-    if BinanceFuturesClientError is not None and isinstance(exc, BinanceFuturesClientError):
+    if BinanceFuturesClientError is not None and isinstance(
+        exc, BinanceFuturesClientError
+    ):
         status = getattr(exc, "status_code", None)
         if status in (429, 418):
             return True  # Rate limited — definitely retry.
@@ -148,6 +155,7 @@ Example::
 # Response-header inspection helpers
 # ---------------------------------------------------------------------------
 
+
 def check_rate_limit_headers(response_headers: dict) -> None:
     """
     Inspect Binance HTTP response headers and log rate-limit usage.
@@ -173,11 +181,15 @@ def check_rate_limit_headers(response_headers: dict) -> None:
         utilisation_pct = (used_weight / _WEIGHT_LIMIT_PER_MIN) * 100
         logger.debug(
             "Binance rate-limit — weight used: %d / %d (%.1f%%)",
-            used_weight, _WEIGHT_LIMIT_PER_MIN, utilisation_pct,
+            used_weight,
+            _WEIGHT_LIMIT_PER_MIN,
+            utilisation_pct,
         )
 
     if order_count_1s is not None:
-        logger.debug("Binance order count (1 s): %d / %d", order_count_1s, _ORDER_LIMIT_PER_SEC)
+        logger.debug(
+            "Binance order count (1 s): %d / %d", order_count_1s, _ORDER_LIMIT_PER_SEC
+        )
 
     if order_count_1d is not None:
         logger.debug("Binance order count (1 day): %d", order_count_1d)
@@ -188,7 +200,8 @@ def check_rate_limit_headers(response_headers: dict) -> None:
         logger.warning(
             "⚠️  Binance rate-limit approaching: %d / %d weight used (%.0f%%). "
             "Pausing %.1f s to avoid HTTP 429.",
-            used_weight, _WEIGHT_LIMIT_PER_MIN,
+            used_weight,
+            _WEIGHT_LIMIT_PER_MIN,
             (used_weight / _WEIGHT_LIMIT_PER_MIN) * 100,
             _RATE_LIMIT_PAUSE_SECONDS,
         )
@@ -202,7 +215,9 @@ def check_rate_limit_headers(response_headers: dict) -> None:
         time.sleep(retry_after)
 
 
-def rate_limited_call(api_func: Callable, *args, response_attr: str = "headers", **kwargs) -> Any:
+def rate_limited_call(
+    api_func: Callable, *args, response_attr: str = "headers", **kwargs
+) -> Any:
     """
     Call *api_func* with retry logic and automatic rate-limit header checking.
 
@@ -220,6 +235,7 @@ def rate_limited_call(api_func: Callable, *args, response_attr: str = "headers",
     Returns:
         The return value of api_func.
     """
+
     @binance_retry
     def _call():
         result = api_func(*args, **kwargs)
@@ -235,6 +251,7 @@ def rate_limited_call(api_func: Callable, *args, response_attr: str = "headers",
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_int(value: Optional[str]) -> Optional[int]:
     """Safely parse a string header value to int."""

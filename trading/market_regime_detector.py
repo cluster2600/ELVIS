@@ -1,6 +1,7 @@
 import pandas as pd
 import ta
 
+
 class MarketRegimeDetector:
     """
     Detects the current market regime (e.g., trending, mean-reverting).
@@ -28,13 +29,13 @@ class MarketRegimeDetector:
             str: The current market regime ('trending' or 'mean-reverting').
         """
         adx = ta.trend.ADXIndicator(
-            high=data['high'],
-            low=data['low'],
-            close=data['close'],
-            window=self.adx_period
+            high=data["high"],
+            low=data["low"],
+            close=data["close"],
+            window=self.adx_period,
         ).adx()
 
         if adx.iloc[-1] > self.adx_threshold:
-            return 'trending'
+            return "trending"
         else:
-            return 'mean-reverting'
+            return "mean-reverting"

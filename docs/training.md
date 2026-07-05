@@ -1,5 +1,8 @@
 # ELVIS Trading System - Model Training Documentation
 
+> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
+
+
 ## Overview
 
 This document provides comprehensive documentation of the model training pipeline for the ELVIS trading system. It covers the architecture, components, data flow, training processes, evaluation methods, and configuration management for both traditional ML models and reinforcement learning agents.

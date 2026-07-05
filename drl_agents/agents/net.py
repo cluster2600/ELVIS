@@ -1,7 +1,7 @@
-import torch
-import torch.nn as nn
 import numpy as np
 import numpy.random as rd
+import torch
+import torch.nn as nn
 
 """DQN"""
 
@@ -257,10 +257,10 @@ class ActorSAC(nn.Module):
         a_tan = (a_avg + a_std * noise).tanh()  # action.tanh()
 
         logprob = (
-                a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
+            a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
         )  # noise.pow(2) * 0.5
         logprob = (
-                logprob + (-a_tan.pow(2) + 1.000001).log()
+            logprob + (-a_tan.pow(2) + 1.000001).log()
         )  # fix logprob using the derivative of action.tanh()
         return a_tan, logprob.sum(1, keepdim=True)  # todo negative logprob
 
@@ -309,11 +309,11 @@ class ActorFixSAC(nn.Module):
         noise = a_noise - action  # todo
 
         log_prob = (
-                a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
+            a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
         )  # noise.pow(2) * 0.5
         log_prob += (
-                            np.log(2.0) - a_noise - self.soft_plus(-2.0 * a_noise)
-                    ) * 2.0  # better than below
+            np.log(2.0) - a_noise - self.soft_plus(-2.0 * a_noise)
+        ) * 2.0  # better than below
         return log_prob
 
     def get_action_logprob(self, state):
@@ -331,7 +331,7 @@ class ActorFixSAC(nn.Module):
         """compute log_prob according to mean and std of a_noise (stochastic policy)"""
         # self.sqrt_2pi_log = np.log(np.sqrt(2 * np.pi))
         log_prob = (
-                a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
+            a_std_log + self.log_sqrt_2pi + noise.pow(2).__mul__(0.5)
         )  # noise.pow(2) * 0.5
         """same as below:
         from torch.distributions.normal import Normal
@@ -343,8 +343,8 @@ class ActorFixSAC(nn.Module):
 
         """fix log_prob of action.tanh"""
         log_prob += (
-                            np.log(2.0) - a_noise - self.soft_plus(-2.0 * a_noise)
-                    ) * 2.0  # better than below
+            np.log(2.0) - a_noise - self.soft_plus(-2.0 * a_noise)
+        ) * 2.0  # better than below
         """same as below:
         epsilon = 1e-6
         a_noise_tanh = a_noise.tanh()
@@ -540,7 +540,7 @@ class CriticREDQ(nn.Module):  # modified REDQ (Randomized Ensemble Double Q-lear
         q_min = torch.min(tensor_qs, dim=1, keepdim=True)[0]  # min Q value
         q_sum = tensor_qs.sum(dim=1, keepdim=True)  # mean Q value
         return (q_min * (self.critic_num * 0.5) + q_sum) / (
-                self.critic_num * 1.5
+            self.critic_num * 1.5
         )  # better than min
 
     def get_q_values(self, state, action):
@@ -664,7 +664,7 @@ class SharePPO(nn.Module):  # Pixel-level state version
         )
 
         logprob = -(
-                ((a_avg - action) / a_std).pow(2) / 2 + self.a_std_log + self.sqrt_2pi_log
+            ((a_avg - action) / a_std).pow(2) / 2 + self.a_std_log + self.sqrt_2pi_log
         ).sum(1)
         return q1, q2, logprob
 
@@ -797,12 +797,20 @@ def build_mlp(mid_dim, num_layer, input_dim, output_dim):  # MLP (MultiLayer Per
     assert num_layer >= 1
     net_list = list()
     if num_layer == 1:
-        net_list.extend([nn.Linear(input_dim, output_dim), ])
+        net_list.extend(
+            [
+                nn.Linear(input_dim, output_dim),
+            ]
+        )
     else:  # elif num_layer >= 2:
         net_list.extend([nn.Linear(input_dim, mid_dim), nn.ReLU()])
         for _ in range(num_layer - 2):
             net_list.extend([nn.Linear(mid_dim, mid_dim), nn.ReLU()])
-        net_list.extend([nn.Linear(mid_dim, output_dim), ])
+        net_list.extend(
+            [
+                nn.Linear(mid_dim, output_dim),
+            ]
+        )
     return nn.Sequential(*net_list)
 
 

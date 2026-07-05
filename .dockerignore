@@ -14,11 +14,10 @@ Dockerfile
 
 # Virtualenv
 venv/
-venv310/
-venv_new/
+venv*/
+.venv/
 env/
-env-coreml/
-env-ydf/
+env-*/
 
 # Python cache
 __pycache__/

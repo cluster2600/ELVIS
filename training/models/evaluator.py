@@ -1,35 +1,44 @@
+import json  # Import for saving results
 import os
 import time
-import torch
+
 import numpy as np
-import json  # Import for saving results
+import torch
+
 
 class Evaluator:  # [ElegantRL.2022.01.01]
-    '''
+    """
     Evaluator class for monitoring and evaluating the agent's performance.
     This class handles recording metrics, saving models, and plotting learning curves.
     It includes enhanced error handling for better debugging.
-    '''
+    """
+
     def __init__(self, cwd, agent_id, eval_env, args):
-        '''
+        """
         Initialize the Evaluator.
-        
+
         Args:
         cwd (str): Current working directory for saving files.
         agent_id (int): ID of the agent being evaluated.
         eval_env: The environment for evaluation.
         args: Configuration arguments.
-        '''
+        """
         try:
-            self.recorder = list()  # List to store metrics: total_step, r_avg, r_std, obj_c, ...
+            self.recorder = (
+                list()
+            )  # List to store metrics: total_step, r_avg, r_std, obj_c, ...
             self.recorder_path = f"{cwd}/recorder.npy"  # Path to save recorder data
 
             self.cwd = cwd
             self.agent_id = agent_id
             self.eval_env = eval_env
             self.eval_gap = args.eval_gap  # Time gap between evaluations
-            self.eval_times1 = max(1, int(args.eval_times / np.e))  # First evaluation times
-            self.eval_times2 = max(0, int(args.eval_times - self.eval_times1))  # Second evaluation times
+            self.eval_times1 = max(
+                1, int(args.eval_times / np.e)
+            )  # First evaluation times
+            self.eval_times2 = max(
+                0, int(args.eval_times - self.eval_times1)
+            )  # Second evaluation times
             self.target_return = args.target_return  # Target return for the agent
 
             self.r_max = -np.inf  # Maximum reward achieved so far
@@ -49,19 +58,19 @@ class Evaluator:  # [ElegantRL.2022.01.01]
     def evaluate_save_and_plot(
         self, act, steps, r_exp, log_tuple
     ) -> (bool, bool):  # 2021-09-09
-        '''
+        """
         Evaluate the agent, save if improved, and plot results.
-        
+
         Args:
         act: The actor model.
         steps (int): Number of steps taken.
         r_exp (float): Expected reward.
         log_tuple: Additional logging metrics.
-        
+
         Returns:
         if_reach_goal (bool): Whether the target return is reached.
         if_save (bool): Whether to save the model.
-        '''
+        """
         try:
             self.total_step += steps  # Update total training steps
 
@@ -78,7 +87,9 @@ class Evaluator:  # [ElegantRL.2022.01.01]
                 ]
                 rewards_steps_ary = np.array(rewards_steps_list, dtype=np.float32)
 
-                r_avg, s_avg = rewards_steps_ary.mean(axis=0)  # Average of episode return and step
+                r_avg, s_avg = rewards_steps_ary.mean(
+                    axis=0
+                )  # Average of episode return and step
 
                 # Evaluate second time if improved
                 if r_avg > self.r_max:
@@ -97,9 +108,13 @@ class Evaluator:  # [ElegantRL.2022.01.01]
                 if_save = r_avg > self.r_max
                 if if_save:
                     self.r_max = r_avg
-                    act_path = f"{self.cwd}/actor_{self.total_step:08}_{self.r_max:09.3f}.pth"
+                    act_path = (
+                        f"{self.cwd}/actor_{self.total_step:08}_{self.r_max:09.3f}.pth"
+                    )
                     torch.save(act.state_dict(), act_path)
-                    print(f"{self.agent_id:<3}{self.total_step:8.2e}{self.r_max:8.2f} |")
+                    print(
+                        f"{self.agent_id:<3}{self.total_step:8.2e}{self.r_max:8.2f} |"
+                    )
 
                 self.recorder.append((self.total_step, r_avg, r_std, r_exp, *log_tuple))
 
@@ -108,7 +123,9 @@ class Evaluator:  # [ElegantRL.2022.01.01]
                     self.used_time = int(time.time() - self.start_time)
                     print(f"Goal reached in {self.used_time} seconds.")
 
-                print(f"{self.agent_id:<3}{self.total_step:8.2e}{self.r_max:8.2f} | {r_avg:8.2f}{r_std:7.1f}{s_avg:7.0f}{s_std:6.0f} | {r_exp:8.2f}{''.join(f'{n:7.2f}' for n in log_tuple)}")
+                print(
+                    f"{self.agent_id:<3}{self.total_step:8.2e}{self.r_max:8.2f} | {r_avg:8.2f}{r_std:7.1f}{s_avg:7.0f}{s_std:6.0f} | {r_exp:8.2f}{''.join(f'{n:7.2f}' for n in log_tuple)}"
+                )
 
                 if len(self.recorder) > 0:
                     np.save(self.recorder_path, self.recorder)
@@ -122,7 +139,7 @@ class Evaluator:  # [ElegantRL.2022.01.01]
         """Save metrics to a JSON file."""
         try:
             file_path = os.path.join(self.cwd, filename)
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 json.dump(metrics, f, indent=4)
             print(f"Metrics saved to {file_path}")
         except Exception as e:
@@ -152,17 +169,17 @@ class Evaluator:  # [ElegantRL.2022.01.01]
 
 
 def get_episode_return_and_step(env, act) -> (float, int):  # [ElegantRL.2022.01.01]
-    '''
+    """
     Get the return and step for an episode.
-    
+
     Args:
     env: The environment.
     act: The actor model.
-    
+
     Returns:
     episode_return (float): Total return of the episode.
     episode_step (int): Number of steps in the episode.
-    '''
+    """
     try:
         max_step = env.max_step
         if_discrete = env.if_discrete
@@ -171,7 +188,9 @@ def get_episode_return_and_step(env, act) -> (float, int):  # [ElegantRL.2022.01
         state = env.reset()
         episode_return = 0.0
         for episode_step in range(max_step):
-            s_tensor = torch.as_tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+            s_tensor = torch.as_tensor(
+                state, dtype=torch.float32, device=device
+            ).unsqueeze(0)
             a_tensor = act(s_tensor)
             if if_discrete:
                 a_tensor = a_tensor.argmax(dim=1)
@@ -192,15 +211,15 @@ def save_learning_curve(
     save_title="learning curve",
     fig_name="plot_learning_curve.jpg",
 ):
-    '''
+    """
     Save the learning curve plot.
-    
+
     Args:
     recorder: Array of recorded metrics.
     cwd: Current working directory.
     save_title: Title for the plot.
     fig_name: Name of the figure file.
-    '''
+    """
     try:
         if recorder is None:
             recorder = np.load(f"{cwd}/recorder.npy")
@@ -214,6 +233,7 @@ def save_learning_curve(
         obj_a = recorder[:, 5]
 
         import matplotlib as mpl
+
         mpl.use("Agg")
         import matplotlib.pyplot as plt
 
@@ -225,7 +245,9 @@ def save_learning_curve(
         ax01.plot(steps, r_exp, color="darkcyan", alpha=0.5)
         ax00.set_ylabel("Episode Return", color="lightcoral")
         ax00.plot(steps, r_avg, label="Episode Return", color="lightcoral")
-        ax00.fill_between(steps, r_avg - r_std, r_avg + r_std, facecolor="lightcoral", alpha=0.3)
+        ax00.fill_between(
+            steps, r_avg - r_std, r_avg + r_std, facecolor="lightcoral", alpha=0.3
+        )
         ax00.grid()
 
         ax10 = axs[1]

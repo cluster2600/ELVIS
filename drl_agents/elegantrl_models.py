@@ -1,12 +1,18 @@
 # RL models from elegantrl
-import torch
 import numpy as np
+import torch
+
+from drl_agents.agents import AgentA2C, AgentDDPG, AgentPPO, AgentSAC, AgentTD3
 from training.config import Arguments
-from training.run import train_and_evaluate, init_agent
+from training.run import init_agent, train_and_evaluate
 
-from drl_agents.agents import AgentDDPG, AgentPPO, AgentSAC, AgentTD3, AgentA2C
-
-MODELS = {"ddpg": AgentDDPG, "td3": AgentTD3, "sac": AgentSAC, "ppo": AgentPPO, "a2c": AgentA2C}
+MODELS = {
+    "ddpg": AgentDDPG,
+    "td3": AgentTD3,
+    "sac": AgentSAC,
+    "ppo": AgentPPO,
+    "a2c": AgentA2C,
+}
 OFF_POLICY_MODELS = ["ddpg", "td3", "sac"]
 ON_POLICY_MODELS = ["ppo", "a2c"]
 """MODEL_KWARGS = {x: config.__dict__[f"{x.upper()}_PARAMS"] for x in MODELS.keys()}
@@ -49,9 +55,9 @@ class DRLAgent:
             "if_train": False,
         }
 
-        env = self.env(config=env_config,
-                       env_params=self.env_params,
-                       if_log=self.if_log)
+        env = self.env(
+            config=env_config, env_params=self.env_params, if_log=self.if_log
+        )
 
         env.env_num = 1
         agent = MODELS[model_name]
@@ -121,10 +127,10 @@ class DRLAgent:
                 state, reward, done, _ = environment.step(action)
 
                 total_asset = (
-                        environment.cash
-                        + (
-                                environment.price_array[environment.time] * environment.stocks
-                        ).sum()
+                    environment.cash
+                    + (
+                        environment.price_array[environment.time] * environment.stocks
+                    ).sum()
                 )
                 episode_total_assets.append(total_asset)
                 episode_return = total_asset / environment.initial_total_asset
@@ -132,5 +138,5 @@ class DRLAgent:
                 if done:
                     break
         print("\n Test Finished!")
-        print("episode_return: ", episode_return - 1, '\n')
+        print("episode_return: ", episode_return - 1, "\n")
         return episode_total_assets

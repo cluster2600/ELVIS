@@ -1,6 +1,8 @@
 import time
+
 import psutil
 import requests
+
 
 class SystemMonitor:
     """
@@ -34,8 +36,8 @@ class SystemMonitor:
         Extract API rate limit information from response headers.
         """
         return {
-            'limit': response_headers.get('x-mbx-used-weight-1m'),
-            'remaining': response_headers.get('x-mbx-order-count-1d')
+            "limit": response_headers.get("x-mbx-used-weight-1m"),
+            "remaining": response_headers.get("x-mbx-order-count-1d"),
         }
 
     def record_error(self, component: str):

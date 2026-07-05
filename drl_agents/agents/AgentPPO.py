@@ -1,8 +1,11 @@
+from copy import deepcopy
+from typing import Tuple
+
 import numpy as np
 import torch
-from drl_agents.agents.net import ActorPPO, ActorDiscretePPO, CriticPPO, SharePPO
+
 from drl_agents.agents.AgentBase import AgentBase
-from typing import Tuple
+from drl_agents.agents.net import ActorDiscretePPO, ActorPPO, CriticPPO, SharePPO
 
 """[ElegantRL.2021.12.12](github.com/AI4Fiance-Foundation/ElegantRL)"""
 
@@ -279,7 +282,9 @@ class AgentSharePPO(AgentPPO):
 
     def __init__(self, net_dim, state_dim, action_dim, gpu_id=0, args=None):
         self.obj_c = (-np.log(0.5)) ** 0.5  # for reliable_lambda
-        self.device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu"
+        )
         self.lambda_a_value = getattr(args, "lambda_a_value", 1.0)
         self.if_use_cri_target = getattr(args, "if_use_cri_target", False)
         self.ratio_clip = getattr(args, "ratio_clip", 0.25)
@@ -307,7 +312,9 @@ class AgentSharePPO(AgentPPO):
         )
         self.criterion = torch.nn.SmoothL1Loss()
 
-    def update_net(self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None):
+    def update_net(
+        self, buffer, batch_size=None, repeat_times=None, soft_update_tau=None
+    ):
         """
         Update the shared-parameter PPO networks.
         """

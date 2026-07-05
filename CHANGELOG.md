@@ -1,3 +1,39 @@
+## [v0.1.0] - 2026-07-02 - First tagged release
+
+First versioned release. Docker image published to
+`ghcr.io/cluster2600/elvis`.
+
+### Runtime
+- Migrated to **Python 3.14**; all dependencies refreshed to current versions.
+- Fixed macOS startup segfault (duplicate OpenMP runtimes) and pandas 3.0 API
+  removals (`fillna(method=)`, deprecated frequency aliases).
+- Guarded the macOS Keychain secret read against indefinite blocking.
+
+### Security
+- Trading API refuses to start without `API_SECRET_KEY`; login fails closed
+  unless `API_USERNAME`/`API_PASSWORD` are set (was `admin`/`admin` with a
+  hard-coded JWT key).
+- `--mode` restricted to `paper|live`; committed Vault token file untracked.
+- Default leverage 3x with a >10x startup safety gate; kill-switch and Binance
+  rate limiting.
+
+### Packaging
+- Multi-stage `Dockerfile` on `python:3.14-slim`; TA-Lib installed from the
+  official per-arch `.deb` (v0.6.4). Non-root runtime, `/health` on 5050.
+- `.github/workflows/release.yml` builds and pushes the image to GHCR and
+  creates a GitHub Release on `v*` tags.
+
+### Cleanup
+- Removed ~113 verified-dead scripts/modules and large tracked artifacts;
+  archived historical status reports under `docs/archive/`.
+
+### Known limitations
+- No Python 3.14 wheels for `ydf`/`tensorflow`; `coremltools` lacks native
+  bindings on 3.14 — those ensemble members are skipped via guards. The Docker
+  image does not bundle `torch`, so DRL/RL strategies are skipped there.
+
+---
+
 ## [2025-07-20] - 🔐 SECURITY: Enterprise-Grade HashiCorp Vault Integration + Maximum Speed Trading
 
 ### 🛡️ **ENTERPRISE SECURITY IMPLEMENTATION:**

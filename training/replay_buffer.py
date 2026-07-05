@@ -18,7 +18,9 @@ class ReplayBuffer:  # for off-policy, extended for multi-agent
             f"cuda:{gpu_id}" if (torch.cuda.is_available() and (gpu_id >= 0)) else "cpu"
         )
 
-        other_dim = 1 + 1 + self.action_dim + 1  # reward_dim + mask_dim + action_dim + agent_id_dim
+        other_dim = (
+            1 + 1 + self.action_dim + 1
+        )  # reward_dim + mask_dim + action_dim + agent_id_dim
         self.buf_other = torch.empty(
             (max_len, other_dim), dtype=torch.float32, device=self.device
         )
@@ -321,9 +323,9 @@ class BinarySearchTree:
         self.now_len += (ids >= self.now_len).sum()
 
         upper_step = self.depth - 1
-        self.prob_ary[
-            ids
-        ] = prob  # here, ids means the indices of given children (maybe the right ones or left ones)
+        self.prob_ary[ids] = (
+            prob  # here, ids means the indices of given children (maybe the right ones or left ones)
+        )
         p_ids = (ids - 1) // 2
 
         while upper_step:  # propagate the change through tree

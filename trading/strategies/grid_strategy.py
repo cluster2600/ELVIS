@@ -1,14 +1,23 @@
+import logging
+
 import numpy as np
 import pandas as pd
+
 from trading.strategies.base_strategy import BaseStrategy
-import logging
+
 
 class GridStrategy(BaseStrategy):
     """
     A grid trading strategy that places a series of buy and sell orders at predefined intervals.
     """
 
-    def __init__(self, logger: logging.Logger, grid_levels: int = 5, grid_spacing: float = 0.01, **kwargs):
+    def __init__(
+        self,
+        logger: logging.Logger,
+        grid_levels: int = 5,
+        grid_spacing: float = 0.01,
+        **kwargs,
+    ):
         """
         Initialize the grid strategy.
 
@@ -28,7 +37,9 @@ class GridStrategy(BaseStrategy):
         """
         pass
 
-    def calculate_position_size(self, data: pd.DataFrame, current_price: float, available_capital: float) -> float:
+    def calculate_position_size(
+        self, data: pd.DataFrame, current_price: float, available_capital: float
+    ) -> float:
         """
         Calculate the position size for each grid level.
         """
@@ -50,6 +61,12 @@ class GridStrategy(BaseStrategy):
         """
         Get the buy and sell grid levels.
         """
-        buy_levels = [current_price * (1 - i * self.grid_spacing) for i in range(1, self.grid_levels + 1)]
-        sell_levels = [current_price * (1 + i * self.grid_spacing) for i in range(1, self.grid_levels + 1)]
+        buy_levels = [
+            current_price * (1 - i * self.grid_spacing)
+            for i in range(1, self.grid_levels + 1)
+        ]
+        sell_levels = [
+            current_price * (1 + i * self.grid_spacing)
+            for i in range(1, self.grid_levels + 1)
+        ]
         return buy_levels, sell_levels

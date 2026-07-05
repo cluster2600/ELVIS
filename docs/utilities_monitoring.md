@@ -1,5 +1,8 @@
 # ELVIS Trading System - Utilities & Monitoring Documentation
 
+> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
+
+
 ## Overview
 
 This document provides comprehensive documentation of the utilities and monitoring infrastructure for the ELVIS trading system. It covers the console dashboard, price fetching, monitoring systems, notification services, and performance tracking components.

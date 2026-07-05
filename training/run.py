@@ -1,8 +1,9 @@
+import multiprocessing as mp
 import os
 import time
-import torch
+
 import numpy as np
-import multiprocessing as mp
+import torch
 
 from training.config import build_env
 from training.models.evaluator import Evaluator
@@ -44,7 +45,7 @@ def train_and_evaluate(args):
         logging_tuple = agent.update_net(buffer)
         torch.set_grad_enabled(False)
 
-        (if_reach_goal, if_save) = evaluator.evaluate_save_and_plot(
+        if_reach_goal, if_save = evaluator.evaluate_save_and_plot(
             agent.act, steps, r_exp, logging_tuple
         )
         dont_break = not if_allow_break

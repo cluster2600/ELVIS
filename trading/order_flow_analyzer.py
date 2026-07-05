@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 class OrderFlowAnalyzer:
     """
     Analyzes order book data to identify order flow patterns.
@@ -23,7 +24,7 @@ class OrderFlowAnalyzer:
         if bids.empty or asks.empty:
             return 0.0
 
-        bid_volume = bids.head(self.order_book_depth)['qty'].sum()
-        ask_volume = asks.head(self.order_book_depth)['qty'].sum()
+        bid_volume = bids.head(self.order_book_depth)["qty"].sum()
+        ask_volume = asks.head(self.order_book_depth)["qty"].sum()
 
         return bid_volume - ask_volume
