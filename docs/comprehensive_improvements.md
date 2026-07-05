@@ -134,6 +134,45 @@ MLOps Components:
 - **Evidently AI**: Model monitoring and drift detection
 - **DVC**: Data version control
 
+### Experiment Tracking: `utils/experiment_tracker.py`
+
+A minimal, dependency-optional `ExperimentTracker` implements the "MLflow /
+Weights & Biases integration" recommendation above.
+
+**How it works**
+- If [MLflow](https://mlflow.org) is importable, params, metrics, and artifacts
+  are forwarded to MLflow (honouring `MLFLOW_TRACKING_URI` and any active
+  experiment).
+- If MLflow is **not** installed (e.g. a minimal CI environment), the tracker
+  degrades gracefully to a **no-op local fallback** that appends one JSON object
+  per run to `models/experiments.jsonl`. Experiment tracking therefore always
+  works, with zero required dependencies.
+- The backend is chosen automatically at construction; pass `use_mlflow=False`
+  to force the JSON fallback. If an MLflow call fails mid-run, the tracker logs
+  a warning and falls back to writing the JSON record so a run is never lost.
+
+**How to use**
+```python
+from utils.experiment_tracker import ExperimentTracker
+
+tracker = ExperimentTracker()          # or ExperimentTracker(use_mlflow=False)
+tracker.start_run("rf_baseline")
+tracker.log_params({"n_estimators": 200, "max_depth": 8})
+tracker.log_metrics({"accuracy": 0.71, "f1": 0.68})
+tracker.log_artifact("models/model_rf.joblib")
+tracker.end_run()
+
+# Context-manager form ends the run automatically:
+with ExperimentTracker(use_mlflow=False) as tracker:
+    tracker.log_params({"lr": 0.01})
+    tracker.log_metrics({"val_loss": 0.42})
+```
+
+Each fallback run is one JSON line with `run_name`, `start_time`/`end_time`,
+`duration_seconds`, `params`, `metrics`, `artifacts`, and `backend`. The module
+is standalone and importable without heavy dependencies; it is intentionally
+**not** wired into the training pipeline yet.
+
 ## 4. Data Engineering
 
 ### Current Limitations

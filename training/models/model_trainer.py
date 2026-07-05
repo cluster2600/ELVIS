@@ -4,14 +4,33 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import joblib
 import numpy as np
-import optuna
 import pandas as pd
-import tensorflow as tf
 import torch
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from torch.utils.data import DataLoader, TensorDataset
+
+# Optional dependencies. optuna has no Python 3.14 wheel and tensorflow/keras
+# are not installed in CI, so guard them to keep this module importable. They
+# are not required for the PyTorch/ensemble training paths used here.
+try:
+    import optuna
+
+    OPTUNA_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in deps-absent CI
+    optuna = None
+    OPTUNA_AVAILABLE = False
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+    TENSORFLOW_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in deps-absent CI
+    tf = None
+    EarlyStopping = None
+    ModelCheckpoint = None
+    TENSORFLOW_AVAILABLE = False
 
 from .ensemble_models import NeuralEnsemble, StackingEnsemble, WeightedEnsemble
 from .explainable_ai import LIMEExplainer, SHAPExplainer
