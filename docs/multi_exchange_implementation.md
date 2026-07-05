@@ -116,6 +116,70 @@ New REST API endpoints for multi-exchange functionality:
 - `GET /api/portfolio/consolidated` - Consolidated portfolio view
 - `GET /api/exchanges/health` - Exchange health status
 
+### API endpoints — how it works & how to use
+
+**How it works.** These endpoints live in `trading/api/app.py` and are wired to
+the real `ExchangeManager`, resolved from the dependency-injection container at
+request time:
+
+```python
+from core.di import container
+em = container.get_optional("exchange_manager")  # None if not registered
+```
+
+Each endpoint delegates to a real manager method (see
+`trading/execution/exchange_manager.py`) and returns its live output — no random
+or hardcoded data:
+
+| Endpoint | Manager method | Notes |
+| --- | --- | --- |
+| `GET /api/exchanges` | `get_exchange_info()` | `healthy_exchanges` counts entries whose `health.status == "healthy"`. API keys/secrets/passphrases are stripped by the manager. |
+| `GET /api/exchanges/prices/<symbol>` | `get_prices_all_exchanges(symbol)` | Adds computed `min_price`, `max_price`, `avg_price`, `spread`, `spread_percentage`. |
+| `GET /api/arbitrage/opportunities?symbol=BTCUSDT` | `detect_arbitrage_opportunities(symbol)` | `symbol` query param defaults to `BTCUSDT`. |
+| `GET /api/portfolio/consolidated` | `get_consolidated_balance()` | `exchange_count` = distinct exchanges reporting a balance. |
+| `GET /api/exchanges/health` | `check_all_exchanges_health()` | `last_check` datetimes are serialised to ISO strings; `summary` counts healthy exchanges. |
+
+**The `available` flag / graceful degradation.** Every response carries a
+boolean `available` field. When the exchange manager (or the data it needs) is
+present, `available` is `true` and the payload holds real data. When the
+manager is **not** registered in the container, the endpoint returns HTTP `200`
+with an empty, correctly-typed structure and `available: false` plus a
+human-readable `detail` — never fabricated numbers. Example:
+
+```json
+{
+  "exchanges": {},
+  "total_exchanges": 0,
+  "healthy_exchanges": 0,
+  "available": false,
+  "detail": "Exchange manager is not available",
+  "timestamp": "2026-07-05T12:00:00"
+}
+```
+
+**How to use.** All five endpoints require a JWT (obtain one from
+`POST /api/auth/login`) sent as `Authorization: Bearer <token>`:
+
+```bash
+# 1. Log in to get a token (API_USERNAME / API_PASSWORD must be configured)
+TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"'"$API_USERNAME"'","password":"'"$API_PASSWORD"'"}' \
+  | python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+
+# 2. Call the multi-exchange endpoints
+curl -s http://localhost:5000/api/exchanges -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:5000/api/exchanges/prices/BTCUSDT -H "Authorization: Bearer $TOKEN"
+curl -s "http://localhost:5000/api/arbitrage/opportunities?symbol=BTCUSDT" -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:5000/api/portfolio/consolidated -H "Authorization: Bearer $TOKEN"
+curl -s http://localhost:5000/api/exchanges/health -H "Authorization: Bearer $TOKEN"
+```
+
+Clients should check `available` before trusting the payload: `false` means the
+bot is running without a configured exchange manager, not that the market is
+empty. Tests for these endpoints live in `tests/test_multi_exchange_api.py`
+(they mock the container's `exchange_manager`, so no live exchange is needed).
+
 ## ⚙️ Configuration
 
 ### Environment Variables

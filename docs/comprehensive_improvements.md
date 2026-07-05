@@ -408,6 +408,58 @@ Trading Enhancements:
     - Order book analysis
 ```
 
+### Kelly Criterion Sizing (implemented)
+
+The "Kelly criterion sizing" item above is now implemented as an opt-in
+sizing helper in `trading/risk_management.py`.
+
+**How it works**
+
+The core is the pure function `kelly_fraction(win_rate, payoff_ratio,
+cap=0.2)`, which applies the standard Kelly formula:
+
+```
+f* = W - (1 - W) / R
+```
+
+where `W` is the win probability (in `[0, 1]`) and `R` is the payoff ratio
+(average win / average loss). The result is clamped to `[0, cap]`:
+
+- Negative edges floor to `0` (skip the trade rather than size negative).
+- The `cap` (default `0.2`) enforces *fractional Kelly* so a single trade
+  never risks more than the configured share of capital.
+
+Examples: `W=0.6, R=2 -> 0.4`; `W=0.4, R=1 -> 0` (floored); `W=0.9, R=5`
+raw `0.88` but returns `0.2` at the default cap.
+
+**How to use**
+
+`RiskManager.calculate_kelly_position_size(...)` wires the fraction into a
+BTC quantity. It is *not* the default path — `calculate_dynamic_position_size`
+remains the built-in sizer; call the Kelly method explicitly when you want
+edge-based sizing:
+
+```python
+from trading.risk_management import RiskManager, kelly_fraction
+
+# Standalone fraction
+f = kelly_fraction(win_rate=0.6, payoff_ratio=2.0)  # -> 0.2 (default cap)
+
+# Full position size (BTC), leverage- and price-aware.
+# win_rate defaults to the manager's tracked self.win_rate when omitted.
+size = risk_manager.calculate_kelly_position_size(
+    available_capital=1000.0,
+    current_price=65000.0,
+    payoff_ratio=2.0,
+    win_rate=0.6,   # optional
+    leverage=50.0,  # subject to enforce_minimum_leverage
+    cap=0.2,
+)
+```
+
+Invalid inputs (`win_rate` outside `[0, 1]`, non-positive `payoff_ratio`,
+negative `cap`, or non-positive `current_price`) raise `ValueError`.
+
 ## 10. Backtesting Framework
 
 ### Current Gap

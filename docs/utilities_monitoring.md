@@ -229,6 +229,45 @@ classDiagram
 - `GET /statistics` - Get trade statistics
 - `GET /export/csv` - Export trades to CSV
 - `GET /risk` - Get risk metrics
+- `GET /metrics` - Prometheus scrape endpoint (see below)
+
+### Prometheus `/metrics` endpoint — how it works & how to use
+
+**What it is.** `GET /metrics` on the trade-history Flask API
+(`trading/utils/trade_history_api.py`, served on `:5050`) is the target
+Prometheus scrapes. It is the endpoint referenced by `prometheus.yml`
+(`metrics_path: '/metrics'`, target `host.docker.internal:5050`).
+
+**How it works.**
+- The route calls `prometheus_client.generate_latest()` and returns it with the
+  `CONTENT_TYPE_LATEST` header (`text/plain; version=0.0.4; charset=utf-8`), the
+  standard Prometheus text exposition format.
+- On every scrape it refreshes a few real gauges straight from
+  `utils.paper_trade_db` so the values reflect live paper-trading state:
+  - `elvis_portfolio_value` — paper equity: base equity (2000 = 1000 USDT +
+    1000 BNB) plus the summed realized P&L of recent trades (`get_all_trades`).
+  - `elvis_open_positions_count` — number of open positions (`get_open_positions`).
+  - `elvis_total_trades` — total number of trades (`get_trade_count`).
+- The default per-request Flask metrics collected by
+  `prometheus_flask_exporter` are included in the same output. The exporter's
+  built-in endpoint is disabled (`PrometheusMetrics(app, path=None)`) so this
+  explicit route owns the `/metrics` path without a collision.
+- **Auth exemption:** `/metrics` (like `/health`) is exempt from the
+  `X-API-Key` check in `require_api_key`, because the Prometheus server does not
+  send that header. All other data/action routes still require the key. If the
+  database is unreachable the endpoint still returns `200` with base values
+  rather than failing the scrape.
+
+**How to use.**
+```bash
+# Scrape it directly (no API key needed):
+curl -s http://localhost:5050/metrics | grep elvis_
+
+# Prometheus is already configured to scrape it (see prometheus.yml):
+#   metrics_path: '/metrics'
+#   scrape_interval: 10s
+#   targets: ['host.docker.internal:5050']
+```
 
 ---
 

@@ -69,6 +69,8 @@ plots_and_metrics/
 
 # Backups/temp
 *.backup
+.vault-backup.enc
+*.vault-backup.enc
 your_bot_script.py.bak
 tmp/
 temp/

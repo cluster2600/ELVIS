@@ -104,6 +104,13 @@ def init_db():
                 open_positions INTEGER
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.trading_session_resets (
+                id SERIAL PRIMARY KEY,
+                reset_timestamp TIMESTAMP DEFAULT NOW(),
+                reason TEXT
+            )
+        """)
         conn.commit()
         print("[INFO] Database tables initialized successfully")
     except Exception as e:
@@ -628,9 +635,18 @@ def init_db_with_balances():
 
         # Start with $1000 in BNB as well for paper trading
         c.execute("""
-            INSERT INTO np.account_balances (asset, balance) 
-            VALUES ('BNB', 1000.0) 
+            INSERT INTO np.account_balances (asset, balance)
+            VALUES ('BNB', 1000.0)
             ON CONFLICT (asset) DO NOTHING
+        """)
+
+        # Track trading-session resets so P&L can start fresh per session
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.trading_session_resets (
+                id SERIAL PRIMARY KEY,
+                reset_timestamp TIMESTAMP DEFAULT NOW(),
+                reason TEXT
+            )
         """)
 
         conn.commit()
