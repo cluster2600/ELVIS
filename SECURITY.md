@@ -23,6 +23,20 @@ Operational implications:
   - explicitly exempt `/metrics` in API auth middleware.
 - For remote/API access from outside localhost (for example in containerized deployments), set `TRADE_HISTORY_API_HOST=0.0.0.0` intentionally.
 
+## Security Hardening Follow-up (2026-07-05)
+
+- Removed residual hardcoded Vault token from the health-check path.
+  - `utils/api_connection_tester.py` no longer injects
+    `os.environ["VAULT_TOKEN"] = "trading-bot-token"` nor falls back to that
+    literal when constructing the `hvac` client.
+  - `VAULT_TOKEN` must now come from the environment. When it is unset, the
+    Vault connectivity check logs a warning and is skipped gracefully
+    (reported as `DISCONNECTED` with `error_message="VAULT_TOKEN not set"`),
+    keeping the "Zero Hardcoded Secrets" guarantee intact.
+  - Regression coverage: `tests/test_api_connection_tester_vault_token.py`
+    asserts the `trading-bot-token` literal is absent and that a missing
+    `VAULT_TOKEN` is not silently defaulted.
+
 ## 🔐 HashiCorp Vault Integration
 
 ### Security Architecture

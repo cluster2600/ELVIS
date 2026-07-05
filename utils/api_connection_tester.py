@@ -285,13 +285,26 @@ class APIConnectionTester:
         """Test HashiCorp Vault connection"""
         start_time = time.time()
         try:
-            # Ensure Vault environment is set
+            # Ensure Vault address is set (safe, non-secret default)
             import os
 
             if not os.getenv("VAULT_ADDR"):
                 os.environ["VAULT_ADDR"] = "http://127.0.0.1:8200"
-            if not os.getenv("VAULT_TOKEN"):
-                os.environ["VAULT_TOKEN"] = "trading-bot-token"
+
+            # VAULT_TOKEN must come from the environment; never hardcode it.
+            # Skip the Vault test gracefully when it is not provided.
+            vault_token = os.getenv("VAULT_TOKEN")
+            if not vault_token:
+                self.logger.warning(
+                    "VAULT_TOKEN not set; skipping Vault connection test"
+                )
+                return APIStatus(
+                    name="vault",
+                    status=ConnectionStatus.DISCONNECTED,
+                    response_time=time.time() - start_time,
+                    last_checked=datetime.now(),
+                    error_message="VAULT_TOKEN not set",
+                )
 
             # Test Vault directly with hvac client
             try:
@@ -299,7 +312,7 @@ class APIConnectionTester:
 
                 client = hvac.Client(
                     url=os.getenv("VAULT_ADDR", "http://127.0.0.1:8200"),
-                    token=os.getenv("VAULT_TOKEN", "trading-bot-token"),
+                    token=vault_token,
                 )
 
                 # Test authentication and health

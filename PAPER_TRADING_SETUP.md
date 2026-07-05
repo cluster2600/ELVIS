@@ -120,6 +120,39 @@ INSERT INTO np.account_balances (asset, balance) VALUES
 ('BNB', 1000.0);
 ```
 
+### Session resets table
+
+```sql
+CREATE TABLE np.trading_session_resets (
+    id SERIAL PRIMARY KEY,
+    reset_timestamp TIMESTAMP DEFAULT NOW(),
+    reason TEXT
+);
+```
+
+**How it works.** When the bot is stopped, `reset_trading_session()`
+(in `utils/paper_trade_db.py`) inserts a row into
+`np.trading_session_resets` with the current timestamp. The dashboards
+and trade-history APIs (`native_console_dashboard.py`,
+`utils/console_dashboard.py`, `trading/utils/trade_history_api.py`,
+`trading/execution/binance_executor.py`) then read the most recent
+`reset_timestamp` and only count trades *after* it, so realized P&L
+starts fresh for the next session while all historical trades stay in
+`np.trades`.
+
+**How to use.** The table is created automatically by `init_db()` and
+`init_db_with_balances()` (`CREATE TABLE IF NOT EXISTS`), so it exists on
+fresh databases before the first reset — no manual migration is needed.
+On a database created before this table existed, simply run either init
+function (or `python reset_paper_trading.py`, which calls
+`init_db_with_balances()`) once to create it. To start a fresh P&L
+session programmatically:
+
+```python
+from utils.paper_trade_db import reset_trading_session
+reset_trading_session()  # inserts a new reset marker; historical trades kept
+```
+
 ## Monitoring
 
 The paper trading system provides real-time monitoring of:

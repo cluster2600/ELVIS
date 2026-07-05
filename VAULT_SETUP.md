@@ -249,6 +249,46 @@ python scripts/vault_admin.py --add
 # Value: your_api_secret
 ```
 
+## Backups
+
+`scripts/vault_admin.py --backup` writes an **encrypted** dump of the known
+Vault secret paths so credentials can be restored after a Vault rebuild or
+disaster. Plaintext secrets are never written to disk.
+
+### How it works
+
+1. **Collect** — reads each known KV path through the secrets manager's Vault
+   client: `secrets/binance`, `secrets/binance_testnet`, plus every distinct
+   path referenced by `_VAULT_KEY_MAP` in `utils/secrets_manager.py`. The set
+   stays in sync with the secrets ELVIS actually reads.
+2. **Encrypt** — the collected secrets are serialised to JSON and encrypted
+   with [Fernet](https://cryptography.io/en/latest/fernet/) (AES-128-CBC +
+   HMAC). Only the ciphertext is ever written; the JSON never touches disk.
+3. **Write** — the ciphertext is saved to the `--out` path (default
+   `.vault-backup.enc`, which is gitignored) with `0600` permissions.
+
+The Fernet key comes from the `BACKUP_KEY` environment variable. If it is
+unset, a fresh key is generated and **printed once** — save it, because it is
+the only way to decrypt the backup and it will not be shown again.
+
+### How to use
+
+```bash
+# Reuse a persistent key (recommended for scripted/scheduled backups)
+export BACKUP_KEY='<your-fernet-key>'
+python scripts/vault_admin.py --backup                 # -> .vault-backup.enc
+python scripts/vault_admin.py --backup --out /secure/vault-2026.enc
+
+# First run without BACKUP_KEY: a key is generated and printed once.
+python scripts/vault_admin.py --backup
+# 🔑 ...  BACKUP_KEY=<copy this and store it in a password manager>
+```
+
+Restore is a decrypt: load the file, `Fernet(BACKUP_KEY).decrypt(...)`, then
+`json.loads(...)` to recover a `{path: {field: value}}` mapping and re-`--add`
+the secrets. Store `BACKUP_KEY` **separately** from the `.enc` file — the
+backup is only as safe as the key.
+
 ## Monitoring and Logging
 
 The Vault integration logs all operations:

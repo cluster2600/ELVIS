@@ -11,6 +11,39 @@ from core.metrics.performance_monitor import PerformanceMonitor
 from trading.execution.base_executor import BaseExecutor
 
 
+def kelly_fraction(
+    win_rate: float,
+    payoff_ratio: float,
+    cap: float = 0.2,
+) -> float:
+    """
+    Compute the Kelly-criterion optimal fraction of capital to risk.
+
+    Uses the standard formula ``f* = W - (1 - W) / R`` where ``W`` is the
+    probability of a winning trade and ``R`` is the payoff ratio (average
+    win / average loss). The result is clamped to ``[0, cap]`` so an edge is
+    never sized negative (skip the trade instead) and never exceeds a safety
+    cap (fractional Kelly).
+
+    Args:
+        win_rate: Probability of a winning trade, in [0, 1].
+        payoff_ratio: Average win divided by average loss (must be > 0).
+        cap: Upper bound on the returned fraction (default 0.2 = 20%).
+
+    Returns:
+        The capped Kelly fraction in [0, cap].
+    """
+    if not 0.0 <= win_rate <= 1.0:
+        raise ValueError("win_rate must be in [0, 1]")
+    if payoff_ratio <= 0.0:
+        raise ValueError("payoff_ratio must be > 0")
+    if cap < 0.0:
+        raise ValueError("cap must be >= 0")
+
+    raw = win_rate - (1.0 - win_rate) / payoff_ratio
+    return max(0.0, min(raw, cap))
+
+
 class RiskManager:
     """
     The RiskManager is responsible for managing risk across all open positions.
@@ -245,6 +278,52 @@ class RiskManager:
             f"💰 Dynamic sizing: {final_size:.6f} BTC (Lev: {effective_leverage}x, Conf: {signal_confidence:.1%}, Risk: {base_risk:.1%})"
         )
         return final_size
+
+    def calculate_kelly_position_size(
+        self,
+        available_capital: float,
+        current_price: float,
+        payoff_ratio: float,
+        win_rate: float = None,
+        leverage: float = 50.0,
+        cap: float = 0.2,
+    ) -> float:
+        """
+        Size a position using the Kelly criterion.
+
+        This is an opt-in alternative to ``calculate_dynamic_position_size``.
+        The fraction of capital to risk is derived from ``kelly_fraction`` and
+        the resulting notional is scaled by ``leverage`` and converted to a
+        BTC quantity at ``current_price``.
+
+        Args:
+            available_capital: Capital available to allocate.
+            current_price: Current asset price (must be > 0).
+            payoff_ratio: Average win / average loss (must be > 0).
+            win_rate: Win probability; defaults to the manager's tracked
+                ``self.win_rate`` when not provided.
+            leverage: Leverage applied to the risked notional.
+            cap: Upper bound on the Kelly fraction (fractional Kelly).
+
+        Returns:
+            Position size in BTC.
+        """
+        if current_price <= 0.0:
+            raise ValueError("current_price must be > 0")
+
+        w = self.win_rate if win_rate is None else win_rate
+        fraction = kelly_fraction(w, payoff_ratio, cap=cap)
+
+        effective_leverage = self.enforce_minimum_leverage(leverage)
+        position_value = available_capital * fraction * effective_leverage
+        position_size = position_value / current_price
+
+        self.logger.info(
+            f"💰 Kelly sizing: {position_size:.6f} BTC "
+            f"(f*: {fraction:.3f}, W: {w:.1%}, R: {payoff_ratio:.2f}, "
+            f"Lev: {effective_leverage}x)"
+        )
+        return position_size
 
     def manage_positions(self, data: Dict[str, pd.DataFrame] = None):
         """

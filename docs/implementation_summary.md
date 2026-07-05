@@ -158,10 +158,34 @@ docker-compose logs -f elvis-bot
 ```
 
 ### Setting Up Secrets
+
+`utils/secrets_manager.py` exposes a small command-line interface for managing
+secrets. It is driven by argparse and requires exactly one mode:
+
 ```bash
-# Interactive setup
-python utils/secrets_manager.py
+# Store a secret (value is prompted with a hidden getpass input)
+python utils/secrets_manager.py --set BINANCE_API_KEY --category api_keys
+
+# Check whether a secret exists (reports PRESENT/MISSING only, never the value)
+python utils/secrets_manager.py --get BINANCE_API_KEY --category api_keys
+
+# List secret names grouped by category (never prints values)
+python utils/secrets_manager.py --list
 ```
+
+**How it works**
+
+- The CLI reuses the existing `EnhancedSecretsManager` (Vault-first, with the
+  local encrypted store as a fallback), so `--set` writes to Vault and/or the
+  encrypted file exactly like the rest of the bot.
+- `--set` reads the value via `getpass.getpass`, so the secret never appears in
+  shell history or process arguments.
+- `--get` prints only presence (`PRESENT` / `MISSING`) and exits non-zero when
+  the secret is missing; it never echoes the stored value.
+- `--category` defaults to `default`; use it to match how the value is read
+  elsewhere (e.g. `api_keys`, `database`).
+- Running the file directly works even without Vault installed: the optional
+  Vault import degrades gracefully and the manager falls back to local storage.
 
 ### Accessing Services
 - **Trading Bot API**: http://localhost:5050
