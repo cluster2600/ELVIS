@@ -9,13 +9,41 @@ from typing import Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import seaborn as sns
-import shap
 import torch
-from lime import lime_tabular
-from plotly.subplots import make_subplots
 from torch import nn
+
+logger = logging.getLogger(__name__)
+
+# Optional dependencies. These have no Python 3.14 wheels (or are heavy extras)
+# and are absent in CI / minimal environments. Guard them so this module always
+# imports; the explainer classes and generate_explanations() degrade gracefully
+# when the corresponding library is missing.
+try:
+    import shap
+
+    SHAP_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in deps-absent CI
+    shap = None
+    SHAP_AVAILABLE = False
+
+try:
+    from lime import lime_tabular
+
+    LIME_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in deps-absent CI
+    lime_tabular = None
+    LIME_AVAILABLE = False
+
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    PLOTLY_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised in deps-absent CI
+    go = None
+    make_subplots = None
+    PLOTLY_AVAILABLE = False
 
 
 class ModelExplainer:
@@ -42,6 +70,12 @@ class SHAPExplainer(ModelExplainer):
         self, model: nn.Module, feature_names: List[str], background_data: np.ndarray
     ):
         super().__init__(model, feature_names)
+        if not SHAP_AVAILABLE:
+            raise ImportError(
+                "SHAPExplainer requires the 'shap' package, which is not "
+                "installed. Install it with `pip install shap` to enable "
+                "SHAP-based explanations."
+            )
         self.background_data = background_data
 
         # Get model device
@@ -114,6 +148,12 @@ class LIMEExplainer(ModelExplainer):
         mode: str = "regression",
     ):
         super().__init__(model, feature_names)
+        if not LIME_AVAILABLE:
+            raise ImportError(
+                "LIMEExplainer requires the 'lime' package, which is not "
+                "installed. Install it with `pip install lime` to enable "
+                "LIME-based explanations."
+            )
         self.training_data = training_data
         self.mode = mode
         self.explainer = lime_tabular.LimeTabularExplainer(
@@ -162,6 +202,11 @@ class LIMEExplainer(ModelExplainer):
 
     def visualize(self, explanation: Dict, save_path: Optional[str] = None):
         """Visualize LIME explanations."""
+        if not PLOTLY_AVAILABLE:
+            raise ImportError(
+                "Visualizing LIME explanations requires the 'plotly' package, "
+                "which is not installed. Install it with `pip install plotly`."
+            )
         try:
             # Create interactive plot using plotly
             fig = make_subplots(
@@ -301,3 +346,47 @@ class DecisionBoundaryVisualizer:
         except Exception as e:
             logging.error(f"Error visualizing decision boundary: {e}")
             raise
+
+
+def generate_explanations(
+    model,
+    data: np.ndarray,
+    feature_names: List[str],
+) -> Dict:
+    """Generate model explanations, degrading to a no-op when deps are absent.
+
+    Chooses SHAP for tensor/PyTorch-style models and LIME for sklearn-style
+    models (those exposing ``predict``/``predict_proba``). If neither the
+    required backend (``shap``/``lime``) is installed, this logs a warning and
+    returns an empty dict instead of raising, so training pipelines keep
+    running in minimal / CI environments where those extras are unavailable.
+
+    Args:
+        model: The model to explain.
+        data (np.ndarray): Feature matrix to explain.
+        feature_names (list): Feature names matching ``data`` columns.
+
+    Returns:
+        dict: Explanation results, or ``{}`` when explanations are skipped.
+    """
+    is_sklearn_like = hasattr(model, "predict") or hasattr(model, "predict_proba")
+
+    if is_sklearn_like and not LIME_AVAILABLE:
+        logger.warning(
+            "Skipping model explanations: the 'lime' package is not installed. "
+            "Install it with `pip install lime` to enable LIME explanations."
+        )
+        return {}
+    if not is_sklearn_like and not SHAP_AVAILABLE:
+        logger.warning(
+            "Skipping model explanations: the 'shap' package is not installed. "
+            "Install it with `pip install shap` to enable SHAP explanations."
+        )
+        return {}
+
+    data = np.asarray(data)
+    if is_sklearn_like:
+        explainer = LIMEExplainer(model, feature_names, data)
+    else:
+        explainer = SHAPExplainer(model, feature_names, data[:100])
+    return explainer.explain(data)

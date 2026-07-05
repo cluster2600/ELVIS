@@ -14,6 +14,20 @@ from sklearn.preprocessing import StandardScaler
 
 from trading.strategies.base_strategy import BaseStrategy
 
+# Optional social-data dependencies. These libraries have no Python 3.14 wheels
+# and are not installed in CI, so their imports are guarded: the collectors below
+# fall back to neutral constants (with a debug log) whenever a library or its API
+# credentials are absent. See docs/research_strategy_guide.md.
+try:  # pragma: no cover - exercised only when tweepy is installed
+    import tweepy  # type: ignore
+except ImportError:  # pragma: no cover
+    tweepy = None
+
+try:  # pragma: no cover - exercised only when pytrends is installed
+    from pytrends.request import TrendReq  # type: ignore
+except ImportError:  # pragma: no cover
+    TrendReq = None
+
 
 class ResearchBasedStrategy(BaseStrategy):
     """
@@ -476,9 +490,13 @@ class ResearchBasedStrategy(BaseStrategy):
             self.feature_scaler.fit(X)
             X_scaled = self.feature_scaler.transform(X)
 
-            # 10-fold cross-validation as specified in research
+            # 10-fold cross-validation as specified in research.
+            # Financial data is ordered in time, so a time-series-aware split is
+            # used (TimeSeriesSplit, no shuffle) instead of the default
+            # (Stratified)KFold that cross_val_score picks for an int cv value.
+            cv_splitter = TimeSeriesSplit(n_splits=self.cv_folds)
             cv_scores = cross_val_score(
-                self.rf_model, X_scaled, y, cv=self.cv_folds, scoring="f1", n_jobs=-1
+                self.rf_model, X_scaled, y, cv=cv_splitter, scoring="f1", n_jobs=-1
             )
 
             # Train the final model on all data
@@ -511,7 +529,9 @@ class ResearchBasedStrategy(BaseStrategy):
         signals = {}
         for symbol in self.symbols:
             if symbol not in data or data[symbol].empty:
-                signals[symbol] = {"signal": "HOLD", "confidence": 0.0}
+                # Binary strategy (no HOLD): with no market data there is no
+                # signal to act on, so default to the conservative SELL side.
+                signals[symbol] = {"signal": "SELL", "confidence": 0.0}
                 continue
 
             df = data[symbol]
@@ -545,7 +565,8 @@ class ResearchBasedStrategy(BaseStrategy):
                     self.logger.warning(
                         "Model not trained, using default signal logic."
                     )
-                    # Fallback to a simple RSI-based logic if model is not ready
+                    # Fallback to a simple RSI-based logic if model is not ready.
+                    # Binary strategy: always emit BUY or SELL, never HOLD.
                     indicators = self.calculate_financial_indicators(df)
                     rsi = indicators.get("RSI", 50)
                     if rsi < 35:
@@ -553,21 +574,28 @@ class ResearchBasedStrategy(BaseStrategy):
                     elif rsi > 65:
                         signal, confidence = "SELL", 0.55
                     else:
-                        signal, confidence = "HOLD", 0.5
+                        # Neutral RSI: pick a side instead of holding.
+                        signal, confidence = ("SELL", 0.5) if rsi < 50 else ("BUY", 0.5)
                 else:
                     try:
-                        # Ensure features have correct shape
-                        if features.shape[1] != 9:
+                        # Ensure features have the shape used at training time.
+                        # This respects the social flag: 11 features when social
+                        # data is enabled (9 financial + 2 social), else 9.
+                        expected_features = 11 if self.social_data_enabled else 9
+                        if features.shape[1] != expected_features:
                             self.logger.warning(
-                                f"Feature shape mismatch: got {features.shape[1]}, expected 9. Fixing..."
+                                f"Feature shape mismatch: got {features.shape[1]}, "
+                                f"expected {expected_features}. Fixing..."
                             )
-                            if features.shape[1] < 9:
+                            if features.shape[1] < expected_features:
                                 # Pad with zeros
-                                padding = np.zeros((1, 9 - features.shape[1]))
+                                padding = np.zeros(
+                                    (1, expected_features - features.shape[1])
+                                )
                                 features = np.concatenate([features, padding], axis=1)
                             else:
-                                # Truncate to 9
-                                features = features[:, :9]
+                                # Truncate to expected size
+                                features = features[:, :expected_features]
 
                         probabilities = self.rf_model.predict_proba(features)[0]
                         sell_prob, buy_prob = probabilities[0], probabilities[1]
@@ -581,7 +609,8 @@ class ResearchBasedStrategy(BaseStrategy):
                     except Exception as pred_error:
                         self.logger.error(f"Model prediction failed: {pred_error}")
                         self.logger.info("Falling back to RSI-based logic")
-                        # Fallback to RSI-based logic if model prediction fails
+                        # Fallback to RSI-based logic if model prediction fails.
+                        # Binary strategy: always emit BUY or SELL, never HOLD.
                         indicators = self.calculate_financial_indicators(df)
                         rsi = indicators.get("RSI", 50)
                         if rsi < 35:
@@ -589,7 +618,10 @@ class ResearchBasedStrategy(BaseStrategy):
                         elif rsi > 65:
                             signal, confidence = "SELL", 0.55
                         else:
-                            signal, confidence = "HOLD", 0.5
+                            # Neutral RSI: pick a side instead of holding.
+                            signal, confidence = (
+                                ("SELL", 0.5) if rsi < 50 else ("BUY", 0.5)
+                            )
 
                 self.logger.info(
                     f"🎯 Research signal for {symbol}: {signal} with {confidence:.3f} confidence"
@@ -598,7 +630,9 @@ class ResearchBasedStrategy(BaseStrategy):
 
             except Exception as e:
                 self.logger.error(f"Error generating research signal for {symbol}: {e}")
-                signals[symbol] = {"signal": "HOLD", "confidence": 0.0}
+                # Binary strategy (no HOLD): default to the conservative SELL
+                # side when signal generation fails entirely.
+                signals[symbol] = {"signal": "SELL", "confidence": 0.0}
 
         return signals
 
@@ -823,17 +857,60 @@ class TwitterSentimentCollector:
         Get lagged 'Price' sentiment from Twitter data.
         Research specifies 5-minute lag.
 
+        Real data requires the optional ``tweepy`` dependency together with a
+        Twitter/X API bearer token (``TWITTER_BEARER_TOKEN``). When either is
+        absent, a neutral constant is returned and the reason is logged at
+        debug level.
+
         Returns:
             float: Sentiment score (normalized to [-1, 1])
         """
+        neutral = 0.0
         try:
-            # Simulate Twitter sentiment (in real implementation, use Twitter API)
-            # Return neutral sentiment for now
-            return 0.0
+            bearer_token = os.environ.get("TWITTER_BEARER_TOKEN")
+            if tweepy is None:
+                self.logger.debug(
+                    "tweepy not installed; returning neutral Twitter sentiment "
+                    f"({neutral})"
+                )
+                return neutral
+            if not bearer_token:
+                self.logger.debug(
+                    "TWITTER_BEARER_TOKEN not set; returning neutral Twitter "
+                    f"sentiment ({neutral})"
+                )
+                return neutral
+
+            # Real path: query recent 'Bitcoin price' tweets and average a
+            # simple sentiment score normalized to [-1, 1].
+            client = tweepy.Client(bearer_token=bearer_token)
+            response = client.search_recent_tweets(
+                query="Bitcoin price -is:retweet lang:en", max_results=100
+            )
+            tweets = getattr(response, "data", None) or []
+            if not tweets:
+                self.logger.debug(
+                    f"No tweets returned; returning neutral sentiment ({neutral})"
+                )
+                return neutral
+
+            scores = [self._score_text(t.text) for t in tweets]
+            return float(np.clip(sum(scores) / len(scores), -1.0, 1.0))
 
         except Exception as e:
             self.logger.warning(f"Error fetching Twitter sentiment: {e}")
-            return 0.0
+            return neutral
+
+    @staticmethod
+    def _score_text(text: str) -> float:
+        """Lightweight lexicon sentiment score in [-1, 1] for a single tweet."""
+        positive = ("bull", "moon", "up", "gain", "buy", "surge", "rally")
+        negative = ("bear", "down", "loss", "sell", "crash", "dump", "drop")
+        lowered = text.lower()
+        score = sum(w in lowered for w in positive) - sum(
+            w in lowered for w in negative
+        )
+        return float(np.clip(score, -1.0, 1.0))
 
 
 class GoogleTrendsCollector:
@@ -848,14 +925,38 @@ class GoogleTrendsCollector:
         Get Google Trends data for 'Bitcoin' interpolated to 5-minute frequency.
         Research uses linear interpolation from daily to 5-minute data.
 
+        Real data requires the optional ``pytrends`` dependency. Google Trends
+        needs no API key, but ``pytrends`` may need ``GOOGLE_TRENDS_HL`` /
+        ``GOOGLE_TRENDS_TZ`` overrides for locale/timezone. When ``pytrends`` is
+        absent, a neutral constant is returned and the reason is logged at debug
+        level.
+
         Returns:
             float: Trends score (0-100 scale)
         """
+        neutral = 50.0
         try:
-            # Simulate Google Trends data (in real implementation, use Google Trends API)
-            # Return neutral trend score for now
-            return 50.0
+            if TrendReq is None:
+                self.logger.debug(
+                    "pytrends not installed; returning neutral Google Trends "
+                    f"score ({neutral})"
+                )
+                return neutral
+
+            # Real path: pull the latest 'Bitcoin' interest-over-time value.
+            hl = os.environ.get("GOOGLE_TRENDS_HL", "en-US")
+            tz = int(os.environ.get("GOOGLE_TRENDS_TZ", "0"))
+            pytrends = TrendReq(hl=hl, tz=tz)
+            pytrends.build_payload(["Bitcoin"], timeframe="now 1-d")
+            interest = pytrends.interest_over_time()
+            if interest is None or interest.empty:
+                self.logger.debug(
+                    f"Empty Google Trends response; returning neutral ({neutral})"
+                )
+                return neutral
+
+            return float(interest["Bitcoin"].iloc[-1])
 
         except Exception as e:
             self.logger.warning(f"Error fetching Google Trends: {e}")
-            return 50.0
+            return neutral

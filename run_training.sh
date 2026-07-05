@@ -136,13 +136,19 @@ check_dependencies() {
         return 1
     fi
     
-    # Check required Python packages
-    python3 -c "import pandas, numpy, torch, tensorflow, psycopg2" 2>/dev/null || {
+    # Check required Python packages (tensorflow is optional, checked below)
+    python3 -c "import pandas, numpy, torch, psycopg2" 2>/dev/null || {
         echo -e "${RED}❌ Missing Python dependencies${NC}"
         echo -e "${YELLOW}💡 Install with: pip install -r requirements.txt${NC}"
         return 1
     }
-    
+
+    # TensorFlow is optional: PyTorch/ensemble training paths do not need it and
+    # it has no wheel on some Python versions. Soft-warn instead of failing.
+    python3 -c "import tensorflow" 2>/dev/null || {
+        echo -e "${YELLOW}⚠️  TensorFlow not installed (optional) — TF-specific model paths will be skipped.${NC}"
+    }
+
     echo -e "${GREEN}✅ Dependencies OK${NC}"
     return 0
 }
