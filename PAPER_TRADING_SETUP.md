@@ -14,8 +14,19 @@ The ELVIS trading bot supports paper trading mode with multi-asset balances. In 
 
 ### Environment Variables
 ```bash
-TRADING_MODE=paper  # Enable paper trading mode
+TRADING_MODE=paper  # paper -> Binance testnet endpoint; anything else -> live api.binance.com
 ```
+
+`TRADING_MODE` (read in `trading/config/api_config.py`) only selects which
+Binance REST endpoint the bot talks to: `paper` points `API_CONFIG` at
+`https://testnet.binance.vision` (using `TESTNET_API_SPOT_KEY` /
+`TESTNET_API_SPOT_SECRET`), any other value points it at
+`https://api.binance.com`.
+
+The bot's own paper/live behaviour is chosen separately by the `--mode`
+argument of `main.py` (`--mode paper|live`, default `paper`), passed through to
+`main(mode=...)`. For a normal paper-trading session leave both at their paper
+defaults.
 
 ### Database Configuration
 The paper trading system uses PostgreSQL to track:
@@ -49,14 +60,20 @@ This script displays:
 ## Features
 
 ### Multi-Asset Support
-- Trade multiple cryptocurrency pairs simultaneously
-- Track individual asset balances
+- Trades the primary pairs concurrently (BTCUSDT + BNBUSDT), capped at
+  `MAX_CONCURRENT_PAIRS = 2` (`config/config.py`, `SYMBOLS_CONFIG`)
+- Tracks individual asset balances in `np.account_balances`
 - Support for USDT and BNB trading pairs
 
 ### BNB Fee Optimization
-- Use BNB to pay trading fees for discounts
-- Automatic BNB balance management
-- Fee optimization for better profitability
+Controlled by the BNB flags in `config/config.py` and implemented in
+`trading/execution/enhanced_binance_executor.py`:
+- `ENABLE_BNB_FEES` — pay trading fees in BNB for a discount
+  (10% on futures, 25% on spot)
+- `AUTO_BUY_BNB` / `MIN_BNB_BALANCE` — automatically top up BNB
+  (`buy_bnb_for_fees()`) when the balance drops below the minimum
+- `MAX_BNB_BUY_PERCENT`, `BNB_REBALANCE_THRESHOLD` — cap and threshold for the
+  auto-buy / rebalance behaviour
 
 ### Performance Tracking
 - Real-time P&L calculation
@@ -65,13 +82,15 @@ This script displays:
 
 ## Trading Pairs
 
-### Primary Pairs
+Configured in `config/config.py` under `SYMBOLS_CONFIG`.
+
+### Primary Pairs (`PRIMARY_SYMBOLS`)
 - BTCUSDT (Bitcoin trading)
 - BNBUSDT (BNB trading)
 
-### Secondary Pairs
+### Secondary Pairs (`SECONDARY_SYMBOLS`, optional)
 - ETHUSDT (Ethereum trading)
-- Other major cryptocurrencies
+- ADAUSDT (Cardano trading)
 
 ## Benefits of Starting with BNB
 
@@ -94,10 +113,11 @@ This script displays:
 
 3. **Start Trading**:
    ```bash
-   # Set environment to paper mode
+   # main.py already defaults to --mode paper; TRADING_MODE=paper keeps
+   # REST calls on the Binance testnet endpoint.
    export TRADING_MODE=paper
-   
-   # Start the bot
+
+   # Start the bot (equivalent to: python main.py --mode paper)
    python main.py
    ```
 

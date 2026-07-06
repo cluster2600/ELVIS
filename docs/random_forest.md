@@ -1,8 +1,5 @@
 # Random Forest Model for Trading – ELVIS Project
 
-> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
-
-
 ![Random Forest Overview](../images/random_forest.png)
 
 ---
@@ -28,143 +25,214 @@ This strategy helps to **reduce overfitting** and improve **generalization** com
 
 ## 🎯 Use in the ELVIS Trading System
 
-In our ELVIS trading platform, the `RandomForestModel` is a production-grade implementation leveraging **TensorFlow Decision Forests** (TFDF). It includes modern ML practices:
+ELVIS ships **two** Random Forest implementations, both built on **scikit-learn's**
+`RandomForestClassifier` and persisted with **joblib** (there is no TensorFlow
+Decision Forests / `.ydf` model behind these classes — that lives only in the
+separate `EnsembleStrategy` YDF loader):
 
-- Integrated with **Optuna** for automated hyperparameter tuning
-- Supports **cross-validation** and **metric tracking**
-- Offers **explainability** through SHAP values and feature importance
-- Designed for **streaming updates** with a `partial_fit` interface
-- Integrated with **Prometheus** and **Grafana** for MLOps
+| Class | File | Purpose |
+| --- | --- | --- |
+| `RandomForestModel` | `core/models/random_forest_model.py` | Lean baseline classifier. Implements the `BaseModel` interface. |
+| `EnhancedRandomForestModel` | `core/models/enhanced_random_forest_model.py` | Production variant with Optuna tuning, SHAP explainability, Prometheus monitoring, drift detection, and simulated incremental learning. |
+
+Both extend `core.models.base_model.BaseModel`, which mandates
+`train`, `predict`, `save`, `load`, `get_params`, and `set_params`.
+
+The baseline `RandomForestModel` is what the rest of the system wires up:
+`core/bootstrap.py` registers it, and `core/models/ensemble_model.py` composes
+it into the ensemble. The `EnhancedRandomForestModel` is trained via
+`scripts/train_enhanced_rf.py` and integrated through
+`core/models/integration/enhanced_rf_integration.py`.
+
+> **Optional dependencies.** SHAP, Optuna, TensorFlow, and YDF have no wheels on
+> some Python versions (including the 3.14 target). Every use of them in this
+> code is guarded by a `try/import`, so the models still work without them —
+> they simply fall back to scikit-learn equivalents (or disable that feature).
 
 ---
 
-## 📦 Core Features
+## 📦 `RandomForestModel` (baseline)
 
-### ✅ Model Architecture
-- Based on TFDF's `RandomForestModel`
-- Uses `num_trees`, `max_depth`, and `min_examples` as primary hyperparameters
-- Saved and loaded via `.ydf` format
+### ✅ Model architecture
+- Wraps `sklearn.ensemble.RandomForestClassifier`.
+- Constructor: `RandomForestModel(logger=None, n_estimators=100, max_depth=None)`.
+- Saved/loaded as a single joblib artifact (`save(path)` → `joblib.dump`,
+  `RandomForestModel.load(path)` → `joblib.load` wrapped in a fresh instance).
 
 ### 🧠 Training
-- Accepts pandas DataFrames (`X_train`, `y_train`)
-- Optionally optimized using an **Optuna trial**
-- Automatically saved after training
-
-### 🔁 Cross-Validation
-- Standard K-Fold, StratifiedKFold, and GroupKFold strategies
-- Saves fold-wise metric plots
-- Pushes average results to **Prometheus** for Grafana monitoring
+- `train(X_train, y_train)` accepts pandas DataFrames/Series and calls
+  `model.fit`. It stores `X_train` so `get_feature_importance()` can reuse the
+  column names. Training is **not** auto-saved — call `save(path)` yourself.
 
 ### 📊 Evaluation
-- Returns a dictionary with:
-  - Accuracy
-  - Precision
-  - Recall
-  - F1 score
-  - Loss
-  - ROC AUC
+`evaluate(X_test, y_test)` returns a dict with:
+- `accuracy`
+- `loss` (scikit-learn `log_loss` over `predict_proba`)
+- `precision`
+- `recall`
+- `f1`
+
+(There is no ROC AUC key here — that is only in `EnhancedRandomForestModel`.)
 
 ### 📤 Prediction
-- Uses TFDF's batch prediction API
-- Returns flattened NumPy array
+`predict(X_test)` returns the scikit-learn prediction array directly
+(`model.predict`). No custom batch/flatten layer.
+
+### 🔁 Cross-validation
+`cross_validate(X, y, n_splits=5)` uses a plain
+`sklearn.model_selection.KFold(shuffle=True, random_state=42)` with
+`scoring=["accuracy", "precision", "recall", "f1"]` and returns scikit-learn's
+raw `cross_validate` score dict. It does **not** save plots or push metrics on
+its own — see the standalone helper below.
 
 ### 📈 Explainability
-- SHAP value summary
-- TFDF's built-in feature importance extractors:
-  - `MEAN_DECREASE_IN_ACCURACY`
-  - `NUM_AS_ROOT`
-  - `SUM_SCORE`
+`explain_predictions(X, path=None)`:
+- Uses `shap.TreeExplainer` **if `shap` is importable**, returning a DataFrame of
+  `feature → mean_abs_shap`.
+- Otherwise falls back to `model.feature_importances_`
+  (`feature → importance`).
+- Writes a CSV to `path` when supplied.
+
+`get_feature_importance()` returns a DataFrame of the fitted model's
+`feature_importances_` keyed to the training columns.
+
+### 🧪 Hyperparameter tuning
+`tune_hyperparameters(X, y, n_trials=20)`:
+- Uses **Optuna** if importable — searches `n_estimators` (50–300) and
+  `max_depth` (3–20), scoring 3-fold `f1`.
+- Otherwise falls back to `sklearn.model_selection.GridSearchCV` over
+  `{n_estimators: [50,100,200], max_depth: [5,10,None]}`.
+- Applies the best params to the model via `set_params` and returns them.
+
+### 📡 Prometheus helper
+The module-level function
+`push_cv_metrics_to_prometheus(metrics, job_name="cv_metrics", gateway="localhost:9091")`
+averages each metric list, registers a Gauge per metric with the `rf_` prefix
+(e.g. `rf_accuracy`, `rf_f1`), and pushes to a Prometheus **Pushgateway**. It is
+a free function, not a method — call it explicitly with the output of
+`cross_validate`.
 
 ---
 
-## ⚙️ Advanced Integrations
+## ⚙️ `EnhancedRandomForestModel` (production variant)
 
-### 🧪 Optuna Hyperparameter Optimization
-- Automatically suggests `num_trees`, `max_depth`, and `min_examples`
-- Integrated with cross-validation
-- Can be extended to optimize learning rate, class weights, etc.
+This class adds MLOps machinery on top of the same
+`sklearn.ensemble.RandomForestClassifier`. Constructor:
+
+```python
+EnhancedRandomForestModel(
+    logger=None,
+    model_path="models/rf_enhanced",
+    enable_optuna=True,        # honored only if optuna is installed
+    enable_shap=True,          # honored only if shap is installed
+    enable_monitoring=True,
+    prometheus_gateway="localhost:9091",
+)
+```
+
+For the full walkthrough, see [`enhanced_random_forest_guide.md`](enhanced_random_forest_guide.md).
+Highlights that differ from the baseline:
+
+### 🧪 Optuna hyperparameter optimization
+`train(X, y, trial=...)` accepts an Optuna `trial`. `_suggest_hyperparameters`
+searches `n_estimators`, `max_depth`, `min_samples_split`, `min_samples_leaf`,
+`max_features`, `bootstrap`, and `class_weight`. Without a trial it uses
+tuned defaults (`n_estimators=150`, `max_depth=12`, `class_weight="balanced"`,
+`n_jobs=-1`, …).
+
+### 📊 Evaluation
+`evaluate(X_test, y_test)` returns weighted `accuracy`, `precision`, `recall`,
+`f1`, and — **for binary targets only** — `roc_auc` via `roc_auc_score` on the
+positive-class probabilities.
+
+### 🔁 Cross-validation
+`cross_validate(X, y, cv_folds=5, scoring=None)` uses
+`sklearn.model_selection.TimeSeriesSplit` (time-aware, no shuffling) and
+defaults to weighted scoring. It logs per-fold means but does not export plots.
+
+### 📈 Explainability
+`explain_prediction(X, max_samples=10)` returns SHAP values from a
+`shap.TreeExplainer` built at train time (`_initialize_shap_explainer`), or
+`None` if SHAP is unavailable.
 
 ### 📡 Prometheus & Grafana
-- After each `cross_validate()`:
-  - Pushes average metrics to Pushgateway
-  - Metrics are exposed as `rf_accuracy`, `rf_loss`, etc.
-  - CSV version saved for external ingestion
+When `enable_monitoring` is on, `_setup_prometheus_metrics` registers
+counters/gauges (`rf_predictions_total`, `rf_current_accuracy`,
+`rf_feature_importance`, `rf_last_training_duration_seconds`) and
+`evaluate` pushes them to the Pushgateway via `_push_metrics_to_prometheus`.
 
-### 📁 Visual Artifact Export
-- Saves plots from `cross_validate()` as `.png` and `.svg`
-- SHAP summary plot saved to `docs/plots/`
-- Mermaid `.mmd` model architecture exported and rendered
+### 🔁 Incremental learning (simulated)
+scikit-learn Random Forests do not support true online learning. As a workaround
+`partial_fit(X_new, y_new)` buffers incoming rows and triggers a **full retrain**
+on the buffer once it reaches `buffer_size` (default 1000) or when
+`_should_retrain()` detects an accuracy drop greater than `retrain_threshold`
+(default 0.05). This method exists **only** on `EnhancedRandomForestModel`.
 
----
-
-## 🔁 Incremental Learning (Simulated)
-
-TensorFlow Decision Forests does not natively support online learning. As a workaround:
-
-- `partial_fit()` accumulates data batches
-- Retrains on all previously seen data
-- Simulates streaming adaptability
-
-This ensures the model can continue learning from new market data.
+### 💾 Persistence
+`save(path=None)` writes two files into the target directory:
+`rf_model.pkl` (joblib) and `rf_metadata.json` (feature names, training stats,
+performance history, params). `load(path)` restores both.
 
 ---
 
-## 🔌 Feature Pipeline
+## 🔌 Feature pipelines
 
-The model is powered by a modular feature pipeline supporting:
-- OHLCV-based features (e.g., high-low ratio, rolling means)
-- Custom financial indicators
-- Rolling statistics
-- Future integrations for sentiment and blockchain metrics
+Feature engineering lives under `core/models/features/` (note: the top-level
+`core/features/feature_pipeline.py` is an empty placeholder — use the modules
+below):
 
-Each version of the feature set is hashed and tracked for reproducibility.
+- **`core/models/features/feature_pipeline.py` — `FeaturePipeline`**
+  A minimal, dependency-free pipeline. `transform(df)` derives a few OHLCV
+  features (`price_diff`, `high_low_ratio`, `rolling_mean_5`, `rolling_std_5`),
+  then computes an MD5 hash of the sorted feature columns and stores it as the
+  feature-set **version** (`get_version()`), enabling reproducibility tracking.
+
+- **`core/models/features/trading_feature_pipeline.py` — `TradingFeaturePipeline`**
+  The full pipeline used for training. `transform(df)` builds grouped feature
+  sets from OHLCV data: price, volume, volatility, momentum, technical
+  indicators (via TA-Lib when available, basic fallbacks otherwise), market
+  structure, time-of-day, and feature interactions, then cleans the result.
+  `get_feature_names()` / `get_feature_count()` / `validate_features()` expose
+  metadata about the generated set.
 
 ---
 
-## 📁 File Structure
+## 📁 Relevant files
 
 ```
 core/
 ├── models/
-│   └── random_forest_model.py     # Main model implementation
-├── features/
-│   └── feature_pipeline.py        # Modular feature engineering
+│   ├── base_model.py                    # BaseModel ABC (train/predict/save/load/params)
+│   ├── random_forest_model.py           # RandomForestModel (baseline) + push_cv_metrics_to_prometheus()
+│   ├── enhanced_random_forest_model.py  # EnhancedRandomForestModel (MLOps variant)
+│   ├── ensemble_model.py                # composes RandomForestModel into the ensemble
+│   ├── integration/
+│   │   └── enhanced_rf_integration.py   # wires EnhancedRandomForestModel into the app
+│   └── features/
+│       ├── feature_pipeline.py          # FeaturePipeline (OHLCV + MD5 version hash)
+│       └── trading_feature_pipeline.py  # TradingFeaturePipeline (full feature set)
 ├── viz/
-│   ├── export_utils.py            # SHAP, Prometheus, CSV exports
-
-metrics/
-├── model_metrics.csv
-├── shap_summary.csv
-
-prometheus/
-├── pushgateway_config.yml
-
-docs/
-├── plots/
-│   ├── shap_summary.png
-│   └── cv_metrics.png
-└── architecture_links.mmd
+│   └── export_utils.py                  # export_to_csv / push_metrics_to_prometheus /
+│                                        #   export_feature_importance / export_shap_summary
+scripts/
+└── train_enhanced_rf.py                 # training entrypoint for EnhancedRandomForestModel
 ```
 
----
-
-## 🛣️ Future Enhancements
-
-- Full support for streaming ML frameworks like `river`
-- Real-time alerts from Prometheus thresholds (e.g. F1 score dip)
-- Grafana dashboards for CV history, SHAP trends, and live predictions
-- Automated model drift detection and retraining triggers
+### Export helpers (`core/viz/export_utils.py`)
+- `export_to_csv(rows, path)` — write dict rows to CSV.
+- `push_metrics_to_prometheus(metrics, job_name, gateway="localhost:9091", prefix="rf_")`
+  — push a metric dict to the Pushgateway; returns success bool.
+- `export_feature_importance(model, feature_names, path)` — dump
+  `feature_importances_` to CSV.
+- `export_shap_summary(model, X, path, feature_names=None)` — SHAP summary CSV,
+  falling back to feature importances when `shap` is not installed.
 
 ---
 
 ## 📚 References
 
 - [IBM Random Forest Explanation](https://www.ibm.com/think/topics/random-forest)
-- [TensorFlow Decision Forests Documentation](https://www.tensorflow.org/decision_forests)
+- [scikit-learn: RandomForestClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)
 - [Optuna: Hyperparameter Optimization Framework](https://optuna.org/)
 - [Prometheus Client for Python](https://github.com/prometheus/client_python)
 - [SHAP: Explainable AI](https://shap.readthedocs.io/en/latest/)
-
----
-
-> This document will be updated iteratively as new capabilities are deployed.
