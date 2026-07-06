@@ -1,11 +1,23 @@
 # ELVIS Trading System - Model Training Documentation
 
-> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
-
-
 ## Overview
 
-This document provides comprehensive documentation of the model training pipeline for the ELVIS trading system. It covers the architecture, components, data flow, training processes, evaluation methods, and configuration management for both traditional ML models and reinforcement learning agents.
+This document describes the model training pipeline for the ELVIS trading
+system. It covers the architecture, the concrete classes and methods, the data
+flow, the configuration file, and how to actually run training.
+
+The pipeline is orchestrated by `training/train_models.py`. It trains a small
+PyTorch regression model epoch-by-epoch, optionally trains reinforcement-learning
+agents, evaluates, and writes explanation artifacts. Ensemble training,
+hyperparameter optimization, and explainability live in sibling modules that are
+imported on demand.
+
+> Reality check: several heavy libraries used here have **no Python 3.14
+> wheels** and are absent in CI / minimal environments — `optuna`, `shap`,
+> `lime`, `plotly`, `tensorflow`/`keras`. Every import of these is wrapped in a
+> `try/except ImportError` guard, and the code degrades gracefully when they are
+> missing. Do not assume they are installed. `xgboost` and `lightgbm` are used
+> by the ensembles and are expected to be present.
 
 ---
 
@@ -13,84 +25,51 @@ This document provides comprehensive documentation of the model training pipelin
 
 ```mermaid
 graph TB
-    subgraph "Training Entry Points"
-        CLI[CLI Arguments]
-        Config[Configuration Files]
-        Scripts[Training Scripts]
+    subgraph "Entry Point"
+        CLI[CLI args: --config --data --output ...]
+        YAML[training/config/model_config.yaml]
     end
-    
-    subgraph "Training Pipeline"
-        Pipeline[TrainingPipeline]
-        Setup[Setup & Initialization]
-        DataLoader[Data Loading]
-        Preparation[Data Preparation]
-        Training[Model Training]
-        Evaluation[Model Evaluation]
-        Explanation[Model Explanation]
-        Persistence[Model Persistence]
+
+    subgraph "TrainingPipeline (training/train_models.py)"
+        Setup[setup]
+        Train[train - PyTorch loop]
+        RL[train_rl_agents]
+        Eval[evaluate_models]
+        Explain[generate_explanations]
     end
-    
-    subgraph "Model Training Components"
-        Trainer[ModelTrainer]
-        Monitor[TrainingMonitor]
-        Evaluator[Evaluator]
-        Checkpoint[CheckpointManager]
-        TensorBoard[TensorBoard Writer]
+
+    subgraph "Components"
+        DP[DataProcessor - trading/data/data_processor.py]
+        MT[ModelTrainer - training/models/model_trainer.py]
+        Mon[TrainingMonitor - utils/monitoring.py]
+        CK[CheckpointManager - trading/utils/checkpoint.py]
+        TB[SummaryWriter - TensorBoard, mocked if missing]
     end
-    
-    subgraph "Model Types"
-        ML[ML Models]
-        RL[RL Agents]
-        Ensemble[Ensemble Models]
+
+    subgraph "Model modules (imported on demand)"
+        Ens[Ensembles - training/models/ensemble_models.py]
+        Agents[RL agents - training/models/rl_agents.py]
+        Trans[Transformer - training/models/transformer_models.py]
+        XAI[Explainers - training/models/explainable_ai.py]
     end
-    
-    subgraph "Data Sources"
-        BinanceAPI[Binance API]
-        CSV[CSV Files]
-        Parquet[Parquet Files]
-        Processor[Data Processor]
-    end
-    
-    subgraph "Outputs"
-        Models[Trained Models]
-        Metrics[Training Metrics]
-        Explanations[Model Explanations]
-        Checkpoints[Model Checkpoints]
-        Logs[Training Logs]
-    end
-    
-    CLI --> Pipeline
-    Config --> Pipeline
-    Scripts --> Pipeline
-    
-    Pipeline --> Setup
-    Setup --> DataLoader
-    DataLoader --> Preparation
-    Preparation --> Training
-    Training --> Evaluation
-    Evaluation --> Explanation
-    Explanation --> Persistence
-    
-    Training --> Trainer
-    Training --> Monitor
-    Training --> Evaluator
-    Training --> Checkpoint
-    Training --> TensorBoard
-    
-    Trainer --> ML
-    Trainer --> RL
-    Trainer --> Ensemble
-    
-    BinanceAPI --> Processor
-    CSV --> Processor
-    Parquet --> Processor
-    Processor --> DataLoader
-    
-    Persistence --> Models
-    Persistence --> Metrics
-    Persistence --> Explanations
-    Persistence --> Checkpoints
-    Persistence --> Logs
+
+    CLI --> Setup
+    YAML --> Setup
+    Setup --> DP
+    Setup --> MT
+    Setup --> Mon
+    Setup --> CK
+    Setup --> TB
+
+    Setup --> Train
+    Train --> RL
+    RL --> Eval
+    Eval --> Explain
+
+    MT --> Ens
+    MT --> XAI
+    RL --> Agents
+    Explain --> XAI
 ```
 
 ---
@@ -99,208 +78,320 @@ graph TB
 
 ### 1. Training Pipeline (`training/train_models.py`)
 
-The main orchestrator for the entire training process:
+`TrainingPipeline` is the main orchestrator. `main()` constructs it from parsed
+CLI args, then calls `setup()`, `train()`, `train_rl_agents()`,
+`evaluate_models(rl_agents)`, and `generate_explanations(rl_agents)` in sequence.
 
 ```mermaid
 classDiagram
     class TrainingPipeline {
-        -config: Dict
-        -logger: Logger
-        -data_processor: BaseProcessor
+        -args
+        -config: dict
+        -logger
+        -data_processor: DataProcessor
         -model_trainer: ModelTrainer
-        -evaluator: Evaluator
+        -monitor: TrainingMonitor
         -checkpoint_manager: CheckpointManager
-        +setup_environment()
-        +load_configuration()
-        +initialize_components()
-        +prepare_data()
-        +train_models()
-        +evaluate_models()
-        +generate_explanations()
-        +save_artifacts()
+        -writer: SummaryWriter
+        -X: np.ndarray
+        -y: np.ndarray
+        -train_loader
+        -val_loader
+        +setup()
+        +train()
+        +train_rl_agents()
+        +evaluate_models(rl_agents)
+        +generate_explanations(rl_agents)
     }
-    
-    class CheckpointManager {
-        -checkpoint_dir: str
-        -save_frequency: int
-        +save_checkpoint(model, epoch, metrics)
-        +load_checkpoint(path) Dict
-        +cleanup_old_checkpoints()
-        +get_best_checkpoint() str
-    }
-    
-    class TrainingMonitor {
-        -metrics_history: List[Dict]
-        -early_stopping: EarlyStopping
-        +log_metrics(epoch, metrics)
-        +check_early_stopping() bool
-        +plot_learning_curves()
-        +save_metrics_history()
-    }
-    
-    TrainingPipeline --> CheckpointManager
-    TrainingPipeline --> TrainingMonitor
 ```
 
-**Key Features:**
-- Signal handlers for graceful interruption
-- Distributed training support
-- Comprehensive logging and monitoring
-- Automatic directory creation for outputs
-- Configuration validation and loading
+`setup()` runs these private steps in order:
+`_setup_signal_handlers` -> `_setup_logging` -> `_load_config` ->
+`_setup_distributed` -> `_setup_training_environment` ->
+`_initialize_components` -> `_load_and_prepare_data` ->
+`_create_data_loaders` -> `_resume_training_if_needed`.
+
+Key behavior:
+- **Signal handling:** installs `SIGINT`/`SIGTERM` handlers that raise
+  `KeyboardInterrupt` to stop training cleanly. (`train_models.py` also defines a
+  module-level `TrainingInterrupt` exception and `signal_handler`, but the
+  handler actually installed is the instance method `_signal_handler`.)
+- **Config loading:** `yaml.safe_load` of the `--config` file into `self.config`.
+- **Distributed:** only if `--distributed` is passed; initializes an NCCL process
+  group and sets the CUDA device to `--local_rank`.
+- **Output dirs:** creates `<output>/models`, `<output>/logs`,
+  `<output>/checkpoints` and writes those paths back into `self.config` as
+  `model_dir`, `log_dir`, `checkpoint_dir`.
+- **Components:** builds `DataProcessor`, `ModelTrainer`, `TrainingMonitor`,
+  `CheckpointManager`, and a TensorBoard `SummaryWriter` (a no-op
+  `MockSummaryWriter` is substituted if `torch.utils.tensorboard` fails to
+  import).
+- **Data:** reads `--data` as CSV (or Parquet if the path does not end in
+  `.csv`). If `--include-trade-history` is set, it also pulls trade history from
+  the database via `TradeHistoryProcessor` and stores those features/targets on
+  the pipeline; otherwise trade-history frames are left empty. Features/targets
+  for the PyTorch loop come from `ModelTrainer.prepare_data(self.data)`.
+- **Data loaders:** `ModelTrainer.create_data_loaders(X, y, batch_size)` using
+  `config["batch_size"]`.
+- **Resume:** if `--resume <path>` is passed, loads the checkpoint and sets the
+  start epoch.
+
+`train()` runs a plain PyTorch loop for `config["transformer"]["epochs"]`
+iterations. Each epoch calls `ModelTrainer.train_epoch`, then `validate`, pushes
+metrics to `TrainingMonitor` and TensorBoard, checkpoints every
+`config["checkpoint_frequency"]` epochs (default 5), and breaks early when
+`monitor.should_stop()` is true.
+
+`train_rl_agents()` builds a `MultiAgentTradingSystem` from `config["rl"]` and
+calls `.train(...)`. `evaluate_models()` loads any saved ensemble models and
+evaluates them (and the RL agents) through an `Evaluator`, writing
+`transformer_evaluation.json` and `rl_agents_evaluation.json` into the output
+dir. `generate_explanations()` calls `ModelTrainer.explain_model(...)` and writes
+`transformer_explanations.json` and an empty `rl_explanations.json` (RL
+explanations are intentionally skipped) under `<log_dir>/explanations`.
 
 ### 2. Model Trainer (`training/models/model_trainer.py`)
 
-Handles model-specific training logic:
+`ModelTrainer` orchestrates data prep, the PyTorch training step, and the
+ensemble/explainability paths. It picks a device (`cuda` -> `mps` -> `cpu`) and
+pre-instantiates three ensemble wrappers.
 
 ```mermaid
 classDiagram
     class ModelTrainer {
-        -config: Dict
+        -config: dict
         -device: torch.device
-        -models: Dict[str, BaseModel]
-        +prepare_data(data) Tuple
-        +train_ml_models(data_loaders)
-        +train_rl_agents(env)
-        +train_ensemble_models(models)
-        +evaluate_model(model, data) Dict
-        +explain_model(model, data) Dict
-        +save_model(model, path)
-        +load_model(path) BaseModel
+        -model: torch.nn.Module
+        -model_state: dict
+        -ensemble_models: dict
+        +prepare_data(data) tuple
+        +create_data_loaders(X, y, batch_size) tuple
+        +train_epoch(train_loader, epoch) dict
+        +validate(val_loader) dict
+        +state_dict() dict
+        +train_ensemble(X, y) dict
+        +evaluate_ensemble(models, X, y) dict
+        +save_ensemble(models, path)
+        +load_ensemble(path) dict
+        +explain_model(model, X, feature_names) dict
     }
-    
-    class EnsembleTrainer {
-        -base_models: List[BaseModel]
-        -ensemble_type: str
-        +train_stacking_ensemble(X, y)
-        +train_weighted_ensemble(X, y)
-        +train_neural_ensemble(X, y)
-        +optimize_weights(predictions, targets)
-    }
-    
-    class RLTrainer {
-        -agents: Dict[str, RLAgent]
-        -environment: TradingEnvironment
-        +train_dqn_agent(episodes)
-        +train_ppo_agent(episodes)
-        +train_a3c_agent(episodes)
-        +evaluate_agent(agent, episodes) Dict
-    }
-    
-    ModelTrainer --> EnsembleTrainer
-    ModelTrainer --> RLTrainer
 ```
 
-**Supported Models:**
-- **Traditional ML:** Random Forest, Neural Networks, Transformers
-- **Ensemble Methods:** Stacking, Weighted Voting, Neural Ensembles
-- **Reinforcement Learning:** DQN, PPO, A3C agents
+Notes on the real behavior:
+- `prepare_data(data)` reads feature names from
+  `config["feature_config"]["features"]` (each entry has a `name`) and the target
+  from `config["target"]` (default `"price"`). It raises `ValueError` if any
+  named feature or the target column is missing. Returns `(X, y)` as NumPy arrays.
+- `create_data_loaders(X, y, batch_size=32)` uses a **time-series split**
+  (`sklearn.model_selection.TimeSeriesSplit(n_splits=5)`), taking the last split
+  as train/validation, and wraps them in PyTorch `TensorDataset`/`DataLoader`s.
+- `train_epoch(train_loader, epoch)` lazily builds a tiny MLP
+  (`Linear(input_dim, 64) -> ReLU -> Linear(64, 1)`) with Adam (`lr=0.001`) and
+  `MSELoss`, trains one epoch, and returns `{"loss": avg_loss}`.
+- `validate(val_loader)` is currently a placeholder that logs and returns
+  `{"val_loss": 0.01}`.
+- The three entries in `ensemble_models` are `"stacking"`, `"weighted"`, and
+  `"neural"` (see the ensemble module below). `train_ensemble` fits them all;
+  `save_ensemble`/`load_ensemble` persist them as
+  `<model_dir>/ensemble_models/<name>_model.joblib` via `joblib`.
+- `explain_model(model, X, feature_names)` picks `LIMEExplainer` if the model
+  exposes `predict`/`predict_proba`, else `SHAPExplainer`, and returns the
+  explanation dict (or `{}` on error).
 
-### 3. Evaluator (`training/models/evaluator.py`)
+There are **no** `EnsembleTrainer` or `RLTrainer` classes. Ensemble logic lives
+in `ensemble_models.py` and RL logic in `rl_agents.py`.
 
-Monitors and evaluates model performance:
+### 3. Ensemble models (`training/models/ensemble_models.py`)
+
+A base `EnsembleModel` with `fit`/`predict`, plus three concrete ensembles. All
+base estimators are classic sklearn/gradient-boosting regressors — there is no
+TensorFlow Decision Forests here.
+
+```mermaid
+classDiagram
+    class EnsembleModel {
+        +fit(X, y)
+        +predict(X) np.ndarray
+    }
+    class StackingEnsemble {
+        -meta_learner: LinearRegression
+        +fit(X, y)
+        +predict(X)
+    }
+    class WeightedEnsemble {
+        -weights
+        +fit(X, y)
+        +predict(X)
+    }
+    class NeuralEnsemble {
+        +fit(X, y)
+        +predict(X)
+    }
+    EnsembleModel <|-- StackingEnsemble
+    EnsembleModel <|-- WeightedEnsemble
+    EnsembleModel <|-- NeuralEnsemble
+```
+
+- `StackingEnsemble` and `WeightedEnsemble` both use the same base models:
+  `RandomForestRegressor`, `GradientBoostingRegressor` (both from
+  `sklearn.ensemble`), `xgboost.XGBRegressor`, and `lightgbm.LGBMRegressor`.
+  Stacking adds a `LinearRegression` meta-learner over the base predictions.
+- `NeuralEnsemble` builds a small `torch.nn` network.
+- Random Forest here is **sklearn**, and standalone Random Forest training/serving
+  in this repo uses `joblib` for persistence — see
+  [Random Forest Model Documentation](random_forest.md) and
+  [Enhanced Random Forest Guide](enhanced_random_forest_guide.md).
+
+### 4. Reinforcement-learning agents (`training/models/rl_agents.py`)
+
+`MultiAgentTradingSystem` wraps one or more agents.
+
+```mermaid
+classDiagram
+    class MultiAgentTradingSystem {
+        -env_config: dict
+        -n_agents: int
+        -agent_types: list
+        -agents: list
+        +pretrain_agents(historical_data)
+        +finetune_agents(recent_data)
+        +train(total_timesteps, eval_freq, n_eval_episodes)
+        +evaluate(X, y)
+        +save(path)
+    }
+    class MetaLearningAgent
+    class MarketMakerAgent
+    class TakerAgent
+    MultiAgentTradingSystem --> MetaLearningAgent
+    MultiAgentTradingSystem --> MarketMakerAgent
+    MultiAgentTradingSystem --> TakerAgent
+```
+
+`__init__(env_config, n_agents=1, agent_types=None, device="cpu")` instantiates
+agents by type: `"maml"` -> `MetaLearningAgent`, `"market_maker"` ->
+`MarketMakerAgent`, `"taker"` -> `TakerAgent`, anything else -> `None`
+placeholder. Several methods (`evaluate`, individual agent `train`/`evaluate`)
+are currently stubs/placeholders — this subsystem is scaffolding, not a fully
+trained RL stack. In `TrainingPipeline.train_rl_agents()` the system is built
+with just `(env_config, n_agents)`, so agents default to type `"default"` (i.e.
+`None` placeholders) unless `agent_types` is supplied programmatically.
+
+### 5. Evaluator (`training/models/evaluator.py`)
+
+`Evaluator` is an **ElegantRL-style reinforcement-learning evaluator**, not a
+generic metrics dashboard. Its constructor is
+`Evaluator(cwd, agent_id, eval_env, args)` where `args` carries `eval_gap`,
+`eval_times`, and `target_return`.
 
 ```mermaid
 classDiagram
     class Evaluator {
-        -metrics_history: List[Dict]
-        -best_metrics: Dict
-        -save_path: str
-        +record_metrics(epoch, metrics)
-        +evaluate_performance(model, data) Dict
-        +save_best_model(model, metrics)
-        +plot_learning_curves()
-        +generate_performance_report() Dict
-        +calculate_statistical_significance() Dict
+        -recorder: list
+        -cwd: str
+        -agent_id: int
+        -eval_env
+        -eval_gap
+        -target_return
+        -r_max
+        +evaluate_save_and_plot(act, steps, r_exp, log_tuple)
+        +evaluate(model, X, y)
+        +save_results(metrics, filename)
+        +save_or_load_recoder(if_save)
     }
-    
-    class MetricsCalculator {
-        +calculate_classification_metrics(y_true, y_pred) Dict
-        +calculate_regression_metrics(y_true, y_pred) Dict
-        +calculate_trading_metrics(returns) Dict
-        +calculate_risk_metrics(returns) Dict
-    }
-    
-    class PerformancePlotter {
-        +plot_training_curves(metrics)
-        +plot_confusion_matrix(y_true, y_pred)
-        +plot_feature_importance(importance)
-        +plot_prediction_distribution(predictions)
-    }
-    
-    Evaluator --> MetricsCalculator
-    Evaluator --> PerformancePlotter
 ```
 
----
+- `evaluate_save_and_plot(...)` runs evaluation episodes, saves the actor to
+  `<cwd>/actor_<step>_<reward>.pth` when the average reward improves, appends to
+  the recorder, and re-draws the learning curve.
+- `evaluate(model, X, y)` simply delegates to `model.evaluate(X, y)` (used by the
+  pipeline over loaded ensemble models).
+- `save_results(metrics, filename)` dumps a metrics dict to `<cwd>/<filename>` as
+  JSON.
+- Module-level helpers `get_episode_return_and_step(env, act)` and
+  `save_learning_curve(...)` support the RL evaluation loop and plot the
+  learning curve with matplotlib (Agg backend).
 
-## Data Processing Pipeline
+There is no `MetricsCalculator`, `PerformancePlotter`, `record_metrics`,
+`generate_performance_report`, or `calculate_statistical_significance` method.
 
-```mermaid
-flowchart TD
-    Start([Data Processing Start]) --> Source{Data Source}
-    
-    Source --> |Binance API| API[Fetch from Binance]
-    Source --> |CSV Files| CSV[Load CSV Data]
-    Source --> |Parquet Files| Parquet[Load Parquet Data]
-    
-    API --> Validate[Validate Data Quality]
-    CSV --> Validate
-    Parquet --> Validate
-    
-    Validate --> Clean[Clean & Preprocess]
-    Clean --> Features[Feature Engineering]
-    Features --> Technical[Technical Indicators]
-    Technical --> Normalize[Normalize Features]
-    Normalize --> Split[Train/Validation Split]
-    Split --> Loaders[Create Data Loaders]
-    Loaders --> Ready([Data Ready for Training])
-    
-    subgraph "Feature Engineering"
-        Features --> OHLCV[OHLCV Features]
-        Features --> Volume[Volume Features]
-        Features --> Price[Price-based Features]
-        Features --> Time[Time-based Features]
-    end
-    
-    subgraph "Technical Indicators"
-        Technical --> RSI[RSI]
-        Technical --> MACD[MACD]
-        Technical --> BB[Bollinger Bands]
-        Technical --> SMA[Simple Moving Average]
-        Technical --> EMA[Exponential Moving Average]
-    end
-```
+### 6. Training monitor (`utils/monitoring.py`)
 
-### Data Sources and Formats
-
-- **Binance API:** Real-time and historical OHLCV data
-- **CSV Files:** Processed training data with features and targets
-- **Parquet Files:** Compressed columnar data format for large datasets
-
-### Feature Engineering
+`TrainingMonitor` tracks train/val metric history and drives early stopping.
 
 ```mermaid
 classDiagram
-    class FeatureEngineer {
-        +create_price_features(data) DataFrame
-        +create_volume_features(data) DataFrame
-        +create_technical_indicators(data) DataFrame
-        +create_time_features(data) DataFrame
-        +create_lag_features(data, lags) DataFrame
-        +normalize_features(data) DataFrame
+    class TrainingMonitor {
+        -metrics: dict
+        -best_val_loss: float
+        -best_epoch: int
+        -early_stopping_patience: int
+        -epochs_no_improve: int
+        +update_metrics(phase, metrics_dict)
+        +should_stop() bool
+        +display_progress(epoch)
+        +get_metrics() dict
+        +get_training_time() float
+        +get_best_epoch() int
     }
-    
-    class TechnicalIndicators {
-        +calculate_rsi(prices, period) Series
-        +calculate_macd(prices) DataFrame
-        +calculate_bollinger_bands(prices, period) DataFrame
-        +calculate_moving_averages(prices, windows) DataFrame
-        +calculate_momentum_indicators(data) DataFrame
-    }
-    
-    FeatureEngineer --> TechnicalIndicators
 ```
+
+Early stopping is keyed off `val_loss`: it stops once `epochs_no_improve` reaches
+`config["early_stopping_patience"]` (default 10). The module also exposes a
+standalone `push_metric_to_prometheus(...)` helper that pushes a gauge to a
+Prometheus pushgateway when `prometheus_client.gateway` is available.
+
+### 7. Checkpoint manager (`trading/utils/checkpoint.py`)
+
+`CheckpointManager(config)` writes `.pt` checkpoints under `config["checkpoint_dir"]`
+and maintains a metadata index.
+
+```mermaid
+classDiagram
+    class CheckpointManager {
+        -checkpoint_dir
+        +save_checkpoint(state_dict, is_final=False, is_best=False) str
+        +load_checkpoint(checkpoint_path=None) dict
+        +get_best_checkpoint() str
+        +get_latest_checkpoint() str
+        +cleanup_old_checkpoints(keep_last_n=5)
+        +backup_checkpoints(backup_dir)
+    }
+```
+
+`save_checkpoint` takes a state dictionary (the pipeline passes
+`{"epoch", "model_state", "metrics"}`), names the file
+`checkpoint_/best_checkpoint_/final_checkpoint_<timestamp>.pt`, saves it with
+`torch.save`, and records it in the metadata index.
+
+---
+
+## Data Processing
+
+Training data is loaded directly from the `--data` file (CSV or Parquet); the
+pipeline does not run indicator engineering itself — it expects the feature
+columns named in `config["feature_config"]["features"]` to already exist in that
+file. Feature/target extraction happens in `ModelTrainer.prepare_data`.
+
+Two processor families exist in the repo:
+
+- `trading/data/data_processor.py` (`DataProcessor`) — instantiated by the
+  pipeline but, given the current `train()` loop, the CSV/Parquet read is what
+  actually feeds training.
+- `core/data/processors/base_processor.py` (`BaseProcessor`, ABC) with concrete
+  `core/data/processors/binance_processor.py` — the abstract interface defines
+  `download_data`, `clean_data`, `add_technical_indicator`, `df_to_array`, and
+  `run`; the Binance processor implements indicator computation. `BaseProcessor`
+  itself is an abstract base, not a concrete data source used inside
+  `train_models.py`.
+
+Trade-history data (when `--include-trade-history` is passed) is produced by
+`training/data/trade_history_processor.py` (`TradeHistoryProcessor`), whose
+`process_for_training(limit=...)` returns `(features, targets)` DataFrames and
+`save_processed_data(...)` persists them.
+
+Binance download utilities live in `training/data/data_downloader.py`, which uses
+`binance.client.Client` (with a fallback definition for
+`KLINE_INTERVAL_1H` when `binance.enums` lacks it).
 
 ---
 
@@ -308,323 +399,239 @@ classDiagram
 
 ```mermaid
 sequenceDiagram
-    participant CLI as CLI/Script
-    participant Pipeline as TrainingPipeline
-    participant Config as Configuration
-    participant Data as DataProcessor
-    participant Trainer as ModelTrainer
-    participant Eval as Evaluator
-    participant Save as Persistence
-    
-    CLI->>Pipeline: Initialize with arguments
-    Pipeline->>Config: Load configuration
-    Config-->>Pipeline: Return config dict
-    
-    Pipeline->>Data: Initialize data processor
-    Data->>Data: Download/load data
-    Data->>Data: Clean and preprocess
-    Data->>Data: Engineer features
-    Data-->>Pipeline: Return processed data
-    
-    Pipeline->>Trainer: Initialize model trainer
-    
-    loop For each model type
-        Pipeline->>Trainer: Train model
-        Trainer->>Trainer: Setup model architecture
-        Trainer->>Trainer: Train on data
-        Trainer->>Eval: Evaluate performance
-        Eval-->>Trainer: Return metrics
-        Trainer-->>Pipeline: Return trained model
+    participant CLI as CLI (train_models.py main)
+    participant P as TrainingPipeline
+    participant MT as ModelTrainer
+    participant Mon as TrainingMonitor
+    participant CK as CheckpointManager
+    participant Ev as Evaluator
+
+    CLI->>P: TrainingPipeline(args); setup()
+    P->>P: load YAML config, build components
+    P->>P: read --data (CSV/Parquet)
+    P->>MT: prepare_data(data) -> X, y
+    P->>MT: create_data_loaders(X, y, batch_size)
+
+    loop epochs (config.transformer.epochs)
+        CLI->>P: train()
+        P->>MT: train_epoch(train_loader, epoch)
+        MT-->>P: {loss}
+        P->>MT: validate(val_loader)
+        MT-->>P: {val_loss}
+        P->>Mon: update_metrics(train/val)
+        P->>CK: save_checkpoint (every checkpoint_frequency)
+        P->>Mon: should_stop()?
     end
-    
-    Pipeline->>Trainer: Train ensemble models
-    Trainer-->>Pipeline: Return ensemble models
-    
-    Pipeline->>Eval: Generate explanations
-    Eval-->>Pipeline: Return explanations
-    
-    Pipeline->>Save: Save models and artifacts
-    Save-->>Pipeline: Confirm saved
-    
-    Pipeline-->>CLI: Training complete
+
+    CLI->>P: train_rl_agents()
+    P->>P: MultiAgentTradingSystem(env, n_agents).train(...)
+    CLI->>P: evaluate_models(rl_agents)
+    P->>Ev: evaluate loaded ensembles + RL; save_results(...)
+    CLI->>P: generate_explanations(rl_agents)
+    P->>MT: explain_model(model, X, feature_names)
 ```
 
 ---
 
-## Configuration Management
+## Configuration (`training/config/model_config.yaml`)
 
-### Model Configuration (`training/config/model_config.yaml`)
+The real config keys are shown below (values are the checked-in defaults).
 
 ```yaml
-# Feature Configuration
-features:
-  feature_columns: ['feature1', 'feature2', 'feature3']
-  target_column: 'price'
-  normalization: 'standard'  # standard, minmax, robust
+feature_config:
+  features:
+    - name: "feature1"
+      type: "float"
+    - name: "feature2"
+      type: "float"
+    - name: "feature3"
+      type: "float"
+  normalization: "minmax"
+  window_size: 50
 
-# Model Parameters
-models:
-  transformer:
-    d_model: 512
-    nhead: 8
-    num_layers: 6
-    dropout: 0.1
-    max_seq_length: 100
-  
-  random_forest:
-    n_estimators: 100
-    max_depth: 10
-    min_samples_split: 2
-  
-  neural_network:
-    hidden_layers: [128, 64, 32]
-    activation: 'relu'
-    dropout: 0.2
+quality_config:
+  min_data_quality: 0.8
+  max_missing_ratio: 0.1
 
-# Training Parameters
-training:
-  batch_size: 32
-  epochs: 100
+batch_size: 64
+checkpoint_frequency: 5
+
+transformer:
+  epochs: 20
   learning_rate: 0.001
-  early_stopping_patience: 10
-  checkpoint_frequency: 5
+  model_params:
+    d_model: 128
+    nhead: 8
+    num_encoder_layers: 4
+    num_decoder_layers: 4
+    dim_feedforward: 512
+    dropout: 0.1
 
-# RL Agent Settings
-reinforcement_learning:
-  agents: ['dqn', 'ppo', 'a3c']
-  episodes: 1000
-  environment: 'trading_env'
-  reward_function: 'sharpe_ratio'
+rl:
+  env:
+    max_steps: 1000
+    reward_type: "sharpe_ratio"
+    data: []
+    multi_agent: true
+    n_agents: 2
+  agent:
+    gamma: 0.99
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 500
+    learning_rate: 0.0005
+    batch_size: 64
+    target_update: 10
+    agents:
+      - type: "market_maker"
+        role: "maker"
+      - type: "taker"
+        role: "taker"
 
-# Output Paths
-paths:
-  models: './models'
-  logs: './logs'
-  checkpoints: './checkpoints'
-  explanations: './explanations'
+logging:
+  level: "INFO"
+  log_to_file: true
+
+output:
+  model_dir: "models"
+  log_dir: "logs"
+  checkpoint_dir: "checkpoints"
 ```
 
-### Configuration Classes
+How the pipeline consumes these keys:
+- `feature_config.features[].name` and `target` (falls back to `"price"`) drive
+  `ModelTrainer.prepare_data`. Note the checked-in config lists placeholder
+  feature names (`feature1..3`) and does **not** set a `target` key, so
+  `prepare_data` will look for a `price` column and the named features in your
+  `--data` file — supply a data file (and, if needed, a `target:` key) that
+  matches.
+- `batch_size` -> data loaders. `checkpoint_frequency` -> checkpoint cadence.
+- `transformer.epochs` -> number of loop iterations in `train()`.
+- `rl.env` / `rl.agent.n_agents` -> `MultiAgentTradingSystem`.
 
-```mermaid
-classDiagram
-    class ConfigManager {
-        -config_path: str
-        -config: Dict
-        +load_config(path) Dict
-        +validate_config(config) bool
-        +get_model_config(model_name) Dict
-        +get_training_config() Dict
-        +get_data_config() Dict
-        +save_config(config, path)
-    }
-    
-    class ModelConfig {
-        -model_type: str
-        -hyperparameters: Dict
-        +get_hyperparameters() Dict
-        +set_hyperparameter(key, value)
-        +validate_hyperparameters() bool
-    }
-    
-    class TrainingConfig {
-        -batch_size: int
-        -epochs: int
-        -learning_rate: float
-        +get_optimizer_config() Dict
-        +get_scheduler_config() Dict
-        +get_early_stopping_config() Dict
-    }
-    
-    ConfigManager --> ModelConfig
-    ConfigManager --> TrainingConfig
-```
-
----
-
-## Model Training Processes
-
-### Traditional ML Models
-
-```mermaid
-flowchart TD
-    Start([ML Training Start]) --> LoadData[Load Training Data]
-    LoadData --> PrepareFeatures[Prepare Features]
-    PrepareFeatures --> SplitData[Split Train/Validation]
-    SplitData --> InitModel[Initialize Model]
-    InitModel --> TrainModel[Train Model]
-    TrainModel --> ValidateModel[Validate Model]
-    ValidateModel --> CheckEarlyStopping{Early Stopping?}
-    CheckEarlyStopping --> |No| TrainModel
-    CheckEarlyStopping --> |Yes| EvaluateModel[Final Evaluation]
-    EvaluateModel --> SaveModel[Save Best Model]
-    SaveModel --> End([Training Complete])
-```
-
-### Reinforcement Learning Agents
-
-```mermaid
-flowchart TD
-    Start([RL Training Start]) --> InitEnv[Initialize Trading Environment]
-    InitEnv --> InitAgent[Initialize RL Agent]
-    InitAgent --> Episode[Start Episode]
-    Episode --> State[Get Current State]
-    State --> Action[Select Action]
-    Action --> Execute[Execute Action in Environment]
-    Execute --> Reward[Receive Reward]
-    Reward --> NextState[Get Next State]
-    NextState --> UpdateAgent[Update Agent]
-    UpdateAgent --> CheckDone{Episode Done?}
-    CheckDone --> |No| State
-    CheckDone --> |Yes| EvaluateEpisode[Evaluate Episode]
-    EvaluateEpisode --> CheckMaxEpisodes{Max Episodes?}
-    CheckMaxEpisodes --> |No| Episode
-    CheckMaxEpisodes --> |Yes| FinalEval[Final Evaluation]
-    FinalEval --> SaveAgent[Save Best Agent]
-    SaveAgent --> End([Training Complete])
-```
-
----
-
-## Evaluation and Metrics
-
-### Performance Metrics
-
-```mermaid
-classDiagram
-    class PerformanceMetrics {
-        +accuracy: float
-        +precision: float
-        +recall: float
-        +f1_score: float
-        +auc_roc: float
-        +sharpe_ratio: float
-        +max_drawdown: float
-        +total_return: float
-        +volatility: float
-        +win_rate: float
-    }
-    
-    class TradingMetrics {
-        +calculate_sharpe_ratio(returns) float
-        +calculate_max_drawdown(equity_curve) float
-        +calculate_calmar_ratio(returns, drawdown) float
-        +calculate_sortino_ratio(returns) float
-        +calculate_win_rate(trades) float
-        +calculate_profit_factor(trades) float
-    }
-    
-    class StatisticalMetrics {
-        +calculate_information_ratio(returns, benchmark) float
-        +calculate_beta(returns, market) float
-        +calculate_alpha(returns, market, risk_free) float
-        +calculate_var(returns, confidence) float
-        +calculate_cvar(returns, confidence) float
-    }
-    
-    PerformanceMetrics --> TradingMetrics
-    PerformanceMetrics --> StatisticalMetrics
-```
+There is no `ConfigManager`, `ModelConfig`, or `TrainingConfig` class layer —
+config is a plain dict loaded with `yaml.safe_load` and mutated in place by the
+pipeline.
 
 ---
 
 ## Model Explanation and Interpretability
 
-### Explanation Methods
+Explainers live in `training/models/explainable_ai.py`:
 
-```mermaid
-graph TB
-    subgraph "Explanation Techniques"
-        SHAP[SHAP Values]
-        LIME[LIME Explanations]
-        FeatureImp[Feature Importance]
-        Attention[Attention Weights]
-        Permutation[Permutation Importance]
-    end
-    
-    subgraph "Model Types"
-        RF[Random Forest]
-        NN[Neural Network]
-        Trans[Transformer]
-        Ensemble[Ensemble]
-    end
-    
-    subgraph "Outputs"
-        Plots[Explanation Plots]
-        Reports[Explanation Reports]
-        JSON[JSON Explanations]
-        CSV[CSV Metrics]
-    end
-    
-    RF --> SHAP
-    RF --> FeatureImp
-    NN --> LIME
-    NN --> Permutation
-    Trans --> Attention
-    Trans --> SHAP
-    Ensemble --> SHAP
-    Ensemble --> FeatureImp
-    
-    SHAP --> Plots
-    LIME --> Reports
-    FeatureImp --> JSON
-    Attention --> Plots
-    Permutation --> CSV
-```
+- `ModelExplainer` (base) with `explain`/`visualize`.
+- `SHAPExplainer` and `LIMEExplainer` — used by `ModelTrainer.explain_model`.
+- `AttentionVisualizer` and `DecisionBoundaryVisualizer` for transformer/2-D
+  visualizations.
+- A module-level `generate_explanations(...)` helper.
+
+`shap`, `lime`, and `plotly` are **optional, guarded imports**
+(`SHAP_AVAILABLE`, `LIME_AVAILABLE`, `PLOTLY_AVAILABLE`). When a library is
+absent the corresponding explainer degrades gracefully instead of raising at
+import time. RL-agent explanations are intentionally skipped by the pipeline
+(`generate_explanations` writes an empty `rl_explanations.json`).
 
 ---
 
-## Known Issues and Limitations
+## Hyperparameter Optimization (`training/automl/hyperparameter_optimizer.py`)
 
-### Current Limitations
-- **RL Agent Explanations:** Currently unsupported due to incompatibility with SHAP/LIME
-- **TensorFlow Warnings:** Version compatibility issues with SHAP explainers
-- **Device Mismatch:** Handled by ensuring model and data are on the same device
-- **Memory Usage:** Large models may require distributed training for optimal performance
-
-### Planned Improvements
-- Enhanced RL agent explanation support using specialized techniques
-- Improved memory management for large-scale training
-- Advanced hyperparameter optimization with Optuna integration
-- Real-time training monitoring with MLflow integration
+`HyperparameterOptimizer` wraps **Optuna** (TPE/random/CMA-ES samplers,
+median/percentile/hyperband/nop pruners, SQLite study storage by default). Optuna
+is an optional dependency (no Python 3.14 wheel, absent in CI), so its import is
+guarded; this module is not invoked by the default `train_models.py` flow.
 
 ---
 
-## Usage Examples
+## Transformer model (`training/models/transformer_models.py`)
 
-### Basic Training Command
+`TimeSeriesTransformer` (PyTorch `nn.Module`) with `PositionalEncoding`, plus
+`FinancialTransformer(TimeSeriesTransformer)`. `FinancialTransformer.__init__`
+takes `(input_dim, d_model=512, nhead=8, num_layers=6, dropout=0.1,
+max_seq_length=100)` and its `forward(price_data, technical_data,
+fundamental_data)` returns `(output, attention_dict)` for interpretability. A
+`load_pretrained_model(model_path)` helper is also provided. Note the default
+transformer sizes here differ from the `model_config.yaml` `transformer.model_params`
+(which the current `train()` loop does not actually use to build this model — the
+loop trains the small MLP in `ModelTrainer.train_epoch`).
+
+---
+
+## Known Limitations
+
+- **The default `train()` loop trains a tiny MLP**, not the transformer. The
+  transformer and ensemble modules exist and are importable, but wiring them into
+  the epoch loop is not done in `ModelTrainer.train_epoch`.
+- **`ModelTrainer.validate` is a placeholder** returning a constant `val_loss`;
+  early stopping therefore never triggers from real validation signal in the
+  default path.
+- **RL agents are largely scaffolding** — several `train`/`evaluate` methods are
+  stubs, and the pipeline constructs the system without explicit `agent_types`,
+  yielding placeholder agents.
+- **Optional heavy deps** (`optuna`, `shap`, `lime`, `plotly`, `tensorflow`) have
+  no Python 3.14 wheels and are guarded; features depending on them are inert
+  when the libraries are missing.
+- **RL-agent explanations are unsupported** and skipped.
+
+---
+
+## Usage
+
+### Basic training
+
 ```bash
-python training/train_models.py --config training/config/model_config.yaml --data data/processed/training_data.csv
+python training/train_models.py \
+    --config training/config/model_config.yaml \
+    --data data/processed/training_data.csv
 ```
 
-### Advanced Training with Custom Parameters
+### Available CLI flags (from `parse_args()`)
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--config` | `training/config/model_config.yaml` | Path to the YAML config |
+| `--data` | `data/processed/training_data.csv` | Training data (`.csv` -> CSV, else Parquet) |
+| `--output` | `models` | Output root; `models/`, `logs/`, `checkpoints/` are created under it |
+| `--resume` | `None` | Path to a checkpoint to resume from |
+| `--distributed` | off | Enable NCCL distributed training |
+| `--local_rank` | `0` | Local rank for distributed training |
+| `--debug` | off | Enable debug mode |
+| `--include-trade-history` | off | Pull trade history from the database via `TradeHistoryProcessor` |
+
+There are no `--models`, `--epochs`, or `--batch-size` flags — epoch count and
+batch size come from the config file (`transformer.epochs`, `batch_size`).
+
+### Include trade history from the database
+
 ```bash
 python training/train_models.py \
     --config training/config/model_config.yaml \
     --data data/processed/training_data.csv \
-    --models transformer,random_forest,ensemble \
-    --epochs 200 \
-    --batch-size 64 \
-    --distributed
+    --include-trade-history
 ```
 
 ---
 
 ## References
 
-### Core Files
-- `training/train_models.py` - Main training pipeline
-- `training/models/model_trainer.py` - Model training logic
-- `training/models/evaluator.py` - Performance evaluation
-- `training/config/model_config.yaml` - Configuration file
-- `training/data/data_downloader.py` - Data acquisition
-- `core/data/processors/base_processor.py` - Data processing interface
+### Core files
+- `training/train_models.py` — `TrainingPipeline` orchestrator and CLI
+- `training/models/model_trainer.py` — `ModelTrainer`
+- `training/models/ensemble_models.py` — `StackingEnsemble`, `WeightedEnsemble`, `NeuralEnsemble`
+- `training/models/rl_agents.py` — `MultiAgentTradingSystem` and agents
+- `training/models/evaluator.py` — RL-style `Evaluator`
+- `training/models/explainable_ai.py` — SHAP/LIME/attention explainers
+- `training/models/transformer_models.py` — `FinancialTransformer`
+- `training/automl/hyperparameter_optimizer.py` — Optuna `HyperparameterOptimizer`
+- `training/config/model_config.yaml` — configuration file
+- `training/data/data_downloader.py` — Binance historical download
+- `training/data/trade_history_processor.py` — `TradeHistoryProcessor`
+- `utils/monitoring.py` — `TrainingMonitor`
+- `trading/utils/checkpoint.py` — `CheckpointManager`
+- `trading/data/data_processor.py` — `DataProcessor`
+- `core/data/processors/base_processor.py` — `BaseProcessor` (ABC)
 
-### Related Documentation
+### Related documentation
 - [Random Forest Model Documentation](random_forest.md)
+- [Enhanced Random Forest Guide](enhanced_random_forest_guide.md)
 - [Future Improvements](future_improvements.md)
 - [Architecture Overview](../README.md)
-
----
-
-This documentation will be continuously updated as the training pipeline evolves and new features are added.
