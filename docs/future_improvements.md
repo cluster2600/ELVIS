@@ -120,7 +120,7 @@ This document outlines key improvements to enhance the ELVIS Trading Bot's funct
 
 ### Short Term (Next 3 Months)
 - [ ] Web-based dashboard with React/Vue.js
-- [ ] Multi-exchange support (Kraken, Coinbase)
+- [x] Multi-exchange support (Kraken, Coinbase) ✅ — implemented via `trading/execution/kraken_executor.py` (`KrakenExecutor`) and `trading/execution/coinbase_executor.py` (`CoinbaseExecutor`), orchestrated alongside Binance by `trading/execution/exchange_manager.py` (`ExchangeManager`: best-price routing, arbitrage detection, consolidated balances)
 - [ ] Advanced order types (OCO, Iceberg, TWAP)
 - [ ] Enhanced mobile notifications
 

@@ -107,30 +107,44 @@ python scripts/vault_admin.py --status
 
 ## Secret Organization
 
-Secrets are organized in the following structure:
+The KV v2 secrets engine is mounted at **`secrets`** (plural). The credentials
+ELVIS actually reads live at flat, per-service paths under that mount, matching
+the native OpenBao convention (see `_VAULT_KEY_MAP` in
+`utils/secrets_manager.py`):
 
 ```
-secret/
-├── trading/
-│   ├── api-keys/          # Binance API credentials
-│   └── binance-testnet/   # Testnet credentials
-├── database/
-│   └── credentials/       # PostgreSQL credentials
-├── notifications/
-│   └── webhooks/          # Telegram, Discord webhooks
-├── monitoring/
-│   ├── prometheus/        # Monitoring credentials
-│   └── grafana/          # Grafana API keys
-└── general/
-    └── secrets/          # Other secrets
+secrets/
+├── binance/            # Live Binance API credentials
+│   ├── api_key
+│   └── secret_key
+└── binance_testnet/    # Binance Futures testnet credentials
+    ├── api_key
+    └── secret_key
 ```
+
+Anything not listed in `_VAULT_KEY_MAP` (database, webhooks, and other
+categories set via `set_secret`) is written to the legacy category paths
+derived by `_category_to_vault_path`, still under the `secrets` mount:
+
+```
+secrets/
+├── trading/api-keys       # api_keys category
+├── database/credentials   # database category (PostgreSQL, Redis)
+├── notifications/webhooks # webhooks category (Discord, Slack)
+└── general/secrets        # default / uncategorized
+```
+
+Note the field-name convention differs between the two layouts: the flat
+per-service paths use `api_key` / `secret_key` verbatim, while the legacy
+category paths lowercase-and-hyphenate the secret name (e.g. `BINANCE_API_KEY`
+→ `binance-api-key`).
 
 ## Code Usage
 
-### Using Enhanced Secrets Manager
+### Using the Enhanced Secrets Manager
 
 ```python
-from utils.secrets_manager_enhanced import get_enhanced_secrets_manager
+from utils.secrets_manager import get_enhanced_secrets_manager
 
 # Initialize
 secrets = get_enhanced_secrets_manager()
@@ -224,7 +238,7 @@ WARNING: Failed to get BINANCE_API_KEY from Vault, falling back to environment
 
 - **Cache TTL**: 300 seconds (5 minutes)
 - **Connection Timeout**: 5 seconds
-- **Mount Point**: `secret` (KV v2)
+- **Mount Point**: `secrets` (KV v2; API data paths are `secrets/data/...`)
 - **Retry Policy**: Automatic fallback to environment
 
 ## Migration from .env

@@ -80,10 +80,10 @@ vault server -dev -dev-root-token-id=trading-bot-token
 export VAULT_ADDR=http://127.0.0.1:8200
 export VAULT_TOKEN=trading-bot-token
 
-# Store secrets securely
-vault kv put secret/trading/api-keys \
-    binance-api-key=your-api-key \
-    binance-api-secret=your-api-secret
+# Store secrets securely (KV v2 mount `secrets`, one path per service)
+vault kv put secrets/binance \
+    api_key=your-api-key \
+    secret_key=your-api-secret
 
 # Start with maximum security
 python main.py --mode paper  # Shows ✅ Vault connected
@@ -143,10 +143,10 @@ vault server -dev -dev-root-token-id=trading-bot-token &
 export VAULT_ADDR=http://127.0.0.1:8200
 export VAULT_TOKEN=trading-bot-token
 
-# 3. Store your API keys securely in Vault
-vault kv put secret/trading/api-keys \
-    binance-api-key=your-binance-api-key \
-    binance-api-secret=your-binance-api-secret
+# 3. Store your API keys securely in Vault (KV v2 mount `secrets`)
+vault kv put secrets/binance \
+    api_key=your-binance-api-key \
+    secret_key=your-binance-api-secret
 
 # 4. Start trading with enterprise security
 python main.py --mode paper
@@ -252,7 +252,8 @@ graph TB
         Dashboard[ConsoleDashboard]
         TelegramBot[TelegramNotifier]
         TradeAPI[TradeHistoryAPI]
-        Monitoring[Monitoring]
+        PerfMonitor[PerformanceMonitor]
+        Prometheus[Prometheus /metrics]
         Grafana[Grafana Dashboards]
     end
     
@@ -293,8 +294,9 @@ graph TB
     TrainPipeline --> BinanceProcessor
     ModelTrainer --> RL
     
-    Dashboard --> Monitoring
-    Monitoring --> Grafana
+    Dashboard --> PerfMonitor
+    PerfMonitor --> Prometheus
+    Prometheus --> Grafana
     
     Config --> Main
     Config --> Training
@@ -322,7 +324,7 @@ classDiagram
     }
     
     class RandomForestModel {
-        -model: tfdf.RandomForestModel
+        -model: sklearn.RandomForestClassifier
         -optuna_trial: Optional[Trial]
         +train(X, y)
         +predict(X) ndarray
@@ -558,14 +560,6 @@ classDiagram
         +get_balance_history() List[Dict]
     }
     
-    class Monitoring {
-        -prometheus_client: PrometheusClient
-        -grafana_config: Dict
-        +push_metrics(metrics)
-        +create_dashboard(config)
-        +setup_alerts(rules)
-    }
-    
     class PerformanceMonitor {
         -metrics_history: List[Dict]
         +track_trade(trade_info)
@@ -576,7 +570,6 @@ classDiagram
     
     ConsoleDashboard --> PerformanceMonitor
     TelegramNotifier --> TradeHistoryAPI
-    Monitoring --> PerformanceMonitor
 ```
 
 ---
@@ -589,7 +582,7 @@ Defines the abstract interface all models must implement, including methods for 
 
 ### RandomForestModel
 
-Implements a Random Forest classifier using scikit-learn (`RandomForestClassifier`), persisted with joblib. Supports training, evaluation, prediction, k-fold cross-validation, and Prometheus Pushgateway CV metrics. (SHAP/Optuna live only in `enhanced_random_forest_model.py`, not the base model.)
+Implements a Random Forest classifier using scikit-learn (`RandomForestClassifier`), persisted with joblib. Supports training, evaluation, prediction, k-fold cross-validation, and Prometheus Pushgateway CV metrics. `explain_predictions()` uses SHAP when the `shap` package is installed, else falls back to sklearn `feature_importances_` (no LIME in the base model); `tune_hyperparameters()` uses Optuna when installed, else a `GridSearchCV` fallback.
 
 ### NeuralNetworkModel
 
@@ -902,10 +895,10 @@ vault server -dev -dev-root-token-id=trading-bot-token
 export VAULT_ADDR=http://127.0.0.1:8200
 export VAULT_TOKEN=trading-bot-token
 
-# 3. Store secrets securely
-vault kv put secret/trading/api-keys \
-    binance-api-key=your-api-key \
-    binance-api-secret=your-api-secret
+# 3. Store secrets securely (KV v2 mount `secrets`, one path per service)
+vault kv put secrets/binance \
+    api_key=your-api-key \
+    secret_key=your-api-secret
 
 # 4. Verify security status
 python main.py --mode paper

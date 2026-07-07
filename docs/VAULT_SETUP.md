@@ -30,34 +30,49 @@ export VAULT_TOKEN=trading-bot-token
 ```
 
 ### 3. Initialize Trading Secrets
-```bash
-# Store Binance API credentials
-vault kv put secret/trading/api-keys \
-    binance-api-key=your-binance-api-key \
-    binance-api-secret=your-binance-api-secret \
-    telegram-bot-token=your-telegram-bot-token
+The KV v2 secrets engine is mounted at `secrets` (plural), and ELVIS reads the
+Binance credentials from one path per service (`secrets/binance`,
+`secrets/binance_testnet`) with the fields `api_key` and `secret_key`. This
+mapping is defined in `utils/secrets_manager.py` (`_VAULT_KEY_MAP`); the paths
+below match it exactly. `vault` and `bao` (OpenBao) are interchangeable CLIs.
 
-# Store database credentials
-vault kv put secret/database/credentials \
+```bash
+# Store Binance API credentials (the paths ELVIS actually reads)
+bao kv put -mount=secrets binance \
+    api_key=your-binance-api-key \
+    secret_key=your-binance-api-secret
+
+# Store Binance Futures testnet credentials
+bao kv put -mount=secrets binance_testnet \
+    api_key=your-testnet-api-key \
+    secret_key=your-testnet-secret-key
+```
+
+Optional legacy category paths (Telegram, database, webhooks) map to
+`secrets/notifications/telegram`, `secrets/database/credentials`, and
+`secrets/notifications/webhooks` via `_category_to_vault_path` in
+`utils/secrets_manager.py`. The Binance credentials are never read from these
+paths. Store them only if you use those integrations:
+
+```bash
+# Optional: notification / database secrets (category-derived paths)
+bao kv put -mount=secrets notifications/telegram \
+    telegram-bot-token=your-telegram-bot-token
+bao kv put -mount=secrets database/credentials \
     postgres-host=localhost \
     postgres-user=elvis_user \
     postgres-password=your-secure-password \
     redis-password=your-redis-password
-
-# Store notification webhooks
-vault kv put secret/notifications/webhooks \
-    discord-webhook=https://discord.com/api/webhooks/... \
-    slack-webhook=https://hooks.slack.com/services/...
 ```
 
 ### 4. Verify Setup
 ```bash
 # Test secret retrieval
-vault kv get secret/trading/api-keys
-vault kv get secret/database/credentials
+bao kv get -mount=secrets binance
+bao kv get -mount=secrets binance_testnet
 
 # Check Vault status
-vault status
+bao status
 ```
 
 ## 🏢 Production Setup
@@ -103,8 +118,8 @@ vault operator unseal <key1>
 vault operator unseal <key2>
 vault operator unseal <key3>
 
-# Enable KV v2 secrets engine
-vault secrets enable -path=secret kv-v2
+# Enable KV v2 secrets engine at the `secrets` mount ELVIS expects
+vault secrets enable -path=secrets kv-v2
 ```
 
 ### 4. Authentication Setup
@@ -124,15 +139,22 @@ vault write auth/ldap/config \
 ### 5. Policy Configuration
 ```hcl
 # trading-bot-policy.hcl
-path "secret/data/trading/*" {
+# KV v2 data lives under <mount>/data/... — here the mount is `secrets`.
+# ELVIS only needs the two Binance service paths to trade.
+path "secrets/data/binance" {
   capabilities = ["read"]
 }
 
-path "secret/data/database/*" {
+path "secrets/data/binance_testnet" {
   capabilities = ["read"]
 }
 
-path "secret/data/notifications/*" {
+# Optional: grant these only if you use the corresponding integrations.
+path "secrets/data/notifications/*" {
+  capabilities = ["read"]
+}
+
+path "secrets/data/database/*" {
   capabilities = ["read"]
 }
 
@@ -164,19 +186,19 @@ The ELVIS bot automatically:
 
 ### 3. Secret Structure
 ```
-Vault KV v2 Paths Used by ELVIS:
-├── secret/trading/api-keys/
-│   ├── binance-api-key         # Binance API key
-│   ├── binance-api-secret      # Binance API secret
-│   └── telegram-bot-token      # Telegram notifications
-├── secret/database/credentials/
-│   ├── postgres-host           # Database host
-│   ├── postgres-user           # Database username
-│   ├── postgres-password       # Database password
-│   └── redis-password          # Redis password (optional)
-└── secret/notifications/webhooks/
-    ├── discord-webhook         # Discord webhook URL
-    └── slack-webhook           # Slack webhook URL
+Vault KV v2 Paths Used by ELVIS (mount: secrets):
+├── secrets/binance/                 # Primary Binance credentials (read by _VAULT_KEY_MAP)
+│   ├── api_key                      # Binance API key
+│   └── secret_key                   # Binance API secret
+└── secrets/binance_testnet/         # Binance Futures testnet credentials
+    ├── api_key                      # Testnet API key
+    └── secret_key                   # Testnet API secret
+
+Optional legacy category paths (NOT read for Binance; only populated/read
+if you use the ELVIS CLIs with the matching category):
+├── secrets/notifications/telegram/  # telegram-bot-token, ...
+├── secrets/database/credentials/    # postgres-host, postgres-user, ...
+└── secrets/notifications/webhooks/  # discord-webhook, slack-webhook
 ```
 
 ## 🛡️ Security Best Practices
@@ -269,7 +291,7 @@ echo $VAULT_TOKEN
 vault token lookup
 
 # Check token permissions
-vault token capabilities secret/trading/api-keys
+vault token capabilities secrets/data/binance
 
 # Renew token if needed
 vault token renew
@@ -278,10 +300,10 @@ vault token renew
 #### 3. Secrets Not Found
 ```bash
 # List available secrets
-vault kv list secret/
+vault kv list -mount=secrets /
 
 # Check specific path
-vault kv get secret/trading/api-keys
+vault kv get -mount=secrets binance
 
 # Verify KV version
 vault secrets list -detailed
