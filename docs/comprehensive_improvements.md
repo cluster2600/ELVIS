@@ -173,6 +173,45 @@ Each fallback run is one JSON line with `run_name`, `start_time`/`end_time`,
 is standalone and importable without heavy dependencies; it is intentionally
 **not** wired into the training pipeline yet.
 
+### Model Registry: `core/models/model_registry.py`
+
+Implements the documented "version control for models" + "deployment approval
+workflow" with a JSON manifest at `models/registry.json` (atomic writes, stdlib
+only — no external service).
+
+**How it works:** `register(path, name, metrics=)` hashes the artifact (sha256)
+and appends a `pending` version; `approve(name, version)` promotes it to
+`production` and `reject(...)` marks it rejected; `get_production(name)` returns
+the latest approved version. Content-hashing means a changed file is always a
+distinct version.
+
+**How to use:**
+```python
+from core.models.model_registry import ModelRegistry
+reg = ModelRegistry()
+reg.register("models/model_rf.joblib", "rf", metrics={"f1": 0.71})  # -> pending v1
+reg.approve("rf", 1)                                                # -> production
+prod = reg.get_production("rf")                                     # latest approved
+```
+
+### Portfolio Allocation: `trading/risk/portfolio_allocation.py`
+
+Implements the documented "multi-asset allocation / risk parity / rebalancing"
+(numpy only, no scipy — 3.14-safe).
+
+**How it works:** `inverse_volatility_weights(returns)` weights assets by
+1/volatility; `risk_parity_weights(cov)` solves equal-risk-contribution weights
+iteratively; `rebalance_orders(current, target_weights, equity, min_trade_usd)`
+emits the BUY/SELL orders to reach the target allocation, skipping dust.
+
+**How to use:**
+```python
+from trading.risk.portfolio_allocation import risk_parity_weights, rebalance_orders
+w = risk_parity_weights(cov_matrix)                    # ERC weights, sum to 1
+orders = rebalance_orders({"BTC": 600, "ETH": 400},
+                          {"BTC": 0.5, "ETH": 0.5}, equity=1000)
+```
+
 ## 4. Data Engineering
 
 ### Current Limitations
