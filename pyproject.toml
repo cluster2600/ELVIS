@@ -68,6 +68,9 @@ include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "perf: API latency/load benchmarks (run explicitly with -m perf)",
+]
 
 [tool.black]
 line-length = 88

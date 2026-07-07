@@ -70,6 +70,11 @@ VAULT_TOKEN=your_actual_vault_token_here
 python scripts/vault_admin.py --list
 ```
 
+Lists field **names only** (never values), covering both the legacy category
+paths (`trading/api-keys`, `database/credentials`, …) and the flat per-service
+paths the bot actually reads via `_VAULT_KEY_MAP` — `secrets/binance` and
+`secrets/binance_testnet` (`api_key` / `secret_key`).
+
 ### Add a New Secret
 
 ```bash

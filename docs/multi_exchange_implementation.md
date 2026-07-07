@@ -184,7 +184,10 @@ empty. Tests for these endpoints live in `tests/test_multi_exchange_api.py`
 
 ### Environment Variables
 
-Add these to your `.env` file for multi-exchange support:
+Add these to your `.env` file for multi-exchange support (they are also listed,
+commented out, in `.env.example`). `APIConfig` reads each from Vault first, then
+the environment; when unset, `core/bootstrap.create_exchange_manager` registers
+only Binance and skips the missing exchange (non-fatal):
 
 ```bash
 # Kraken API (optional)

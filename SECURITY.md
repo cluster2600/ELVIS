@@ -50,6 +50,25 @@ Operational implications:
     asserts the `trading-bot-token` literal is absent and that a missing
     `VAULT_TOKEN` is not silently defaulted.
 
+## 🧑‍⚖️ Role-Based Access Control (control API)
+
+**How it works:** the control API (`trading/api/app.py`) issues JWTs with a
+`role` claim at `/api/auth/login` (`API_ROLE` env var, default `admin` for the
+single env-configured operator). A `require_role("admin")` decorator protects
+the mutating endpoints — `/api/bot/start`, `/api/bot/stop`, `PUT /api/config`,
+`/api/dashboard/broadcast/alert` — returning **403** for other roles. Read
+endpoints require any valid token. Tokens **without** a role claim (issued
+before RBAC) are treated as read-only `viewer`, so old tokens keep working for
+reads but can no longer mutate.
+
+**How to use:** set `API_ROLE=viewer` before issuing tokens for dashboards or
+monitors that must not control the bot; leave unset (admin) for operator
+tokens. Coverage: `tests/test_api_rbac.py`.
+
+**Network binding:** both Flask apps bind `127.0.0.1` by default; set
+`API_HOST=0.0.0.0` / `TRADE_API_HOST=0.0.0.0` (docker-compose does) to expose
+them, and `API_DEBUG=true` explicitly for debug mode.
+
 ## 🔐 HashiCorp Vault Integration
 
 The bot targets HashiCorp Vault / OpenBao's KV v2 secrets engine for API keys

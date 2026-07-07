@@ -99,6 +99,30 @@ def require_auth(f):
     return decorated_function
 
 
+def require_role(role):
+    """Decorator: valid JWT AND the given role (RBAC, see SECURITY.md).
+
+    Tokens without a role claim are treated as read-only 'viewer' so tokens
+    issued before RBAC keep working for read endpoints but cannot mutate.
+    """
+
+    def decorator(f):
+        @wraps(f)
+        @require_auth
+        def decorated_function(*args, **kwargs):
+            token_role = getattr(request, "user", {}).get("role", "viewer")
+            if token_role != role:
+                return (
+                    jsonify({"error": f"Requires '{role}' role"}),
+                    403,
+                )
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
+
 # Health check endpoint
 @app.route("/health", methods=["GET"])
 @limiter.limit("1000 per hour")
@@ -131,11 +155,17 @@ def login():
     api_pass = os.environ.get("API_PASSWORD")
     if api_user and api_pass and username == api_user and password == api_pass:
 
-        # Generate token
-        payload = {"user": username, "exp": datetime.utcnow() + timedelta(hours=24)}
+        # Generate token with an RBAC role claim (default admin for the
+        # single env-configured operator; override with API_ROLE=viewer).
+        role = os.environ.get("API_ROLE", "admin")
+        payload = {
+            "user": username,
+            "role": role,
+            "exp": datetime.utcnow() + timedelta(hours=24),
+        }
         token = jwt.encode(payload, app.config["SECRET_KEY"], algorithm="HS256")
 
-        return jsonify({"token": token, "expires_in": 86400})  # 24 hours
+        return jsonify({"token": token, "role": role, "expires_in": 86400})
 
     return jsonify({"error": "Invalid credentials"}), 401
 
@@ -165,7 +195,7 @@ def get_bot_status():
 
 
 @app.route("/api/bot/start", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def start_bot():
     """Start the trading bot"""
@@ -195,7 +225,7 @@ def start_bot():
 
 
 @app.route("/api/bot/stop", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def stop_bot():
     """Stop the trading bot"""
@@ -460,7 +490,7 @@ def get_config():
 
 
 @app.route("/api/config", methods=["PUT"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def update_config():
     """Update bot configuration"""
@@ -675,7 +705,7 @@ def get_websocket_clients():
 
 
 @app.route("/api/dashboard/broadcast/alert", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("20 per hour")
 def broadcast_dashboard_alert():
     """Broadcast alert to all connected dashboard clients"""
