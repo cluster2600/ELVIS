@@ -942,10 +942,14 @@ def health():
 
 
 # NEW: Create a function that can be called externally
-def start_trade_history_server(host="0.0.0.0", port=5050):
+def start_trade_history_server(host=None, port=5050):
     """
     Starts the trade history Flask API server.
+
+    Binds 127.0.0.1 by default (SECURITY.md); set TRADE_API_HOST=0.0.0.0 to
+    expose it (docker-compose does this for container networking).
     """
+    host = host or _os.getenv("TRADE_API_HOST", "127.0.0.1")
     print(f"Starting Trade History Server on {host}:{port}...")
     app.run(host=host, port=port)
 
