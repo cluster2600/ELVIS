@@ -35,6 +35,22 @@ Testing Strategy:
     - Market volatility stress tests
 ```
 
+### API Latency Harness: `tests/perf/test_api_latency.py`
+
+Implements the "Load testing for API endpoints" item as a lightweight
+**regression tripwire** (not a load generator). Using the Flask test client
+with the DB mocked, it measures p50/p95 wall-clock over 50 calls to the
+trade-history API's `/health` and `/trades` read endpoints and asserts a
+generous p95 ceiling (0.5s) so it fails only on a real regression.
+
+**How to use:** the tests carry the `perf` marker (registered in
+`pyproject.toml`) and are **excluded from the default CI run** (`-m "not perf"`).
+Run them explicitly:
+
+```bash
+venv314/bin/python -m pytest tests/perf -m perf -v   # prints p50/p95 per endpoint
+```
+
 ## 2. Architecture & Design Patterns
 
 ### Current Issues

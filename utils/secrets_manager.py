@@ -280,7 +280,11 @@ class EnhancedSecretsManager:
                     "notifications/webhooks",
                     "general/secrets",
                 ]
-                for vault_path in vault_paths:
+                # Also probe the flat per-service paths the bot actually
+                # reads (secrets/binance, secrets/binance_testnet, ...) per
+                # _VAULT_KEY_MAP — field NAMES only, never values.
+                flat_paths = sorted({path for path, _field in _VAULT_KEY_MAP.values()})
+                for vault_path in vault_paths + flat_paths:
                     try:
                         vault_secrets = self.vault_client.get_secret(vault_path)
                         if vault_secrets:
