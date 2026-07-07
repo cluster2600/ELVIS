@@ -7,7 +7,8 @@ The Research-Based Strategy implements the exact methodology from the academic p
 
 This strategy is designed to solve the two main issues with your current bot:
 1. **Not trading enough** (eliminates HOLD signals)
-2. **Losing money** (follows proven 14.9% annual return methodology)
+2. **Losing money** (follows the methodology the paper reports at a 14.9% annual
+   return — a paper target, not a measured bot result)
 
 ## Key Features
 
@@ -124,24 +125,33 @@ ROLLING_TRAINING_ENABLED=true STRATEGY_MODE=research python main.py --mode paper
 
 ## Expected Results
 
-### 🎯 Performance Targets (from research)
-- **Annualized Return**: 14.9%
-- **Annualized Sharpe Ratio**: 2.02
-- **F1-Score**: 57.6%
-- **Accuracy**: 57.8%
+### 🎯 Performance Targets (from the source paper — NOT measured bot results)
+
+> ⚠️ The figures below are the results **reported in Bonenkamp (2021)** for the
+> paper's own backtest. They are the design targets this strategy aims to
+> reproduce — they are **not** verified live or paper-trading results of this
+> bot. Treat them as reference numbers from the paper, not a promise of bot
+> performance.
+
+- **Annualized Return**: 14.9% *(paper target)*
+- **Annualized Sharpe Ratio**: 2.02 *(paper target)*
+- **F1-Score**: 57.6% *(paper target)*
+- **Accuracy**: 57.8% *(paper target)*
 
 ### 🚀 Trading Behavior Changes
 - **More active trading** (no HOLD signals)
 - **Binary decisions** (always BUY or SELL)
-- **Higher confidence** signals (research-proven methodology)
-- **Consistent profitability** (follows academic research)
+- **Higher confidence** signals (model probability drives confidence)
+- **Aims to reproduce** the paper's methodology (past paper results are not a
+  guarantee of future profitability)
 
 ## Testing
 
-Run the test script to validate the implementation:
+Run the end-to-end validation script (it prints a step-by-step report and can be
+run directly):
 
 ```bash
-python test_research_strategy.py
+python tests/test_research_strategy.py
 ```
 
 This will test:
@@ -151,6 +161,14 @@ This will test:
 - ✅ Signal generation (BUY/SELL only)
 - ✅ Model training with cross-validation
 - ✅ Research methodology compliance
+
+For fast, dependency-free assertions (no talib/torch/tweepy/pytrends required)
+covering the binary-signal guarantee, time-series-aware cross-validation, and the
+import-guarded social collectors, run the focused pytest suite:
+
+```bash
+pytest tests/test_research_strategy_features.py
+```
 
 ## Implementation Details
 
@@ -268,4 +286,4 @@ them.
 
 5. **Compare performance** with ensemble strategy over time
 
-This research-based strategy directly addresses your trading issues by following a proven academic methodology that achieved 14.9% returns with active binary trading decisions.
+This research-based strategy directly addresses your trading issues by following an academic methodology that the source paper reports at a 14.9% return, using active binary trading decisions. That 14.9% is the paper's reported figure, not verified performance of this bot.

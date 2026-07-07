@@ -17,16 +17,16 @@ graph TB
     
     subgraph "Docker Network: elvis-network"
         subgraph "Database Layer"
-            DB1[PostgreSQL Container<br/>elvis-postgres<br/>Port: 5432<br/>Volume: postgres-data]
-            DB2[Redis Container<br/>elvis-redis<br/>Port: 6379<br/>Volume: redis-data]
+            DB1[PostgreSQL Container<br/>elvis-postgres<br/>Host 5433 → 5432<br/>Volume: postgres-data]
+            DB2[Redis Container<br/>elvis-redis<br/>Host 6380 → 6379<br/>Volume: redis-data]
         end
         
-        subgraph "Monitoring Core"
+        subgraph "Monitoring Core (profile: observability)"
             MON1[Prometheus Container<br/>elvis-prometheus<br/>Port: 9090<br/>Volume: prometheus-data]
-            MON2[Grafana Container<br/>elvis-grafana<br/>Port: 3000→3001<br/>Volume: grafana-data]
+            MON2[Grafana Container<br/>elvis-grafana<br/>Port: 3001→3000<br/>Volume: grafana-data]
         end
         
-        subgraph "Logging Stack"
+        subgraph "Logging Stack (profile: observability)"
             LOG1[Loki Container<br/>elvis-loki<br/>Port: 3100<br/>Volume: loki-data]
             LOG2[Promtail Container<br/>elvis-promtail<br/>No exposed ports<br/>Log shipping agent]
         end
@@ -43,8 +43,8 @@ graph TB
     EXT2 -.->|Git Clone/Pull| HOST3
     
     %% Host to Container Connections
-    HOST1 -->|Database Queries<br/>Port: 5432| DB1
-    HOST1 -->|Cache Operations<br/>Port: 6379| DB2
+    HOST1 -->|Database Queries<br/>Host port: 5433| DB1
+    HOST1 -->|Cache Operations<br/>Host port: 6380| DB2
     HOST1 -->|Metrics Export<br/>Port: 5050/metrics| MON1
     HOST2 -->|Log File Mount<br/>Read-only| LOG2
     HOST3 -->|Config Mount<br/>Read-only| MON1
@@ -80,13 +80,27 @@ graph TB
     class USER1,USER2,USER3 user
 ```
 
+> **Monitoring is not a standalone service.** The Prometheus/Grafana/Loki/Promtail
+> containers above are optional and only start with the `observability` Compose
+> profile (`docker compose --profile observability up`). The bot's actual
+> monitoring code lives in three places:
+> - **`trading/utils/trade_history_api.py`** — the Flask trade-history API on port
+>   `5050`; exposes `GET /metrics` (Prometheus format, via `prometheus_client` /
+>   `prometheus_flask_exporter`) and `GET /health`. This is the target Prometheus
+>   scrapes at `host.docker.internal:5050`.
+> - **`utils/api_connection_tester.py`** — `APIConnectionTester` runs per-service
+>   health checks (Binance spot/futures/testnet, PostgreSQL, Redis, Vault,
+>   Telegram, Prometheus) and rolls them up via `get_overall_health()`.
+> - **`core/metrics/performance_monitor.py`** — `PerformanceMonitor` tracks
+>   trading performance (rolling Sharpe, drawdown).
+
 ## 🔌 Detailed Port Mapping & Network Configuration
 
 ```mermaid
 graph LR
     subgraph "Host Ports (localhost)"
-        H1[5432<br/>PostgreSQL]
-        H2[6379<br/>Redis]
+        H1[5433<br/>PostgreSQL]
+        H2[6380<br/>Redis]
         H3[9090<br/>Prometheus]
         H4[3001<br/>Grafana]
         H5[3100<br/>Loki]
@@ -144,7 +158,7 @@ sequenceDiagram
     User->>Grafana: HTTP Request (port 3001)
     Grafana->>Prometheus: PromQL Query (port 9090)
     Prometheus->>ELVIS: Scrape /metrics (port 5050)
-    ELVIS->>DB: Query trading data (port 5432)
+    ELVIS->>DB: Query trading data (host port 5433)
     DB-->>ELVIS: Trade/position data
     ELVIS-->>Prometheus: Metrics response
     Prometheus-->>Grafana: Query results
@@ -234,8 +248,8 @@ graph TB
     end
     
     subgraph "Access Control Matrix"
-        PUB[Public Ports<br/>🔓 3001: Grafana UI<br/>🔓 9090: Prometheus API<br/>🔓 5050: ELVIS API<br/>🔓 3100: Loki API]
-        INT_CONT[Internal Only<br/>🔒 5432: PostgreSQL<br/>🔒 6379: Redis<br/>🔒 Container-to-Container]
+        PUB[Published Ports (bound to host)<br/>🔓 3001: Grafana UI<br/>🔓 9090: Prometheus API<br/>🔓 5050: ELVIS API<br/>🔓 3100: Loki API<br/>🔓 5433→5432: PostgreSQL<br/>🔓 6380→6379: Redis]
+        INT_CONT[Container-to-Container<br/>🔒 Service DNS on elvis-network<br/>🔒 postgres:5432, redis:6379]
     end
     
     INT -.->|HTTPS/WSS| HOST

@@ -159,8 +159,15 @@ docker-compose logs -f elvis-bot
 
 ### Setting Up Secrets
 
-`utils/secrets_manager.py` exposes a small command-line interface for managing
-secrets. It is driven by argparse and requires exactly one mode:
+The bot ships **two** secret command-line tools. They are complementary, not
+interchangeable — use `utils/secrets_manager.py` for quick, safe get/set/list
+against the same store the bot reads at runtime, and `scripts/vault_admin.py`
+for full Vault administration (add/update/delete/backup/test).
+
+#### `utils/secrets_manager.py` — lightweight get/set/list
+
+This module exposes a small argparse CLI that requires exactly one mode
+(`--set`, `--get`, or `--list`, mutually exclusive):
 
 ```bash
 # Store a secret (value is prompted with a hidden getpass input)
@@ -186,6 +193,38 @@ python utils/secrets_manager.py --list
   elsewhere (e.g. `api_keys`, `database`).
 - Running the file directly works even without Vault installed: the optional
   Vault import degrades gracefully and the manager falls back to local storage.
+
+#### `scripts/vault_admin.py` — full Vault administration
+
+This script targets HashiCorp Vault directly (via `get_vault_client` and the
+`_VAULT_KEY_MAP` from `utils/secrets_manager.py`) and offers a broader set of
+mutually exclusive modes. Note the flag names differ from the module above —
+it uses `--add`/`--update`/`--delete`, not `--set`/`--get`:
+
+```bash
+# Interactively add a new secret to Vault
+python scripts/vault_admin.py --add
+
+# Update an existing secret
+python scripts/vault_admin.py --update
+
+# Delete a secret
+python scripts/vault_admin.py --delete
+
+# List all secrets in Vault
+python scripts/vault_admin.py --list
+
+# Check Vault connection/status
+python scripts/vault_admin.py --status
+
+# Write an encrypted backup of Vault secrets (default: .vault-backup.enc)
+python scripts/vault_admin.py --backup [--out PATH]
+
+# Test that Binance credentials can be retrieved
+python scripts/vault_admin.py --test
+```
+
+Run with no flag to print the help banner and the command summary.
 
 ### Accessing Services
 - **Trading Bot API**: http://localhost:5050
