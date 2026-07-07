@@ -1214,5 +1214,13 @@ def _calculate_uptime() -> Optional[str]:
 
 
 if __name__ == "__main__":
-    # Development server with WebSocket support
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    # Binds localhost by default (SECURITY.md); set API_HOST=0.0.0.0 to expose
+    # (docker-compose does this). debug is opt-in via API_DEBUG only.
+    import os as _os
+
+    socketio.run(
+        app,
+        host=_os.getenv("API_HOST", "127.0.0.1"),
+        port=int(_os.getenv("API_PORT", "5000")),
+        debug=_os.getenv("API_DEBUG", "").lower() == "true",
+    )
