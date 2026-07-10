@@ -116,7 +116,7 @@ Concrete strategies shipped under `trading/strategies/` include (non-exhaustive)
 `bonenkamp_hft_strategy`, `technical_strategy`, `ema_rsi_strategy`,
 `mean_reversion_strategy`, `trend_following_strategy`, `grid_strategy`,
 `sentiment_strategy`, `llm_enhanced_strategy`, `high_leverage_scalping_strategy`,
-`bnb_aware_strategy`, `balanced_starter`.
+`balanced_starter`.
 
 ### 2. Ensemble Strategy Implementation
 
