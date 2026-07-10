@@ -23,10 +23,9 @@ all:
       - 22    # SSH
       - 80    # HTTP
       - 443   # HTTPS
-      - 3000  # Grafana
+      - 3001  # Grafana
       - 5050  # Trade History API
       - 6379  # Redis
-      - 8000  # Web Dashboard
       - 9090  # Prometheus
       
 development:

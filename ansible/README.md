@@ -46,7 +46,8 @@ The Ansible playbook automatically installs and configures:
 - **Docker Compose** - Multi-container orchestration
 
 ### Web Technologies
-- **Node.js 18** - JavaScript runtime for web dashboard
+- **Node.js 18** - installed for tooling and any future web UI (the bot itself
+  uses the curses console dashboard + Grafana, not a bundled web app)
 
 ### Python Environment
 - **Virtual environment** - Isolated Python environment
@@ -202,8 +203,8 @@ After running the Ansible playbook:
    ```
 
 4. **Access Web Interfaces**:
-   - Grafana: http://localhost:3000 (admin/admin)
-   - API Docs: http://localhost:5050/api/docs
+   - Grafana: http://localhost:3001 (admin/admin)
+   - Trade History API health: http://localhost:5050/health
    - Prometheus: http://localhost:9090
 
 ## Troubleshooting

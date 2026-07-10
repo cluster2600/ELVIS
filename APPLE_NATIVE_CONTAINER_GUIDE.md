@@ -21,6 +21,8 @@ You have Apple's native `container` CLI installed! This guide shows you how to r
 open http://localhost:5050
 ```
 
+> **Note**: The trade-history API binds `127.0.0.1` by default (see `SECURITY.md`). For the dashboard to be reachable through the container port mapping, set `TRADE_API_HOST=0.0.0.0` in your `.env` file (the script passes `.env` entries into the container).
+
 ---
 
 ## 🎯 **What's Different**
@@ -92,7 +94,7 @@ container rm elvis-bot
 1. **elvis-postgres** - PostgreSQL database (port 5432)
 2. **elvis-redis** - Redis cache (port 6379)  
 3. **elvis-prometheus** - Metrics collection (port 9090)
-4. **elvis-grafana** - Dashboards (port 3000)
+4. **elvis-grafana** - Dashboards (port 3000; note: the Docker Compose stack maps Grafana to host port 3001 instead)
 5. **elvis-bot** - Trading engine (ports 5050, 8000)
 
 ### **Network Configuration**
@@ -116,11 +118,8 @@ container rm elvis-bot
 # List all ELVIS containers
 container list | grep elvis
 
-# Detailed container info
-container inspect elvis-bot --format json
-
-# Resource usage (if supported)
-container stats elvis-bot
+# Detailed container info (JSON output)
+container inspect elvis-bot
 ```
 
 ### **Health Checks**
@@ -182,6 +181,10 @@ BINANCE_FUTURES_TESTNET_API_KEY=your_key_here
 BINANCE_FUTURES_TESTNET_API_SECRET=your_secret_here
 LEVERAGE=50
 PROFIT_MODE=conservative
+
+# Required for the dashboard/API to be reachable from the host
+# (the trade-history API binds 127.0.0.1 by default)
+TRADE_API_HOST=0.0.0.0
 ```
 
 ---
@@ -191,7 +194,10 @@ PROFIT_MODE=conservative
 ### **Manual Container Management**
 
 #### **Build ELVIS Image**
+The setup script tries `Dockerfile.minimal` first (fewer network dependencies) and falls back to `Dockerfile.simple`:
 ```bash
+container build -f Dockerfile.minimal -t elvis-bot:latest .
+# or, with full dependencies:
 container build -f Dockerfile.simple -t elvis-bot:latest .
 ```
 
@@ -252,10 +258,10 @@ container exec elvis-bot python reset_paper_trading.py
 container exec elvis-bot python check_paper_balances.py
 
 # Test Bonenkamp strategy
-container exec elvis-bot python test_bonenkamp_strategy.py
+container exec elvis-bot python tests/test_bonenkamp_strategy.py
 
 # View position display
-container exec elvis-bot python test_positions_display.py
+container exec elvis-bot python tests/test_positions_display.py
 ```
 
 ---
@@ -313,11 +319,8 @@ container network create elvis-network
 
 ### **Performance Issues**
 ```bash
-# Check resource usage
-container stats elvis-bot
-
-# View system resources
-top -pid $(container inspect elvis-bot --format '{{.State.Pid}}')
+# Inspect container details (JSON output)
+container inspect elvis-bot
 
 # Restart with more resources (if container supports it)
 container stop elvis-bot
