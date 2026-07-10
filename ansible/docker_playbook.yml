@@ -147,8 +147,7 @@
           - "{{ project_dir }}/logs:/app/logs"
           - "{{ project_dir }}/models:/app/models"
         ports:
-          - "5050:5050"  # API port
-          - "8000:8000"  # Web dashboard
+          - "5050:5050"  # Trade History API + /metrics
         depends_on:
           - "{{ postgres_container }}"
           - "{{ redis_container }}"
@@ -213,9 +212,8 @@
           ✅ ELVIS Trading Bot deployment completed successfully!
           
           🚀 Services:
-          - Trading Bot API: http://localhost:5050
-          - Web Dashboard: http://localhost:8000  
-          - Grafana Monitoring: http://localhost:3000 (admin/admin)
+          - Trade History API: http://localhost:5050
+          - Grafana Monitoring: http://localhost:3001 (admin/admin)
           - Prometheus Metrics: http://localhost:9090
           - PostgreSQL Database: localhost:5432
           - Redis Cache: localhost:6379
@@ -289,7 +287,6 @@
                 - ./models:/app/models
               ports:
                 - "5050:5050"
-                - "8000:8000"
               networks:
                 - {{ network_name }}
               depends_on:
