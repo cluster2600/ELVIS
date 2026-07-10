@@ -38,7 +38,7 @@
 
 #### 1. Start Vault / OpenBao (Development)
 ```bash
-# dev-mode server; pick any local token (start_bot_with_vault.sh requires
+# dev-mode server; pick any local token (scripts/start_bot_with_vault.sh requires
 # VAULT_DEV_ROOT_TOKEN_ID to be set in the environment)
 vault server -dev -dev-root-token-id=<choose-a-local-dev-token>
 export VAULT_ADDR=http://127.0.0.1:8200

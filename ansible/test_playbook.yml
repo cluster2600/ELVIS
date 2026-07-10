@@ -59,7 +59,7 @@
         - requirements_coreml.txt
         - requirements_ydf.txt
         - .env.example
-        - run_elvis.sh
+        - scripts/run_elvis.sh
         
     - name: Display requirements file status
       debug:

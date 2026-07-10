@@ -13,7 +13,7 @@
 - Stale tests identified in an earlier audit were repaired on 2026-07-04.
 - Collection guards (`pytest.importorskip`) skip tests that need `talib` or
   `torch` when those heavy dependencies are absent (e.g. in the minimal CI env).
-- Run locally with `venv314/bin/python -m pytest tests/` or `./run_tests.sh`.
+- Run locally with `venv314/bin/python -m pytest tests/` or `./scripts/run_tests.sh`.
 
 ## Overview
 This document summarizes the comprehensive test suite fixes implemented to achieve 100% test success rate for the ELVIS Trading Bot.
@@ -117,7 +117,7 @@ open htmlcov/index.html
 ### Test Script
 ```bash
 # Use the provided test script
-./run_tests.sh
+./scripts/run_tests.sh
 ```
 
 ## Test Execution Output

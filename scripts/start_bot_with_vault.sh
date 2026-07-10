@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 echo "🚀 Starting ELVIS Trading Bot with Vault Authentication..."
 
 # Set vault environment variables

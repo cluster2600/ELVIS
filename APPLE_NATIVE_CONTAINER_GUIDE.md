@@ -8,12 +8,12 @@ You have Apple's native `container` CLI installed! This guide shows you how to r
 
 ### **1. Setup ELVIS (One Time)**
 ```bash
-./apple_container_native.sh setup
+./scripts/apple_container_native.sh setup
 ```
 
 ### **2. Start Trading**
 ```bash
-./apple_container_native.sh start
+./scripts/apple_container_native.sh start
 ```
 
 ### **3. Access Dashboard**
@@ -47,22 +47,22 @@ open http://localhost:5050
 ### **ELVIS Management**
 ```bash
 # Complete setup
-./apple_container_native.sh setup
+./scripts/apple_container_native.sh setup
 
 # Start all services
-./apple_container_native.sh start
+./scripts/apple_container_native.sh start
 
 # Check status
-./apple_container_native.sh status
+./scripts/apple_container_native.sh status
 
 # View logs
-./apple_container_native.sh logs
+./scripts/apple_container_native.sh logs
 
 # Stop services
-./apple_container_native.sh stop
+./scripts/apple_container_native.sh stop
 
 # Reset paper trading
-./apple_container_native.sh reset
+./scripts/apple_container_native.sh reset
 ```
 
 ### **Direct Apple Container Commands**
@@ -281,7 +281,7 @@ container logs elvis-bot
 # Remove and recreate
 container stop elvis-bot
 container rm elvis-bot
-./apple_container_native.sh start
+./scripts/apple_container_native.sh start
 ```
 
 #### **Database Connection Error**
@@ -295,7 +295,7 @@ container exec elvis-postgres pg_isready -U elvis_user
 # Restart database
 container stop elvis-postgres
 container rm elvis-postgres
-./apple_container_native.sh start
+./scripts/apple_container_native.sh start
 ```
 
 #### **Port Conflicts**
@@ -334,7 +334,7 @@ container rm elvis-bot
 
 ### **Paper Trading**
 - **Initial Balances**: $1000 USDT + $1000 BNB
-- **Reset Command**: `./apple_container_native.sh reset`
+- **Reset Command**: `./scripts/apple_container_native.sh reset`
 - **Balance Check**: `container exec elvis-bot python check_paper_balances.py`
 
 ### **Bonenkamp HFT Strategy**
@@ -368,8 +368,8 @@ container rm elvis-bot
 
 ## 🎯 **Next Steps**
 
-1. **Setup**: Run `./apple_container_native.sh setup`
-2. **Start**: Run `./apple_container_native.sh start`
+1. **Setup**: Run `./scripts/apple_container_native.sh setup`
+2. **Start**: Run `./scripts/apple_container_native.sh start`
 3. **Monitor**: Open http://localhost:5050
 4. **Customize**: Edit `.env` file for your preferences
 

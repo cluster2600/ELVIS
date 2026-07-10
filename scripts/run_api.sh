@@ -4,6 +4,9 @@
 # This script starts the REST API server
 
 # Colors for output
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'

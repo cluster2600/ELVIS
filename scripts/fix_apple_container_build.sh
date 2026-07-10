@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.." || exit 1  # repo root (scripts moved into scripts/)
 
 # Colors
 GREEN='\033[0;32m'
@@ -44,7 +44,7 @@ if command -v docker &> /dev/null && docker info &> /dev/null; then
         print_success "✅ Docker build successful!"
         echo ""
         echo "You can now use either:"
-        echo "• Docker Compose: ./apple_container_elvis.sh start"
+        echo "• Docker Compose: scripts/apple_container_elvis.sh start"
         echo "• Apple Container: Import the image and use native CLI"
         exit 0
     else
@@ -95,5 +95,5 @@ echo "   • Try container system restart: container system stop && container sy
 echo "   • Use VPN or different network connection"
 echo ""
 echo "3. Use the Docker Compose workflow:"
-echo "   ./apple_container_elvis.sh setup"
-echo "   ./apple_container_elvis.sh start"
+echo "   scripts/apple_container_elvis.sh setup"
+echo "   scripts/apple_container_elvis.sh start"

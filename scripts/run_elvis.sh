@@ -1,5 +1,8 @@
 #!/bin/bash
 
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 echo "
  _______  _        __      __  _____   _____ 
 |  ____| | |       \ \    / / |_   _| / ____|

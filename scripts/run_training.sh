@@ -46,7 +46,7 @@ NAS_GENERATIONS=20
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.." || exit 1  # repo root (scripts moved into scripts/)
 
 print_header() {
     echo -e "${CYAN}============================================${NC}"

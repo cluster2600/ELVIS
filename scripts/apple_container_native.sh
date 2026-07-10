@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.." || exit 1  # repo root (scripts moved into scripts/)
 
 # Colors
 GREEN='\033[0;32m'
@@ -83,7 +83,7 @@ build_elvis_image() {
         echo "2. Try building with Docker Desktop instead:"
         echo "   docker build -f Dockerfile.minimal -t elvis-bot:latest ."
         echo "3. Use the Docker Compose setup:"
-        echo "   ./apple_container_elvis.sh setup"
+        echo "   scripts/apple_container_elvis.sh setup"
         echo ""
         return 1
     fi

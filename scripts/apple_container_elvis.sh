@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.." || exit 1  # repo root (scripts moved into scripts/)
 
 # Colors
 GREEN='\033[0;32m'
@@ -93,8 +93,8 @@ cmd_setup() {
     
     check_requirements
     
-    if [[ -f "./setup_apple_containers.sh" ]]; then
-        ./setup_apple_containers.sh
+    if [[ -f "scripts/setup_apple_containers.sh" ]]; then
+        scripts/setup_apple_containers.sh
     else
         print_error "Setup script not found!"
         exit 1
@@ -229,8 +229,8 @@ cmd_dashboard() {
 cmd_test() {
     print_header "🧪 Running Container Tests"
     
-    if [[ -f "./test_container_setup.sh" ]]; then
-        ./test_container_setup.sh
+    if [[ -f "scripts/test_container_setup.sh" ]]; then
+        scripts/test_container_setup.sh
     else
         print_error "Test script not found!"
         exit 1

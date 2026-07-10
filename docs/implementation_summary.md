@@ -48,7 +48,7 @@ This document summarizes the improvements implemented to enhance the ELVIS Tradi
   - `tests/test_price_fetcher.py` - PriceFetcher tests
   - `tests/test_logger_config.py` - Logger tests
   - `tests/test_ensemble_model.py` - Ensemble model tests
-  - `run_tests.sh` - Test runner script
+  - `scripts/run_tests.sh` - Test runner script
   - `.coveragerc` - Coverage configuration
 - **Features**:
   - Mock fixtures for all major components
@@ -151,10 +151,10 @@ docker-compose logs -f elvis-bot
 ### Running Tests
 ```bash
 # Execute test suite
-./run_tests.sh
+./scripts/run_tests.sh
 
 # With specific test file
-./run_tests.sh tests/test_redis_cache.py
+./scripts/run_tests.sh tests/test_redis_cache.py
 ```
 
 ### Setting Up Secrets

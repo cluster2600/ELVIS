@@ -3,6 +3,9 @@
 # ELVIS Console Dashboard Runner
 # This script runs ELVIS in a container with the console dashboard
 
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 echo "🚀 Starting ELVIS Console Dashboard in Container..."
 
 # Stop any existing elvis containers

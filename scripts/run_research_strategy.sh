@@ -3,6 +3,9 @@
 # ELVIS Research-Based Strategy Runner
 # Based on Bonenkamp (2021) academic paper methodology
 
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 echo "🔬 ELVIS Research-Based Trading Strategy"
 echo "========================================"
 echo "📊 Targeting 14.9% annual returns with binary classification"

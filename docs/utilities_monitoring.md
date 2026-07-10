@@ -205,7 +205,7 @@ Key facts (verified):
   `create_api_tester` used by the dashboard.
 - A standalone `main(stdscr)` entry point exists in the module; in normal
   operation the dashboard is launched from `main.py` via
-  `ConsoleDashboardManager`. `run_console_dashboard.sh` runs the whole bot
+  `ConsoleDashboardManager`. `scripts/run_console_dashboard.sh` runs the whole bot
   (`main.py --mode paper`) in a container with the dashboard attached.
 
 ### 3. Trade-History API (`trading/utils/trade_history_api.py`)
@@ -526,7 +526,7 @@ Container log aggregation is handled by Loki + Promtail (see `docker-compose.yml
 Relevant tests include `tests/test_metrics_endpoint.py`, which imports the Flask
 `app` from `trading.utils.trade_history_api` and exercises the `/metrics`
 endpoint (auth exemption, exposition format, gauge refresh with the DB
-unavailable). Run the suite with `./run_tests.sh` or `pytest`.
+unavailable). Run the suite with `./scripts/run_tests.sh` or `pytest`.
 
 ---
 

@@ -675,10 +675,10 @@
       become_user: "{{ project_user }}"
       become: no
       loop:
-        - run_elvis.sh
-        - run_training.sh
-        - run_api.sh
-        - run_tests.sh
+        - scripts/run_elvis.sh
+        - scripts/run_training.sh
+        - scripts/run_api.sh
+        - scripts/run_tests.sh
       ignore_errors: yes
       
     # System service setup (optional)
