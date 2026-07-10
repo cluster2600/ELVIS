@@ -91,7 +91,11 @@ def test_manual_positions():
     positions = get_open_positions()
     logger.info(f"Current open positions: {len(positions)}")
     for pos in positions:
-        logger.info(f"  {pos[1]} | Entry: ${pos[2]:.2f} | Qty: {pos[3]:.6f}")
+        # entry_price/quantity may come back as str/Decimal from the DB driver;
+        # coerce so formatting is robust regardless of column type.
+        logger.info(
+            f"  {pos[1]} | Entry: ${float(pos[2]):.2f} | Qty: {float(pos[3]):.6f}"
+        )
 
 
 def test_position_display():
