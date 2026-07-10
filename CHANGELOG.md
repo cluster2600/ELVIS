@@ -5417,7 +5417,6 @@ The ELVIS trading bot is confirmed to be working correctly and ready for live tr
      - Implemented circuit breakers for extreme market conditions in the `RiskManager`.
   5. **Position-level Risk Decomposition**:
      - Added position-level risk decomposition to the `RiskManager`.
->>>>>>> main
 
 - eureka: Implemented Advanced Trading Strategies:
   1. **Position Scaling**:
@@ -5444,7 +5443,6 @@ The ELVIS trading bot is confirmed to be working correctly and ready for live tr
   3. **RiskManager Implementation**:
      - Created a new `RiskManager` to manage trailing stops and partial take-profits.
      - Integrated the `RiskManager` into the main application loop to run periodically.
->>>>>>> main
 
 - eureka: Implemented Console Dashboard Enhancements:
   1. **Redesigned UI**:
