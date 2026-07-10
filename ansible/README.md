@@ -202,8 +202,8 @@ After running the Ansible playbook:
    ```
 
 4. **Access Web Interfaces**:
-   - Grafana: http://localhost:3000 (admin/admin)
-   - API Docs: http://localhost:5050/api/docs
+   - Grafana: http://localhost:3001 (admin/admin)
+   - Trade History API health: http://localhost:5050/health
    - Prometheus: http://localhost:9090
 
 ## Troubleshooting
