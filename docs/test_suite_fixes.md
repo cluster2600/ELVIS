@@ -1,5 +1,20 @@
 # Test Suite Fixes and Documentation
 
+> **Historical snapshot (written 2025-06-23).** This document describes the test
+> suite as it stood at that time (107 tests, Python 3.11). It is kept as a record
+> of that fix effort and is not maintained as current documentation. For the
+> current state of the suite, see the "Current state" section below, the tests
+> themselves in `tests/`, and the CI workflow in `.github/workflows/ci.yml`.
+
+## Current state (as of 2026-07)
+
+- The suite is green in CI on **Python 3.14** (GitHub Actions runs
+  `pytest tests/ -v -m "not perf"`; baseline: 182 passed, 6 skipped).
+- Stale tests identified in an earlier audit were repaired on 2026-07-04.
+- Collection guards (`pytest.importorskip`) skip tests that need `talib` or
+  `torch` when those heavy dependencies are absent (e.g. in the minimal CI env).
+- Run locally with `venv314/bin/python -m pytest tests/` or `./run_tests.sh`.
+
 ## Overview
 This document summarizes the comprehensive test suite fixes implemented to achieve 100% test success rate for the ELVIS Trading Bot.
 
@@ -86,17 +101,14 @@ This document summarizes the comprehensive test suite fixes implemented to achie
 
 ### Quick Test Run
 ```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Run all tests
-pytest tests/ --verbose
+# Run all tests (Python 3.14 virtual environment)
+venv314/bin/python -m pytest tests/ --verbose
 ```
 
 ### Coverage Report
 ```bash
 # Run tests with coverage
-pytest tests/ --cov=. --cov-report=html --cov-report=term
+venv314/bin/python -m pytest tests/ --cov=. --cov-report=html --cov-report=term
 
 # View HTML coverage report
 open htmlcov/index.html
@@ -109,6 +121,10 @@ open htmlcov/index.html
 ```
 
 ## Test Execution Output
+
+Output from the original 2025-06-23 run, which used Python 3.11. The suite now
+runs on Python 3.14 (see "Current state" above).
+
 ```
 =============================================================== test session starts ================================================================
 platform darwin -- Python 3.11.13, pytest-8.3.5, pluggy-1.6.0
