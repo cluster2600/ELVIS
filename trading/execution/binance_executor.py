@@ -210,6 +210,92 @@ class BinanceExecutor(BaseExecutor):
             self.logger.error(f"Error getting current price for {symbol}: {e}")
             return 0.0
 
+    def get_funding_rate(self, symbol: str) -> Dict[str, Any]:
+        """Return the latest funding rate for ``symbol``.
+
+        Live futures mode queries the UMFutures ``funding_rate`` endpoint and
+        returns its most recent entry.  In paper mode (no client, or a spot
+        client) a mock structure ``{'symbol', 'fundingRate', 'ts'}`` with a
+        zero rate is returned so callers never hit the network.
+        """
+        if self.client is None or not (FUTURES_AVAILABLE and self.use_futures):
+            return {
+                "symbol": symbol,
+                "fundingRate": 0.0,
+                "ts": int(time.time() * 1000),
+            }
+        try:
+
+            @binance_retry
+            def _fetch():
+                return self.client.funding_rate(symbol=symbol, limit=1)
+
+            data = _fetch()
+            latest = data[-1] if isinstance(data, list) and data else data
+            if not latest:
+                return {
+                    "symbol": symbol,
+                    "fundingRate": 0.0,
+                    "ts": int(time.time() * 1000),
+                }
+            return {
+                "symbol": latest.get("symbol", symbol),
+                "fundingRate": float(latest.get("fundingRate", 0.0)),
+                "ts": int(latest.get("fundingTime", int(time.time() * 1000))),
+            }
+        except ClientError if FUTURES_AVAILABLE else BinanceAPIException as e:
+            self.logger.error(f"Error getting funding rate for {symbol}: {e}")
+            return {
+                "symbol": symbol,
+                "fundingRate": 0.0,
+                "ts": int(time.time() * 1000),
+            }
+
+    def get_order_book(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        """Return the current order book (bids/asks) for ``symbol``.
+
+        Live futures mode queries the UMFutures ``depth`` endpoint; live spot
+        mode uses the spot client's ``get_order_book``.  In paper mode (no
+        client) an empty book ``{'symbol', 'bids', 'asks', 'timestamp'}`` is
+        returned so callers never hit the network.
+        """
+        if self.client is None:
+            return {
+                "symbol": symbol,
+                "bids": [],
+                "asks": [],
+                "timestamp": int(time.time() * 1000),
+            }
+        try:
+            if FUTURES_AVAILABLE and self.use_futures:
+
+                @binance_retry
+                def _fetch():
+                    return self.client.depth(symbol=symbol, limit=limit)
+
+                book = _fetch()
+            else:
+
+                @binance_retry
+                def _fetch():
+                    return self.client.get_order_book(symbol=symbol, limit=limit)
+
+                book = _fetch()
+            return {
+                "symbol": symbol,
+                "bids": book.get("bids", []),
+                "asks": book.get("asks", []),
+                "timestamp": int(book.get("T") or book.get("E") or time.time() * 1000),
+            }
+        except ClientError if FUTURES_AVAILABLE else BinanceAPIException as e:
+            self.logger.error(f"Error getting order book for {symbol}: {e}")
+            return {
+                "symbol": symbol,
+                "bids": [],
+                "asks": [],
+                "timestamp": int(time.time() * 1000),
+            }
+
     def set_leverage(self, symbol: str, leverage: int) -> None:
         if self.client is None or not self.use_futures:
             self.logger.info(f"Paper trading: Leverage set to {leverage}x for {symbol}")

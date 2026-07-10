@@ -7,7 +7,13 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 
 try:
-    from prometheus_client import Counter, Gauge, Histogram
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
+    )
     from prometheus_flask_exporter import PrometheusMetrics
 
     HAS_PROMETHEUS = True
@@ -46,10 +52,12 @@ _API_KEY = os.getenv("API_KEY")
 @app.before_request
 def require_api_key():
     """Reject requests that do not present the correct API key header."""
-    # Health check is exempt so load balancers / Docker health checks still work
+    # Health check and the Prometheus scrape endpoint are exempt so that load
+    # balancers / Docker health checks and the Prometheus server (which does not
+    # send an X-API-Key header) can still reach them.
     from flask import jsonify, request
 
-    if request.path == "/health":
+    if request.path in ("/health", "/metrics"):
         return  # exempt from auth
 
     if not _API_KEY:
@@ -64,9 +72,13 @@ def require_api_key():
         )
 
 
-# Initialize Prometheus if available
+# Initialize Prometheus if available.
+# path=None disables the exporter's built-in /metrics endpoint so the explicit
+# GET /metrics route defined below (which also refreshes trading gauges) owns
+# that path without a routing collision. Default Flask request metrics are
+# still collected and rendered by generate_latest() in that route.
 if HAS_PROMETHEUS:
-    metrics = PrometheusMetrics(app)
+    metrics = PrometheusMetrics(app, path=None)
 else:
     metrics = None
 
@@ -343,7 +355,7 @@ def format_timestamp(ts):
 def safe_float(value):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 
@@ -869,6 +881,53 @@ def kill_switch_status_hyphen():
     return kill_switch_status()
 
 
+@app.route("/metrics", methods=["GET"])
+def metrics_endpoint():
+    """Prometheus scrape endpoint (text exposition format).
+
+    Refreshes a handful of real trading gauges straight from the paper-trade
+    database on every scrape, then renders the full Prometheus registry.
+
+    Exposed here (plus the default Flask request metrics collected by
+    prometheus_flask_exporter):
+      * ``elvis_portfolio_value``       — paper equity (base + realized P&L)
+      * ``elvis_open_positions_count``  — number of open positions
+      * ``elvis_total_trades``          — total number of trades
+
+    This route is exempt from the X-API-Key check (see ``require_api_key``) so
+    the Prometheus server can scrape it without credentials.
+    """
+    if not HAS_PROMETHEUS:
+        return "prometheus_client not available", 503
+
+    # Base paper-trading equity (1000 USDT + 1000 BNB) — same convention used
+    # by the background metrics updater above.
+    base_equity = 2000.0
+
+    try:
+        TOTAL_TRADES_COUNT.set(get_trade_count())
+    except Exception as e:  # pragma: no cover - defensive, DB may be down
+        logger.debug(f"/metrics: trade count unavailable: {e}")
+
+    try:
+        OPEN_POSITIONS_COUNT.set(len(get_open_positions()))
+    except Exception as e:  # pragma: no cover - defensive, DB may be down
+        logger.debug(f"/metrics: open positions unavailable: {e}")
+
+    try:
+        realized_pnl = sum(
+            safe_float(trade[6])
+            for trade in get_all_trades(limit=100)
+            if len(trade) > 6
+        )
+        PORTFOLIO_VALUE.set(base_equity + realized_pnl)
+    except Exception as e:  # pragma: no cover - defensive, DB may be down
+        logger.debug(f"/metrics: paper equity unavailable: {e}")
+        PORTFOLIO_VALUE.set(base_equity)
+
+    return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint for Docker container"""
@@ -883,10 +942,14 @@ def health():
 
 
 # NEW: Create a function that can be called externally
-def start_trade_history_server(host="0.0.0.0", port=5050):
+def start_trade_history_server(host=None, port=5050):
     """
     Starts the trade history Flask API server.
+
+    Binds 127.0.0.1 by default (SECURITY.md); set TRADE_API_HOST=0.0.0.0 to
+    expose it (docker-compose does this for container networking).
     """
+    host = host or _os.getenv("TRADE_API_HOST", "127.0.0.1")
     print(f"Starting Trade History Server on {host}:{port}...")
     app.run(host=host, port=port)
 

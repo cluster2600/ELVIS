@@ -183,6 +183,58 @@ def _train_research_strategy_if_needed(
         logger.error(f"❌ Error during initial model training: {e}", exc_info=True)
 
 
+def _strategy_loop_sleep_seconds(
+    active_strategy, default_seconds: float = 1.0
+) -> float:
+    """Resolve the per-iteration loop pace from the strategy.
+
+    The research strategy documents a 5-minute trading frequency via
+    ``trading_frequency_minutes``. When that attribute is set (and positive),
+    pace the loop accordingly; otherwise fall back to ``default_seconds`` so
+    strategies without an opinion keep the previous behaviour.
+    """
+    freq_minutes = getattr(active_strategy, "trading_frequency_minutes", None)
+    try:
+        if freq_minutes is not None and float(freq_minutes) > 0:
+            return float(freq_minutes) * 60.0
+    except (TypeError, ValueError):
+        pass
+    return default_seconds
+
+
+def _retrain_strategy_if_due(active_strategy, price_fetcher, logger: logging.Logger):
+    """Retrain the strategy once if it reports it is due.
+
+    Calls ``active_strategy.should_retrain()`` when that method exists. When it
+    returns truthy, fresh historical data is fetched and handed to
+    ``train_model`` (mirroring the initial-training path). Everything is guarded
+    so a retrain failure is logged but never interrupts the trading loop.
+    """
+    should_retrain = getattr(active_strategy, "should_retrain", None)
+    if not callable(should_retrain):
+        return False
+    try:
+        if not should_retrain():
+            return False
+        logger.info("🔁 Strategy reports retraining is due. Retraining model...")
+        training_data = price_fetcher.get_historical_klines("BTCUSDT", "5m", limit=2100)
+        if (
+            training_data is not None
+            and not training_data.empty
+            and len(training_data) > 200
+        ):
+            active_strategy.train_model(training_data)
+            logger.info("✅ Strategy retrained successfully.")
+            return True
+        logger.warning(
+            "⚠️ Skipping retrain: insufficient historical data fetched for training."
+        )
+        return False
+    except Exception as e:  # non-fatal: never break the trading loop
+        logger.error(f"⚠️ Non-fatal error during strategy retraining: {e}")
+        return False
+
+
 def main(mode: str, log_level: str):
     """
     Main entry point for the trading bot using dependency injection.
@@ -278,6 +330,11 @@ def main(mode: str, log_level: str):
                 try:
                     # Get market data with detailed logging
                     logger.info("=== TRADING LOOP ITERATION START ===")
+
+                    # Retrain hook: once per iteration, retrain if the strategy
+                    # reports it is due (non-fatal, guarded inside the helper).
+                    _retrain_strategy_if_due(active_strategy, price_fetcher, logger)
+
                     logger.info("Attempting to fetch market data...")
                     try:
                         # Multi-symbol trading: BTCUSDT + BNBUSDT (both USDT pairs for balance consistency)
@@ -2230,19 +2287,31 @@ def main(mode: str, log_level: str):
                     else:
                         logger.error("Data is empty even after mock data creation!")
 
-                    # EMERGENCY: MUCH SLOWER LOOP to prevent disaster
                     logger.debug("=== TRADING LOOP ITERATION END ===\n")
-                    logger.info(
-                        "🚀 MAXIMUM SPEED: No cooldown - immediate next iteration"
-                    )
 
-                    # COOLDOWN REMOVED: Immediate next iteration for maximum trading speed
+                    # Pace the loop using the strategy's documented trading
+                    # frequency (e.g. 5-minute intervals) when set; otherwise
+                    # keep the previous minimal 1-second pause. The sleep is
+                    # broken into 1-second slices so shutdown stays responsive.
                     if shutdown_requested:
                         logger.info("Shutdown requested, exiting trading loop...")
                         return
-                    time.sleep(
-                        1
-                    )  # Minimal 1-second pause to prevent excessive CPU usage
+                    loop_sleep_seconds = _strategy_loop_sleep_seconds(
+                        active_strategy, default_seconds=1.0
+                    )
+                    logger.info(
+                        f"⏱️ Next iteration in {loop_sleep_seconds:.0f}s "
+                        "(strategy-paced)"
+                    )
+                    slept = 0.0
+                    while slept < loop_sleep_seconds:
+                        if shutdown_requested:
+                            logger.info(
+                                "Shutdown requested during pacing sleep, exiting..."
+                            )
+                            return
+                        time.sleep(min(1.0, loop_sleep_seconds - slept))
+                        slept += 1.0
 
                 except Exception as e:
                     logger.error(f"Error in trading loop: {e}")

@@ -99,6 +99,30 @@ def require_auth(f):
     return decorated_function
 
 
+def require_role(role):
+    """Decorator: valid JWT AND the given role (RBAC, see SECURITY.md).
+
+    Tokens without a role claim are treated as read-only 'viewer' so tokens
+    issued before RBAC keep working for read endpoints but cannot mutate.
+    """
+
+    def decorator(f):
+        @wraps(f)
+        @require_auth
+        def decorated_function(*args, **kwargs):
+            token_role = getattr(request, "user", {}).get("role", "viewer")
+            if token_role != role:
+                return (
+                    jsonify({"error": f"Requires '{role}' role"}),
+                    403,
+                )
+            return f(*args, **kwargs)
+
+        return decorated_function
+
+    return decorator
+
+
 # Health check endpoint
 @app.route("/health", methods=["GET"])
 @limiter.limit("1000 per hour")
@@ -131,11 +155,17 @@ def login():
     api_pass = os.environ.get("API_PASSWORD")
     if api_user and api_pass and username == api_user and password == api_pass:
 
-        # Generate token
-        payload = {"user": username, "exp": datetime.utcnow() + timedelta(hours=24)}
+        # Generate token with an RBAC role claim (default admin for the
+        # single env-configured operator; override with API_ROLE=viewer).
+        role = os.environ.get("API_ROLE", "admin")
+        payload = {
+            "user": username,
+            "role": role,
+            "exp": datetime.utcnow() + timedelta(hours=24),
+        }
         token = jwt.encode(payload, app.config["SECRET_KEY"], algorithm="HS256")
 
-        return jsonify({"token": token, "expires_in": 86400})  # 24 hours
+        return jsonify({"token": token, "role": role, "expires_in": 86400})
 
     return jsonify({"error": "Invalid credentials"}), 401
 
@@ -165,7 +195,7 @@ def get_bot_status():
 
 
 @app.route("/api/bot/start", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def start_bot():
     """Start the trading bot"""
@@ -195,7 +225,7 @@ def start_bot():
 
 
 @app.route("/api/bot/stop", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def stop_bot():
     """Stop the trading bot"""
@@ -460,7 +490,7 @@ def get_config():
 
 
 @app.route("/api/config", methods=["PUT"])
-@require_auth
+@require_role("admin")
 @limiter.limit("10 per hour")
 def update_config():
     """Update bot configuration"""
@@ -675,7 +705,7 @@ def get_websocket_clients():
 
 
 @app.route("/api/dashboard/broadcast/alert", methods=["POST"])
-@require_auth
+@require_role("admin")
 @limiter.limit("20 per hour")
 def broadcast_dashboard_alert():
     """Broadcast alert to all connected dashboard clients"""
@@ -704,44 +734,45 @@ def broadcast_dashboard_alert():
 
 
 # Multi-exchange endpoints
+def _get_exchange_manager():
+    """Resolve the ExchangeManager from the DI container (or None)."""
+    from core.di import container
+
+    return container.get_optional("exchange_manager")
+
+
 @app.route("/api/exchanges", methods=["GET"])
 @require_auth
 def get_exchanges():
     """Get information about all configured exchanges"""
     try:
-        # This would normally get from the exchange manager
-        # For now, return mock data
-        exchanges = {
-            "binance": {
-                "name": "Binance",
-                "status": "healthy",
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "ADAUSDT"],
-                "fees": {"maker": 0.001, "taker": 0.001},
-                "last_check": datetime.now().isoformat(),
-            },
-            "kraken": {
-                "name": "Kraken",
-                "status": "healthy",
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "ADAUSDT"],
-                "fees": {"maker": 0.0016, "taker": 0.0026},
-                "last_check": datetime.now().isoformat(),
-            },
-            "coinbase": {
-                "name": "Coinbase",
-                "status": "healthy",
-                "supported_symbols": ["BTCUSDT", "ETHUSDT", "ADAUSDT"],
-                "fees": {"maker": 0.005, "taker": 0.005},
-                "last_check": datetime.now().isoformat(),
-            },
-        }
+        em = _get_exchange_manager()
+        if em is None:
+            return jsonify(
+                {
+                    "exchanges": {},
+                    "total_exchanges": 0,
+                    "healthy_exchanges": 0,
+                    "available": False,
+                    "detail": "Exchange manager is not available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+        exchanges = em.get_exchange_info()
+        healthy = sum(
+            1
+            for info in exchanges.values()
+            if isinstance(info, dict)
+            and info.get("health", {}).get("status") == "healthy"
+        )
 
         return jsonify(
             {
                 "exchanges": exchanges,
                 "total_exchanges": len(exchanges),
-                "healthy_exchanges": len(
-                    [e for e in exchanges.values() if e["status"] == "healthy"]
-                ),
+                "healthy_exchanges": healthy,
+                "available": True,
                 "timestamp": datetime.now().isoformat(),
             }
         )
@@ -756,33 +787,47 @@ def get_exchanges():
 def get_multi_exchange_prices(symbol: str):
     """Get prices from all exchanges for a symbol"""
     try:
-        # Mock multi-exchange prices
-        import random
+        em = _get_exchange_manager()
+        if em is None:
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "prices": {},
+                    "available": False,
+                    "detail": "Exchange manager is not available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
-        base_price = 50000 if symbol == "BTCUSDT" else 3000
+        prices = em.get_prices_all_exchanges(symbol)
 
-        prices = {}
-        for exchange in ["binance", "kraken", "coinbase"]:
-            # Add some variation to simulate real price differences
-            variation = random.uniform(-0.01, 0.01)  # ±1%
-            price = base_price * (1 + variation)
-            prices[exchange] = round(price, 2)
+        if not prices:
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "prices": {},
+                    "available": True,
+                    "detail": "No prices returned by any exchange",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
-        # Calculate spread
+        # Calculate spread from the real prices
         min_price = min(prices.values())
         max_price = max(prices.values())
         spread = max_price - min_price
-        spread_pct = (spread / min_price) * 100
+        spread_pct = (spread / min_price) * 100 if min_price else 0.0
 
         return jsonify(
             {
                 "symbol": symbol,
-                "prices": prices,
-                "min_price": min_price,
-                "max_price": max_price,
+                "prices": {k: round(v, 2) for k, v in prices.items()},
+                "min_price": round(min_price, 2),
+                "max_price": round(max_price, 2),
                 "avg_price": round(sum(prices.values()) / len(prices), 2),
                 "spread": round(spread, 2),
                 "spread_percentage": round(spread_pct, 4),
+                "available": True,
                 "timestamp": datetime.now().isoformat(),
             }
         )
@@ -799,47 +844,27 @@ def get_arbitrage_opportunities():
     try:
         symbol = request.args.get("symbol", "BTCUSDT")
 
-        # Mock arbitrage opportunities
-        import random
+        em = _get_exchange_manager()
+        if em is None:
+            return jsonify(
+                {
+                    "symbol": symbol,
+                    "opportunities": [],
+                    "count": 0,
+                    "available": False,
+                    "detail": "Exchange manager is not available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
-        opportunities = []
-
-        # Simulate some arbitrage opportunities
-        if random.random() > 0.7:  # 30% chance of having opportunities
-            base_price = 50000 if symbol == "BTCUSDT" else 3000
-
-            for i in range(random.randint(1, 3)):
-                buy_price = base_price * (1 + random.uniform(-0.005, 0.005))
-                sell_price = buy_price * (
-                    1 + random.uniform(0.006, 0.015)
-                )  # Profitable spread
-
-                exchanges = ["binance", "kraken", "coinbase"]
-                buy_exchange = random.choice(exchanges)
-                sell_exchange = random.choice(
-                    [e for e in exchanges if e != buy_exchange]
-                )
-
-                opportunities.append(
-                    {
-                        "symbol": symbol,
-                        "buy_exchange": buy_exchange,
-                        "sell_exchange": sell_exchange,
-                        "buy_price": round(buy_price, 2),
-                        "sell_price": round(sell_price, 2),
-                        "profit_percentage": round(
-                            ((sell_price - buy_price) / buy_price) * 100, 3
-                        ),
-                        "profit_absolute": round(sell_price - buy_price, 2),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+        opportunities = em.detect_arbitrage_opportunities(symbol)
 
         return jsonify(
             {
                 "symbol": symbol,
                 "opportunities": opportunities,
                 "count": len(opportunities),
+                "available": True,
                 "timestamp": datetime.now().isoformat(),
             }
         )
@@ -854,43 +879,33 @@ def get_arbitrage_opportunities():
 def get_consolidated_portfolio():
     """Get consolidated portfolio across all exchanges"""
     try:
-        # Mock consolidated portfolio
-        portfolio = {
-            "total_value_usd": 12500.75,
-            "balances": {
-                "BTC": {
-                    "total_balance": 0.25,
-                    "total_free": 0.23,
-                    "total_locked": 0.02,
-                    "exchanges": {
-                        "binance": {"free": 0.15, "locked": 0.01, "total": 0.16},
-                        "kraken": {"free": 0.08, "locked": 0.01, "total": 0.09},
-                    },
-                },
-                "ETH": {
-                    "total_balance": 2.5,
-                    "total_free": 2.3,
-                    "total_locked": 0.2,
-                    "exchanges": {
-                        "binance": {"free": 1.5, "locked": 0.1, "total": 1.6},
-                        "coinbase": {"free": 0.8, "locked": 0.1, "total": 0.9},
-                    },
-                },
-                "USDT": {
-                    "total_balance": 5000.0,
-                    "total_free": 4800.0,
-                    "total_locked": 200.0,
-                    "exchanges": {
-                        "binance": {"free": 3000.0, "locked": 100.0, "total": 3100.0},
-                        "kraken": {"free": 1800.0, "locked": 100.0, "total": 1900.0},
-                    },
-                },
-            },
-            "exchange_count": 3,
-            "timestamp": datetime.now().isoformat(),
-        }
+        em = _get_exchange_manager()
+        if em is None:
+            return jsonify(
+                {
+                    "balances": {},
+                    "exchange_count": 0,
+                    "available": False,
+                    "detail": "Exchange manager is not available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
-        return jsonify(portfolio)
+        balances = em.get_consolidated_balance()
+
+        # Count the distinct exchanges that reported any balance
+        exchange_names = set()
+        for entry in balances.values():
+            exchange_names.update(entry.get("exchanges", {}).keys())
+
+        return jsonify(
+            {
+                "balances": balances,
+                "exchange_count": len(exchange_names),
+                "available": True,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error getting consolidated portfolio: {e}")
@@ -902,45 +917,43 @@ def get_consolidated_portfolio():
 def get_exchanges_health():
     """Get health status of all exchanges"""
     try:
-        # Mock exchange health data
-        health = {
-            "binance": {
-                "status": "healthy",
-                "last_check": datetime.now().isoformat(),
-                "error_count": 0,
-                "response_time_ms": 120,
-                "api_calls_remaining": 1200,
-            },
-            "kraken": {
-                "status": "healthy",
-                "last_check": datetime.now().isoformat(),
-                "error_count": 1,
-                "response_time_ms": 250,
-                "api_calls_remaining": 800,
-            },
-            "coinbase": {
-                "status": "healthy",
-                "last_check": datetime.now().isoformat(),
-                "error_count": 0,
-                "response_time_ms": 180,
-                "api_calls_remaining": 950,
-            },
-        }
+        em = _get_exchange_manager()
+        if em is None:
+            return jsonify(
+                {
+                    "health": {},
+                    "summary": {"total_exchanges": 0, "healthy_count": 0},
+                    "available": False,
+                    "detail": "Exchange manager is not available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+        health = em.check_all_exchanges_health()
+
+        # Health entries carry datetime objects (last_check); make them
+        # JSON-serialisable without mutating the manager's cached state.
+        serialisable = {}
+        for name, entry in health.items():
+            item = dict(entry) if isinstance(entry, dict) else entry
+            if isinstance(item, dict) and isinstance(item.get("last_check"), datetime):
+                item["last_check"] = item["last_check"].isoformat()
+            serialisable[name] = item
+
+        healthy_count = sum(
+            1
+            for entry in serialisable.values()
+            if isinstance(entry, dict) and entry.get("status") == "healthy"
+        )
 
         return jsonify(
             {
-                "health": health,
+                "health": serialisable,
                 "summary": {
-                    "total_exchanges": len(health),
-                    "healthy_count": len(
-                        [h for h in health.values() if h["status"] == "healthy"]
-                    ),
-                    "avg_response_time": round(
-                        sum(h["response_time_ms"] for h in health.values())
-                        / len(health),
-                        1,
-                    ),
+                    "total_exchanges": len(serialisable),
+                    "healthy_count": healthy_count,
                 },
+                "available": True,
                 "timestamp": datetime.now().isoformat(),
             }
         )
@@ -1231,5 +1244,13 @@ def _calculate_uptime() -> Optional[str]:
 
 
 if __name__ == "__main__":
-    # Development server with WebSocket support
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    # Binds localhost by default (SECURITY.md); set API_HOST=0.0.0.0 to expose
+    # (docker-compose does this). debug is opt-in via API_DEBUG only.
+    import os as _os
+
+    socketio.run(
+        app,
+        host=_os.getenv("API_HOST", "127.0.0.1"),
+        port=int(_os.getenv("API_PORT", "5000")),
+        debug=_os.getenv("API_DEBUG", "").lower() == "true",
+    )

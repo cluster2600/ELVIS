@@ -14,8 +14,19 @@ The ELVIS trading bot supports paper trading mode with multi-asset balances. In 
 
 ### Environment Variables
 ```bash
-TRADING_MODE=paper  # Enable paper trading mode
+TRADING_MODE=paper  # paper -> Binance testnet endpoint; anything else -> live api.binance.com
 ```
+
+`TRADING_MODE` (read in `trading/config/api_config.py`) only selects which
+Binance REST endpoint the bot talks to: `paper` points `API_CONFIG` at
+`https://testnet.binance.vision` (using `TESTNET_API_SPOT_KEY` /
+`TESTNET_API_SPOT_SECRET`), any other value points it at
+`https://api.binance.com`.
+
+The bot's own paper/live behaviour is chosen separately by the `--mode`
+argument of `main.py` (`--mode paper|live`, default `paper`), passed through to
+`main(mode=...)`. For a normal paper-trading session leave both at their paper
+defaults.
 
 ### Database Configuration
 The paper trading system uses PostgreSQL to track:
@@ -49,14 +60,20 @@ This script displays:
 ## Features
 
 ### Multi-Asset Support
-- Trade multiple cryptocurrency pairs simultaneously
-- Track individual asset balances
+- Trades the primary pairs concurrently (BTCUSDT + BNBUSDT), capped at
+  `MAX_CONCURRENT_PAIRS = 2` (`config/config.py`, `SYMBOLS_CONFIG`)
+- Tracks individual asset balances in `np.account_balances`
 - Support for USDT and BNB trading pairs
 
 ### BNB Fee Optimization
-- Use BNB to pay trading fees for discounts
-- Automatic BNB balance management
-- Fee optimization for better profitability
+Controlled by the BNB flags in `config/config.py` and implemented in
+`trading/execution/enhanced_binance_executor.py`:
+- `ENABLE_BNB_FEES` — pay trading fees in BNB for a discount
+  (10% on futures, 25% on spot)
+- `AUTO_BUY_BNB` / `MIN_BNB_BALANCE` — automatically top up BNB
+  (`buy_bnb_for_fees()`) when the balance drops below the minimum
+- `MAX_BNB_BUY_PERCENT`, `BNB_REBALANCE_THRESHOLD` — cap and threshold for the
+  auto-buy / rebalance behaviour
 
 ### Performance Tracking
 - Real-time P&L calculation
@@ -65,13 +82,15 @@ This script displays:
 
 ## Trading Pairs
 
-### Primary Pairs
+Configured in `config/config.py` under `SYMBOLS_CONFIG`.
+
+### Primary Pairs (`PRIMARY_SYMBOLS`)
 - BTCUSDT (Bitcoin trading)
 - BNBUSDT (BNB trading)
 
-### Secondary Pairs
+### Secondary Pairs (`SECONDARY_SYMBOLS`, optional)
 - ETHUSDT (Ethereum trading)
-- Other major cryptocurrencies
+- ADAUSDT (Cardano trading)
 
 ## Benefits of Starting with BNB
 
@@ -94,10 +113,11 @@ This script displays:
 
 3. **Start Trading**:
    ```bash
-   # Set environment to paper mode
+   # main.py already defaults to --mode paper; TRADING_MODE=paper keeps
+   # REST calls on the Binance testnet endpoint.
    export TRADING_MODE=paper
-   
-   # Start the bot
+
+   # Start the bot (equivalent to: python main.py --mode paper)
    python main.py
    ```
 
@@ -118,6 +138,39 @@ CREATE TABLE np.account_balances (
 INSERT INTO np.account_balances (asset, balance) VALUES 
 ('USDT', 1000.0),
 ('BNB', 1000.0);
+```
+
+### Session resets table
+
+```sql
+CREATE TABLE np.trading_session_resets (
+    id SERIAL PRIMARY KEY,
+    reset_timestamp TIMESTAMP DEFAULT NOW(),
+    reason TEXT
+);
+```
+
+**How it works.** When the bot is stopped, `reset_trading_session()`
+(in `utils/paper_trade_db.py`) inserts a row into
+`np.trading_session_resets` with the current timestamp. The dashboards
+and trade-history APIs (`native_console_dashboard.py`,
+`utils/console_dashboard.py`, `trading/utils/trade_history_api.py`,
+`trading/execution/binance_executor.py`) then read the most recent
+`reset_timestamp` and only count trades *after* it, so realized P&L
+starts fresh for the next session while all historical trades stay in
+`np.trades`.
+
+**How to use.** The table is created automatically by `init_db()` and
+`init_db_with_balances()` (`CREATE TABLE IF NOT EXISTS`), so it exists on
+fresh databases before the first reset — no manual migration is needed.
+On a database created before this table existed, simply run either init
+function (or `python reset_paper_trading.py`, which calls
+`init_db_with_balances()`) once to create it. To start a fresh P&L
+session programmatically:
+
+```python
+from utils.paper_trade_db import reset_trading_session
+reset_trading_session()  # inserts a new reset marker; historical trades kept
 ```
 
 ## Monitoring

@@ -280,7 +280,11 @@ class EnhancedSecretsManager:
                     "notifications/webhooks",
                     "general/secrets",
                 ]
-                for vault_path in vault_paths:
+                # Also probe the flat per-service paths the bot actually
+                # reads (secrets/binance, secrets/binance_testnet, ...) per
+                # _VAULT_KEY_MAP — field NAMES only, never values.
+                flat_paths = sorted({path for path, _field in _VAULT_KEY_MAP.values()})
+                for vault_path in vault_paths + flat_paths:
                     try:
                         vault_secrets = self.vault_client.get_secret(vault_path)
                         if vault_secrets:
@@ -543,3 +547,82 @@ def get_enhanced_secrets_manager(
 def get_secrets_manager(logger: logging.Logger = None) -> EnhancedSecretsManager:
     """Backward compatibility wrapper"""
     return get_enhanced_secrets_manager(logger)
+
+
+def main(argv: Optional[list] = None) -> int:
+    """
+    Interactive command-line entry point for managing ELVIS secrets.
+
+    Usage:
+        python utils/secrets_manager.py --set NAME [--category CAT]
+        python utils/secrets_manager.py --get NAME [--category CAT]
+        python utils/secrets_manager.py --list
+
+    ``--set`` prompts for the value with a hidden (``getpass``) input so the
+    secret never lands in shell history. ``--get`` only reports presence and
+    never prints the stored value. ``--list`` shows secret names grouped by
+    source/category (never values).
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="secrets_manager",
+        description="Manage ELVIS trading bot secrets (Vault + local fallback).",
+    )
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--set",
+        metavar="NAME",
+        help="Store a secret named NAME (value is prompted, hidden).",
+    )
+    group.add_argument(
+        "--get",
+        metavar="NAME",
+        help="Report whether the secret NAME is present (never prints value).",
+    )
+    group.add_argument(
+        "--list",
+        action="store_true",
+        help="List secret names by category (never prints values).",
+    )
+    parser.add_argument(
+        "--category",
+        default="default",
+        help="Category for --set/--get (default: 'default').",
+    )
+
+    args = parser.parse_args(argv)
+
+    manager = get_enhanced_secrets_manager()
+
+    if args.set:
+        value = getpass.getpass(f"Enter value for {args.set}: ")
+        if not value:
+            print(f"No value entered for {args.set}; nothing stored.")
+            return 1
+        manager.set_secret(args.set, value, args.category)
+        print(f"Secret '{args.set}' stored in category '{args.category}'.")
+        return 0
+
+    if args.get:
+        value = manager.get_secret(args.get, args.category, warn_if_missing=False)
+        if value is not None:
+            print(f"Secret '{args.get}' is PRESENT in category '{args.category}'.")
+            return 0
+        print(f"Secret '{args.get}' is MISSING in category '{args.category}'.")
+        return 1
+
+    # --list
+    all_secrets = manager.list_secrets()
+    if not all_secrets:
+        print("No secrets found.")
+        return 0
+    for category, names in all_secrets.items():
+        print(f"{category}:")
+        for name in names:
+            print(f"  - {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

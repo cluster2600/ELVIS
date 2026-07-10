@@ -1,11 +1,25 @@
 # ELVIS Trading System - Trading Components Documentation
 
-> ⚠️ **Partially outdated (audited 2026-07-02).** A large share of this document's concrete claims — file paths, class/param names, config files, and library choices (e.g. TFDF/Optuna/SHAP, `trading_config.yaml`) — no longer match the code. Treat the source under `core/`, `trading/`, and `training/` as the authority until this doc is rewritten.
-
-
 ## Overview
 
-This document provides comprehensive documentation of the core trading components in the ELVIS trading system. It covers trading strategies, execution modules, risk management, and the complete trading workflow from signal generation to order execution.
+This document describes the core trading components in the ELVIS trading system:
+strategies, order execution, risk management, and the configuration that wires
+them together. Everything below is reconciled against the source under
+`trading/` and `config/`.
+
+The three concrete pieces most callers touch are:
+
+- **`EnsembleStrategy`** (`trading/strategies/ensemble_strategy.py`) — the default
+  strategy. It blends technical analysis with any ML models that happen to be
+  available and returns a `(signal, confidence)` decision.
+- **`BinanceExecutor`** (`trading/execution/binance_executor.py`) — the executor.
+  It runs in paper mode (mock spot fills backed by a Postgres trade DB) or
+  against Binance spot/futures.
+- **`AdvancedRiskManager`** / **`DollarBasedRiskManager`** (`trading/risk/`) — two
+  independent risk models (a margin/liquidation model and a dollar-cap model).
+
+Operational knobs live in `trading_config.yaml` at the repo root, loaded via
+`config.trading_config.load_trading_config()`.
 
 ---
 
@@ -14,74 +28,56 @@ This document provides comprehensive documentation of the core trading component
 ```mermaid
 graph TB
     subgraph "Signal Generation"
-        DataFeed[Market Data Feed]
-        Indicators[Technical Indicators]
-        MLModels[ML Models]
-        Signals[Trading Signals]
+        DataFeed[Market Data / PriceFetcher]
+        Features[Feature Dict]
+        Models[YDF / CoreML / trade-learned / RL / research / Bonenkamp-HFT]
+        Signal[signal, confidence]
     end
-    
+
     subgraph "Strategy Layer"
-        BaseStrategy[BaseStrategy]
+        BaseStrategy[BaseStrategy - abstract]
         EnsembleStrategy[EnsembleStrategy]
-        StrategyManager[StrategyManager]
+        StrategyManager[StrategyManager - regime routing]
     end
-    
+
     subgraph "Risk Management"
-        RiskManager[AdvancedRiskManager]
-        PositionSizer[PositionSizer]
-        RiskLimits[Risk Limits]
-        DrawdownProtection[Drawdown Protection]
+        AdvancedRM[AdvancedRiskManager - margin/liquidation]
+        DollarRM[DollarBasedRiskManager - dollar caps]
     end
-    
+
     subgraph "Execution Layer"
-        BaseExecutor[BaseExecutor]
-        BinanceExecutor[BinanceExecutor]
-        OrderManager[OrderManager]
-        ExecutionEngine[ExecutionEngine]
+        BaseExecutor[BaseExecutor - abstract]
+        BinanceExecutor[BinanceExecutor - paper / spot / futures]
+        ExchangeManager[ExchangeManager - multi-exchange]
     end
-    
-    subgraph "Portfolio Management"
-        Portfolio[Portfolio]
-        PositionTracker[Position Tracker]
-        PnLCalculator[P&L Calculator]
-        PerformanceAnalyzer[Performance Analyzer]
+
+    subgraph "Persistence & Notify"
+        PaperDB[Postgres paper_trade_db]
+        Telegram[TelegramNotifier]
     end
-    
-    subgraph "External Interfaces"
-        BinanceAPI[Binance API]
-        TelegramBot[Telegram Notifications]
-        Database[Trade Database]
-        Monitoring[Monitoring System]
-    end
-    
-    DataFeed --> Indicators
-    Indicators --> MLModels
-    MLModels --> Signals
-    
-    Signals --> EnsembleStrategy
-    BaseStrategy <|-- EnsembleStrategy
-    EnsembleStrategy --> StrategyManager
-    
-    StrategyManager --> RiskManager
-    RiskManager --> PositionSizer
-    RiskManager --> RiskLimits
-    RiskManager --> DrawdownProtection
-    
-    RiskManager --> ExecutionEngine
-    ExecutionEngine --> OrderManager
-    OrderManager --> BinanceExecutor
-    BaseExecutor <|-- BinanceExecutor
-    
-    BinanceExecutor --> BinanceAPI
-    ExecutionEngine --> Portfolio
-    Portfolio --> PositionTracker
-    Portfolio --> PnLCalculator
-    Portfolio --> PerformanceAnalyzer
-    
-    ExecutionEngine --> TelegramBot
-    ExecutionEngine --> Database
-    ExecutionEngine --> Monitoring
+
+    DataFeed --> Features
+    Features --> Models
+    Models --> Signal
+
+    Signal --> EnsembleStrategy
+    BaseStrategy -.abstract base.-> EnsembleStrategy
+    StrategyManager --> EnsembleStrategy
+
+    EnsembleStrategy --> BinanceExecutor
+    BinanceExecutor --> ExchangeManager
+    BaseExecutor -.abstract base.-> BinanceExecutor
+    BinanceExecutor --> PaperDB
+
+    AdvancedRM -.consulted by main loop.-> BinanceExecutor
+    DollarRM -.consulted by main loop.-> BinanceExecutor
+    EnsembleStrategy --> Telegram
 ```
+
+The main trading loop lives in `main.py`; it constructs a strategy and an
+executor, asks the strategy for a `(signal, confidence)`, and routes execution
+through the executor. There is no separate `ExecutionEngine`/`OrderManager`
+object — order lifecycle is handled inside `BinanceExecutor`.
 
 ---
 
@@ -89,220 +85,188 @@ graph TB
 
 ### 1. Base Strategy Interface
 
-The foundation for all trading strategies:
+`trading/strategies/base_strategy.py` defines the abstract base every strategy
+subclasses. It has exactly four abstract methods (all others in earlier versions
+of this doc were fictional):
 
 ```mermaid
 classDiagram
     class BaseStrategy {
         <<abstract>>
-        -logger: Logger
-        -kwargs: Dict
-        +generate_signals(data) Tuple[bool, bool]
-        +calculate_position_size(data, price, capital) float
-        +calculate_stop_loss(data, entry_price) float
-        +calculate_take_profit(data, entry_price) float
-        +validate_signal(signal) bool
-        +get_strategy_params() Dict
-        +set_strategy_params(params)
+        +logger: logging.Logger
+        +kwargs: Dict
+        +__init__(logger, **kwargs)
+        +generate_signals(data) Tuple~bool, bool~*
+        +calculate_position_size(data, current_price, available_capital) float*
+        +calculate_stop_loss(data, entry_price) float*
+        +calculate_take_profit(data, entry_price) float*
     }
-    
-    class StrategyValidator {
-        +validate_data_quality(data) bool
-        +validate_signal_strength(signal) bool
-        +validate_market_conditions(data) bool
-        +validate_risk_parameters(params) bool
-    }
-    
-    class SignalGenerator {
-        +generate_buy_signal(data) bool
-        +generate_sell_signal(data) bool
-        +calculate_signal_strength(data) float
-        +get_signal_confidence(data) float
-    }
-    
-    BaseStrategy --> StrategyValidator
-    BaseStrategy --> SignalGenerator
 ```
+
+Notes:
+
+- The constructor stores `logger` and `**kwargs`; there is no signal-validation
+  or parameter-getter/setter API on the base class.
+- The abstract `generate_signals` signature is `(data: pd.DataFrame) ->
+  Tuple[bool, bool]`. `EnsembleStrategy` overrides it with a wider, dict-based
+  signature (see below), which is what the running system actually uses.
+
+Concrete strategies shipped under `trading/strategies/` include (non-exhaustive):
+`ensemble_strategy`, `research_based_strategy`, `rl_strategy`,
+`bonenkamp_hft_strategy`, `technical_strategy`, `ema_rsi_strategy`,
+`mean_reversion_strategy`, `trend_following_strategy`, `grid_strategy`,
+`sentiment_strategy`, `llm_enhanced_strategy`, `high_leverage_scalping_strategy`,
+`bnb_aware_strategy`, `balanced_starter`.
 
 ### 2. Ensemble Strategy Implementation
 
-Multi-model consensus trading strategy:
+`EnsembleStrategy` (`trading/strategies/ensemble_strategy.py`) is the default
+strategy. It loads whatever models are available and combines their predictions
+with technical analysis into a weighted vote.
 
 ```mermaid
 classDiagram
     class EnsembleStrategy {
-        -ydf_model: RandomForestModel
-        -coreml_model: NeuralNetworkModel
-        -mlx_model: Optional[LLMModel]
-        -executor: BaseExecutor
-        -risk_manager: RiskManager
-        -price_fetcher: PriceFetcher
-        -notifier: TelegramNotifier
-        +generate_signals(data) Tuple[bool, bool]
-        +run()
-        +_consensus_signal(predictions) bool
-        +_calculate_ensemble_confidence(predictions) float
-        +_validate_trading_conditions() bool
-        +_execute_trade_decision(signal, confidence)
+        +symbols: List~str~
+        +REQUIRED_FEATURES: List~str~  20 features
+        +CLASSES: List~str~  BUY, HOLD, SELL
+        +ydf_model
+        +nn_model  CoreML
+        +trade_learned_model  sklearn via joblib
+        +drl_agent
+        +research_strategy
+        +rl_strategy
+        +bonenkamp_strategy
+        +exchange_manager
+        +price_fetcher
+        +order_flow_analyzer
+        +generate_signal(symbol, market_data) Tuple~str, float~
+        +generate_signals(data) Dict~str, Dict~
+        +calculate_position_size(data, price, capital, leverage, signal_confidence) float
+        +calculate_stop_loss(data, entry_price) float
+        +calculate_take_profit(data, entry_price) float
+        +record_trade_signal(signal, price)
+        +check_arbitrage_opportunities(symbol) List~Dict~
+        +execute_multi_exchange_order(symbol, side, quantity, use_best_price) Dict
+        +get_consolidated_portfolio() Dict
+        +get_market_overview(symbols) Dict
     }
-    
-    class ModelEnsemble {
-        -models: List[BaseModel]
-        -weights: List[float]
-        -voting_method: str
-        +add_model(model, weight)
-        +predict_ensemble(data) float
-        +calculate_consensus(predictions) float
-        +get_model_contributions() Dict
-    }
-    
-    class ConsensusEngine {
-        -threshold: float
-        -min_models: int
-        +evaluate_consensus(predictions) bool
-        +calculate_confidence_score(predictions) float
-        +apply_consensus_rules(predictions) Dict
-        +validate_model_agreement(predictions) bool
-    }
-    
-    EnsembleStrategy --> ModelEnsemble
-    EnsembleStrategy --> ConsensusEngine
 ```
+
+How it actually works:
+
+- **Model sources (all optional).** On construction it tries to load a YDF
+  Random Forest (`models/model_rf.ydf` native, else a TensorFlow-DF export at
+  `models/model_rf_tf`), a CoreML neural net (`models/NNModel.mlpackage`), and a
+  trade-learned scikit-learn classifier persisted with `joblib`
+  (`training/models/trade_learned_model.pkl`). It also optionally wires in a DRL
+  agent, a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an
+  MLX LLM endpoint (`MLX_URL`). Any source that fails to import or load is simply
+  skipped — `ydf`, `tensorflow`, and `coremltools` have no Python 3.14 wheels and
+  are guarded behind `try/except`, so on 3.14 the strategy runs on technical
+  analysis plus whichever pure-Python sources are present.
+- **`generate_signal(symbol, market_data)`** is the entry point the main loop
+  calls. It builds a feature dict, gathers weighted predictions from each
+  available source (technical, research, RL, Bonenkamp-HFT, model ensemble),
+  takes a weighted average over the `[BUY, HOLD, SELL]` probability vectors, and
+  returns `(signal, confidence)`. It applies an anti-HOLD conversion and a
+  trend-following filter, and floors the confidence for actual BUY/SELL signals.
+- **`generate_signals(data)`** takes a `Dict[str, pd.DataFrame]` and returns a
+  `Dict[symbol -> {"signal", "confidence"}]` via straight ensemble averaging (no
+  weighting/anti-HOLD). This is the batch variant.
+- The DRL branch is currently disabled in code (`_get_drl_prediction` returns
+  `"HOLD"`).
+
+There is no `ModelEnsemble` or `ConsensusEngine` class, and no `run()` method —
+consensus is just an in-line weighted mean of probability arrays.
 
 ### 3. Strategy Manager
 
-Orchestrates multiple strategies and manages strategy selection:
+`StrategyManager` (`trading/strategy_manager.py`) is a thin regime router, not a
+performance-tracking orchestrator.
 
 ```mermaid
 classDiagram
     class StrategyManager {
-        -strategies: Dict[str, BaseStrategy]
-        -active_strategy: str
-        -strategy_performance: Dict
-        -selection_criteria: Dict
-        +register_strategy(name, strategy)
-        +select_strategy(criteria) str
-        +execute_strategy(data) Dict
-        +evaluate_strategy_performance() Dict
-        +switch_strategy(new_strategy)
-        +get_strategy_metrics(strategy_name) Dict
+        +market_regime_detector: MarketRegimeDetector
+        +strategies: dict  regime -> BaseStrategy
+        +active_strategy: BaseStrategy
+        +__init__(market_regime_detector, strategies)
+        +get_active_strategy(data) BaseStrategy
     }
-    
-    class StrategySelector {
-        -performance_history: Dict
-        -market_regime: str
-        +analyze_market_regime(data) str
-        +select_best_strategy(regime) str
-        +calculate_strategy_scores() Dict
-        +apply_selection_rules() str
-    }
-    
-    class PerformanceTracker {
-        -strategy_metrics: Dict
-        +track_strategy_performance(strategy, result)
-        +calculate_sharpe_ratio(strategy) float
-        +calculate_win_rate(strategy) float
-        +calculate_max_drawdown(strategy) float
-        +generate_performance_report() Dict
-    }
-    
-    StrategyManager --> StrategySelector
-    StrategyManager --> PerformanceTracker
 ```
+
+`get_active_strategy(data)` asks `MarketRegimeDetector.get_regime(data)` for the
+current regime and returns the strategy registered under that regime key, falling
+back to `strategies["default"]`. There is no `StrategySelector`,
+`PerformanceTracker`, Sharpe/win-rate tracking, or dynamic strategy switching in
+this class.
 
 ---
 
 ## Risk Management System
 
-### 1. Advanced Risk Manager
+Two independent risk classes exist. Neither resembles the earlier "AdvancedRiskManager
+with VaR/Kelly/drawdown" description — those methods and the `PositionSizer` /
+`DrawdownProtection` / `RiskLimits` helper classes were fictional.
 
-Comprehensive risk management with multiple protection layers:
+### 1. AdvancedRiskManager — margin & liquidation model
+
+`AdvancedRiskManager` lives in `trading/risk/risk_manager.py`
+(`trading/risk/advanced_risk_manager.py` is a one-line re-export shim so the
+documented import path keeps working). It models a leveraged margin account:
 
 ```mermaid
 classDiagram
     class AdvancedRiskManager {
-        -max_position_size: float
-        -max_daily_trades: int
-        -max_drawdown: float
-        -daily_loss_limit: float
-        -position_limits: Dict
-        -trade_history: List[Dict]
-        +manage_risk(signal, position) bool
-        +calculate_position_size(signal_strength, volatility) float
-        +check_daily_limits() bool
-        +check_drawdown_protection() bool
-        +validate_trade_size(size) bool
-        +update_risk_metrics(trade_result)
+        +starting_balance: float
+        +margin_balance: float
+        +used_margin: float
+        +open_positions: List~Dict~
+        +maintenance_margin_rate: float  0.005
+        +liquidation_fee_rate: float  0.005
+        +__init__(logger, **kwargs)
+        +open_position(symbol, entry_price, quantity, leverage) bool
+        +check_liquidation(current_price)
+        +close_position(symbol, exit_price)
+        +get_status() Dict
     }
-    
-    class PositionSizer {
-        -base_size: float
-        -volatility_adjustment: bool
-        -kelly_criterion: bool
-        +calculate_base_size(capital) float
-        +adjust_for_volatility(size, volatility) float
-        +apply_kelly_criterion(win_rate, avg_win, avg_loss) float
-        +apply_risk_parity(correlations) float
-    }
-    
-    class DrawdownProtection {
-        -max_drawdown: float
-        -current_drawdown: float
-        -protection_level: float
-        +calculate_current_drawdown(equity_curve) float
-        +check_protection_trigger() bool
-        +reduce_position_size(current_size) float
-        +halt_trading() bool
-    }
-    
-    class RiskLimits {
-        -daily_var: float
-        -position_var: float
-        -correlation_limit: float
-        +check_var_limits(portfolio) bool
-        +check_concentration_limits(positions) bool
-        +check_correlation_limits(positions) bool
-        +calculate_portfolio_risk(positions) float
-    }
-    
-    AdvancedRiskManager --> PositionSizer
-    AdvancedRiskManager --> DrawdownProtection
-    AdvancedRiskManager --> RiskLimits
 ```
 
-### 2. Risk Metrics and Monitoring
+- `open_position` reserves initial margin (`notional / leverage`) against
+  `margin_balance`; it returns `False` if margin is insufficient.
+- `check_liquidation` walks open positions and liquidates any whose free margin
+  drops to/below the maintenance margin, charging a liquidation fee.
+- `close_position` returns the reserved margin plus realized PnL to
+  `margin_balance`.
+- `get_status` returns `{"balance", "used_margin", "open_positions"}`.
 
-Real-time risk assessment and monitoring:
+### 2. DollarBasedRiskManager — fixed-dollar risk caps
+
+`DollarBasedRiskManager` (`trading/risk/dollar_risk_manager.py`) sizes positions
+against a per-trade dollar risk budget and daily-loss caps:
 
 ```mermaid
-flowchart TD
-    Start([Risk Assessment Start]) --> GatherData[Gather Portfolio Data]
-    GatherData --> CalcMetrics[Calculate Risk Metrics]
-    
-    CalcMetrics --> VaR[Calculate VaR]
-    CalcMetrics --> CVaR[Calculate CVaR]
-    CalcMetrics --> Beta[Calculate Beta]
-    CalcMetrics --> Correlation[Calculate Correlations]
-    
-    VaR --> CheckLimits{Check Risk Limits}
-    CVaR --> CheckLimits
-    Beta --> CheckLimits
-    Correlation --> CheckLimits
-    
-    CheckLimits --> |Within Limits| ContinueTrading[Continue Trading]
-    CheckLimits --> |Approaching Limits| ReduceRisk[Reduce Risk Exposure]
-    CheckLimits --> |Exceeded Limits| HaltTrading[Halt Trading]
-    
-    ContinueTrading --> Monitor[Monitor Continuously]
-    ReduceRisk --> AdjustPositions[Adjust Position Sizes]
-    HaltTrading --> SendAlert[Send Risk Alert]
-    
-    AdjustPositions --> Monitor
-    SendAlert --> WaitCooldown[Wait Cooldown Period]
-    WaitCooldown --> Start
-    
-    Monitor --> |Update Interval| Start
+classDiagram
+    class DollarBasedRiskManager {
+        +__init__(logger, **kwargs)
+        +calculate_position_size(current_price, max_risk_dollars) float
+        +calculate_dynamic_position_size(available_balance, current_price, ...) float
+        +should_open_position(symbol, estimated_risk) bool
+        +add_position(symbol, position_data)
+        +check_position_exits(current_prices) List~Dict~
+        +calculate_position_pnl(position, current_price) float
+        +close_position(symbol, exit_price, pnl)
+        +get_risk_status() Dict
+        +reset_daily_pnl()
+        +enforce_minimum_leverage(base_leverage) float
+        +manage_positions()
+    }
 ```
+
+A plain `risk_manager.py` also exports `AdvancedRiskManager`; there is no separate
+`RiskLimits`/VaR engine in the codebase. VaR/CVaR/correlation-limit checks
+described in older revisions of this document are not implemented.
 
 ---
 
@@ -310,579 +274,224 @@ flowchart TD
 
 ### 1. Base Executor Interface
 
-Abstract interface for all trading executors:
+`trading/execution/base_executor.py` is the abstract executor interface:
 
 ```mermaid
 classDiagram
     class BaseExecutor {
         <<abstract>>
-        -logger: Logger
-        -kwargs: Dict
-        +initialize()
-        +get_balance() Dict[str, float]
-        +get_position(symbol) Dict
-        +get_current_price(symbol) float
-        +set_leverage(symbol, leverage)
-        +execute_buy(symbol, quantity, price) Dict
-        +execute_sell(symbol, quantity, price) Dict
-        +execute_stop_loss(symbol, quantity, stop_price) Dict
-        +execute_take_profit(symbol, quantity, tp_price) Dict
-        +cancel_order(order_id) bool
-        +get_order_status(order_id) Dict
+        +logger: logging.Logger
+        +kwargs: Dict
+        +__init__(logger, **kwargs)
+        +initialize() bool
+        +get_balance() Dict~str, float~*
+        +get_position(symbol) Dict*
+        +get_current_price(symbol) float*
+        +set_leverage(symbol, leverage)*
+        +execute_buy(symbol, quantity, price, **kwargs) Dict*
+        +execute_sell(symbol, quantity, price, **kwargs) Dict*
+        +execute_stop_loss(symbol, quantity, stop_price, **kwargs) Dict*
+        +execute_take_profit(symbol, quantity, take_profit_price, **kwargs) Dict*
+        +cancel_order(order_id) bool*
+        +get_order_status(order_id) Dict*
     }
-    
-    class OrderValidator {
-        +validate_order_params(params) bool
-        +validate_balance(required_balance) bool
-        +validate_position_size(size) bool
-        +validate_price_levels(entry, stop, target) bool
-    }
-    
-    class ExecutionMetrics {
-        -fill_times: List[float]
-        -slippage_data: List[float]
-        -execution_costs: List[float]
-        +track_execution(order_data)
-        +calculate_avg_fill_time() float
-        +calculate_avg_slippage() float
-        +calculate_execution_cost() float
-    }
-    
-    BaseExecutor --> OrderValidator
-    BaseExecutor --> ExecutionMetrics
 ```
+
+`initialize()` has a default implementation returning `True`; every other method
+is abstract. There are no `OrderValidator` or `ExecutionMetrics` companion
+classes.
 
 ### 2. Binance Executor Implementation
 
-Concrete implementation for Binance exchange:
+`BinanceExecutor` (`trading/execution/binance_executor.py`) is the concrete
+executor. It supports paper trading (spot) with mock fills persisted to Postgres,
+plus real Binance spot and USDⓈ-M futures.
 
 ```mermaid
 classDiagram
     class BinanceExecutor {
-        -client: binance.Client
-        -is_testnet: bool
-        -api_key: str
-        -api_secret: str
-        -order_cache: Dict
-        +initialize()
-        +get_balance() Dict[str, float]
-        +get_funding_rate(symbol) float
+        +client  binance Client or UMFutures or None in paper
+        +api_key: str
+        +api_secret: str
+        +is_testnet: bool
+        +use_futures: bool
+        +default_leverage: int  validated
+        +fee_calculator: BinanceFeeCalculator
+        +__init__(logger, api_key, api_secret, is_testnet, use_futures, default_leverage, **kwargs)
+        +initialize() bool
+        +get_balance() Dict~str, float~
+        +get_position(symbol) Dict
+        +get_current_price(symbol) float
+        +get_funding_rate(symbol) Dict
         +get_order_book(symbol, limit) Dict
-        +execute_market_order(side, symbol, quantity) Dict
-        +execute_limit_order(side, symbol, quantity, price) Dict
-        +execute_stop_market_order(symbol, quantity, stop_price) Dict
-        +get_account_info() Dict
-        +get_open_orders(symbol) List[Dict]
-    }
-    
-    class BinanceAPIManager {
-        -client: binance.Client
-        -rate_limiter: RateLimiter
-        -retry_handler: RetryHandler
-        +handle_api_call(method, params) Any
-        +check_rate_limits() bool
-        +handle_api_errors(error) bool
-        +reconnect_websocket()
-    }
-    
-    class OrderManager {
-        -active_orders: Dict
-        -order_history: List[Dict]
-        +submit_order(order_params) str
+        +set_leverage(symbol, leverage)
+        +execute_buy(symbol, quantity, price, **kwargs) Dict
+        +execute_sell(symbol, quantity, price, **kwargs) Dict
+        +execute_stop_loss(symbol, quantity, stop_price, **kwargs) Dict
+        +execute_take_profit(symbol, quantity, take_profit_price, **kwargs) Dict
+        +check_and_manage_positions()
+        +calculate_open_position_pnl(...) 
+        +close_all_positions(reason) dict
         +cancel_order(order_id) bool
-        +modify_order(order_id, new_params) bool
-        +track_order_status(order_id) str
-        +cleanup_filled_orders()
+        +get_order_status(order_id) Dict
+        +get_account_balance() float
     }
-    
-    BinanceExecutor --> BinanceAPIManager
-    BinanceExecutor --> OrderManager
 ```
 
-### 3. Execution Engine
+Key behaviours:
 
-Coordinates order execution and management:
+- **Modes.** `is_testnet=True` + spot ⇒ paper trading with mock execution (no API
+  keys needed). Futures uses the `binance-futures-connector` `UMFutures` client
+  when available; spot uses `python-binance` `Client`. Live/testnet is chosen by
+  `is_testnet`.
+- **Leverage safety (Issue #14).** The default leverage is `3` (from
+  `config.config.TRADING_CONFIG["DEFAULT_LEVERAGE"]`, overridable by the
+  `DEFAULT_LEVERAGE` env var). `validate_leverage_config` rejects leverage above
+  10x unless `OVERRIDE_HIGH_LEVERAGE=true` is set.
+- **Rate limiting (Issue #12).** Live API calls are wrapped with `binance_retry`
+  (exponential back-off) from `utils.binance_rate_limiter`.
+- **Paper balance.** `_calculate_paper_balance()` computes equity as a single
+  USDT deposit plus true cumulative realized P&L since the last session reset:
+  `equity = max(0.0, starting_usdt + total_pnl)`, floored at 0 (liquidation). The
+  deposit defaults to `$100` (`PAPER_START_USDT` env or
+  `PAPER_TRADING_CONFIG["INITIAL_USDT_BALANCE"]`). The account is pure USDT — no
+  pre-seeded crypto. Realized P&L is summed from the `trades` table in the paper
+  trade DB (`utils.paper_trade_db`).
+- **Fees.** `BinanceFeeCalculator` (`trading/fees/`) handles fee estimation.
+
+There is no `BinanceAPIManager` or standalone `OrderManager` class; order
+tracking and position management are methods on `BinanceExecutor`
+(`check_and_manage_positions`, `close_all_positions`, etc.). For multi-exchange
+routing, `ExchangeManager` (`trading/execution/exchange_manager.py`) coordinates
+Binance/Coinbase/Kraken executors.
+
+### 3. Execution Flow
 
 ```mermaid
 sequenceDiagram
-    participant Strategy as Trading Strategy
-    participant Risk as Risk Manager
-    participant Engine as Execution Engine
-    participant Executor as Binance Executor
-    participant API as Binance API
-    participant Monitor as Monitoring
-    
-    Strategy->>Risk: Request position size
-    Risk-->>Strategy: Return approved size
-    
-    Strategy->>Engine: Submit trade request
-    Engine->>Engine: Validate trade parameters
-    Engine->>Risk: Final risk check
-    Risk-->>Engine: Risk approval
-    
-    Engine->>Executor: Execute order
-    Executor->>API: Submit order to exchange
-    API-->>Executor: Order confirmation
-    Executor-->>Engine: Execution result
-    
-    Engine->>Monitor: Log trade execution
-    Engine->>Strategy: Return execution status
-    
-    loop Order Monitoring
-        Engine->>Executor: Check order status
-        Executor->>API: Query order status
-        API-->>Executor: Order update
-        Executor-->>Engine: Status update
-        
-        alt Order Filled
-            Engine->>Monitor: Log fill
-            Engine->>Strategy: Notify completion
-        else Order Partial Fill
-            Engine->>Engine: Continue monitoring
-        else Order Cancelled/Rejected
-            Engine->>Strategy: Notify failure
-            Engine->>Monitor: Log error
-        end
+    participant Strategy as EnsembleStrategy
+    participant Loop as main.py loop
+    participant Executor as BinanceExecutor
+    participant API as Binance API / paper DB
+    participant Notify as TelegramNotifier
+
+    Loop->>Strategy: generate_signal(symbol, market_data)
+    Strategy-->>Loop: (signal, confidence)
+    Loop->>Strategy: calculate_position_size(...)
+    Strategy-->>Loop: position size (BTC)
+
+    Loop->>Executor: execute_buy / execute_sell(symbol, qty, price)
+    alt Paper mode (testnet spot)
+        Executor->>API: record mock fill in paper_trade_db
+    else Live / futures
+        Executor->>API: submit order (binance_retry wrapped)
     end
-```
+    API-->>Executor: fill / order result
+    Executor-->>Loop: execution result Dict
 
----
-
-## Portfolio Management
-
-### 1. Portfolio Tracker
-
-Manages positions and portfolio state:
-
-```mermaid
-classDiagram
-    class Portfolio {
-        -positions: Dict[str, Position]
-        -cash_balance: float
-        -total_equity: float
-        -unrealized_pnl: float
-        -realized_pnl: float
-        +add_position(symbol, quantity, price)
-        +close_position(symbol, quantity, price)
-        +update_position_prices(market_data)
-        +calculate_total_equity() float
-        +calculate_portfolio_metrics() Dict
-        +get_position_summary() Dict
-    }
-    
-    class Position {
-        -symbol: str
-        -quantity: float
-        -entry_price: float
-        -current_price: float
-        -unrealized_pnl: float
-        -entry_time: datetime
-        +update_price(new_price)
-        +calculate_pnl() float
-        +calculate_return() float
-        +get_position_value() float
-        +is_long() bool
-        +is_short() bool
-    }
-    
-    class PnLCalculator {
-        +calculate_realized_pnl(trades) float
-        +calculate_unrealized_pnl(positions) float
-        +calculate_total_return(initial_capital) float
-        +calculate_daily_pnl(trades) List[float]
-        +calculate_cumulative_pnl(trades) List[float]
-    }
-    
-    Portfolio --> Position
-    Portfolio --> PnLCalculator
-```
-
-### 2. Performance Analytics
-
-Comprehensive performance analysis and reporting:
-
-```mermaid
-classDiagram
-    class PerformanceAnalyzer {
-        -trade_history: List[Dict]
-        -equity_curve: List[float]
-        -benchmark_data: DataFrame
-        +calculate_sharpe_ratio() float
-        +calculate_sortino_ratio() float
-        +calculate_calmar_ratio() float
-        +calculate_max_drawdown() float
-        +calculate_win_rate() float
-        +calculate_profit_factor() float
-        +generate_performance_report() Dict
-    }
-    
-    class RiskAnalyzer {
-        +calculate_var(returns, confidence) float
-        +calculate_cvar(returns, confidence) float
-        +calculate_beta(returns, market) float
-        +calculate_alpha(returns, market, risk_free) float
-        +calculate_tracking_error(returns, benchmark) float
-        +calculate_information_ratio(returns, benchmark) float
-    }
-    
-    class TradeAnalyzer {
-        +analyze_trade_distribution(trades) Dict
-        +calculate_avg_trade_duration(trades) float
-        +analyze_trade_timing(trades) Dict
-        +calculate_trade_efficiency(trades) float
-        +identify_best_worst_trades(trades) Dict
-    }
-    
-    PerformanceAnalyzer --> RiskAnalyzer
-    PerformanceAnalyzer --> TradeAnalyzer
-```
-
----
-
-## Trading Workflow
-
-### Complete Trading Cycle
-
-```mermaid
-flowchart TD
-    Start([Trading Cycle Start]) --> FetchData[Fetch Market Data]
-    FetchData --> CalcIndicators[Calculate Technical Indicators]
-    CalcIndicators --> RunModels[Run ML Models]
-    RunModels --> GenerateSignals[Generate Trading Signals]
-    
-    GenerateSignals --> EvaluateConsensus{Evaluate Model Consensus}
-    EvaluateConsensus --> |No Consensus| WaitNext[Wait Next Cycle]
-    EvaluateConsensus --> |Consensus Reached| ValidateSignal[Validate Signal]
-    
-    ValidateSignal --> CheckRisk{Risk Management Check}
-    CheckRisk --> |Risk Too High| RejectTrade[Reject Trade]
-    CheckRisk --> |Risk Acceptable| CalcPositionSize[Calculate Position Size]
-    
-    CalcPositionSize --> ValidateBalance{Validate Balance}
-    ValidateBalance --> |Insufficient Balance| RejectTrade
-    ValidateBalance --> |Balance OK| ExecuteTrade[Execute Trade]
-    
-    ExecuteTrade --> MonitorExecution[Monitor Order Execution]
-    MonitorExecution --> CheckFill{Order Filled?}
-    CheckFill --> |Partial Fill| MonitorExecution
-    CheckFill --> |Filled| UpdatePortfolio[Update Portfolio]
-    CheckFill --> |Failed| LogError[Log Execution Error]
-    
-    UpdatePortfolio --> SetStopLoss[Set Stop Loss]
-    SetStopLoss --> SetTakeProfit[Set Take Profit]
-    SetTakeProfit --> SendNotification[Send Trade Notification]
-    
-    SendNotification --> MonitorPosition[Monitor Position]
-    MonitorPosition --> CheckExit{Exit Condition?}
-    CheckExit --> |No| MonitorPosition
-    CheckExit --> |Yes| ClosePosition[Close Position]
-    
-    ClosePosition --> UpdateMetrics[Update Performance Metrics]
-    UpdateMetrics --> WaitNext
-    
-    RejectTrade --> WaitNext
-    LogError --> WaitNext
-    WaitNext --> |Next Interval| Start
-```
-
-### Risk Management Integration
-
-```mermaid
-graph TB
-    subgraph "Pre-Trade Risk Checks"
-        PositionLimit[Position Size Limit]
-        DailyTradeLimit[Daily Trade Limit]
-        DrawdownCheck[Drawdown Check]
-        CorrelationCheck[Correlation Check]
-        VaRCheck[VaR Limit Check]
-    end
-    
-    subgraph "Trade Execution Risk"
-        SlippageControl[Slippage Control]
-        LiquidityCheck[Liquidity Check]
-        MarketImpact[Market Impact Assessment]
-        ExecutionRisk[Execution Risk Management]
-    end
-    
-    subgraph "Post-Trade Risk Management"
-        StopLossManagement[Stop Loss Management]
-        PositionMonitoring[Position Monitoring]
-        RiskAdjustment[Dynamic Risk Adjustment]
-        EmergencyExit[Emergency Exit Protocols]
-    end
-    
-    subgraph "Portfolio Risk Management"
-        PortfolioVaR[Portfolio VaR]
-        ConcentrationRisk[Concentration Risk]
-        SectorExposure[Sector Exposure]
-        CurrencyRisk[Currency Risk]
-    end
-    
-    PositionLimit --> SlippageControl
-    DailyTradeLimit --> LiquidityCheck
-    DrawdownCheck --> MarketImpact
-    CorrelationCheck --> ExecutionRisk
-    VaRCheck --> ExecutionRisk
-    
-    SlippageControl --> StopLossManagement
-    LiquidityCheck --> PositionMonitoring
-    MarketImpact --> RiskAdjustment
-    ExecutionRisk --> EmergencyExit
-    
-    StopLossManagement --> PortfolioVaR
-    PositionMonitoring --> ConcentrationRisk
-    RiskAdjustment --> SectorExposure
-    EmergencyExit --> CurrencyRisk
+    Loop->>Notify: trade notification
+    Loop->>Executor: check_and_manage_positions()
 ```
 
 ---
 
 ## Configuration and Parameters
 
-### Trading Configuration
+### Unified trading config
+
+Operational knobs live in `trading_config.yaml` at the repo root and are loaded
+by `config.trading_config.load_trading_config()`. The file composes settings that
+were previously split across `config/config.py` and `trading/config/*.yaml`.
 
 ```yaml
 # trading_config.yaml
 trading:
-  strategy:
-    name: "ensemble_strategy"
-    models:
-      - name: "random_forest"
-        weight: 0.4
-        enabled: true
-      - name: "neural_network"
-        weight: 0.4
-        enabled: true
-      - name: "transformer"
-        weight: 0.2
-        enabled: false
-    
-    consensus:
-      threshold: 0.6
-      min_models: 2
-      confidence_threshold: 0.7
-  
-  risk_management:
-    max_position_size: 0.1  # 10% of portfolio
-    max_daily_trades: 5
-    max_drawdown: 0.15  # 15%
-    daily_loss_limit: 0.05  # 5%
-    stop_loss_pct: 0.02  # 2%
-    take_profit_pct: 0.04  # 4%
-    
-    position_sizing:
-      method: "kelly_criterion"  # fixed, volatility_adjusted, kelly_criterion
-      base_size: 0.02  # 2% of portfolio
-      volatility_adjustment: true
-      max_leverage: 3
-  
-  execution:
-    exchange: "binance"
-    order_type: "market"  # market, limit
-    slippage_tolerance: 0.001  # 0.1%
-    execution_timeout: 30  # seconds
-    
-  monitoring:
-    update_interval: 5  # seconds
-    performance_tracking: true
-    telegram_notifications: true
-    risk_alerts: true
+  symbol: BTCUSDT
+  mode: paper                # paper | live
+  default_leverage: 3        # env DEFAULT_LEVERAGE overrides; >10x needs OVERRIDE_HIGH_LEVERAGE=true
+  strategy: ensemble
+
+risk_management:
+  max_position_size: 0.1     # fraction of portfolio
+  min_position_size: 0.01
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.02
+  max_daily_loss: 0.05       # fraction
+  max_daily_loss_usd: 150.0
+  max_drawdown: 0.2
+  leverage_max: 125
+  leverage_min: 1
+
+execution:
+  max_daily_trades: 8
+  max_trades_per_day: 10
+  trade_cooldown_minutes: 15
+  taker_fee: 0.0004
+
+monitoring:
+  trade_history_port: 5050
+  prometheus_pushgateway: localhost:9091
+  grafana_port: 3001
 ```
 
-### Strategy Parameters
+`load_trading_config()` reads this file and applies the `DEFAULT_LEVERAGE` env
+override to `trading.default_leverage` so the loaded config matches the runtime
+behaviour enforced by `config.config.validate_leverage_config`.
 
-```mermaid
-classDiagram
-    class TradingConfig {
-        -strategy_params: Dict
-        -risk_params: Dict
-        -execution_params: Dict
-        -monitoring_params: Dict
-        +load_config(path) Dict
-        +validate_config() bool
-        +get_strategy_config() Dict
-        +get_risk_config() Dict
-        +update_config(updates)
-        +save_config(path)
-    }
-    
-    class ParameterValidator {
-        +validate_risk_parameters(params) bool
-        +validate_strategy_parameters(params) bool
-        +validate_execution_parameters(params) bool
-        +check_parameter_ranges(params) bool
-        +validate_dependencies(params) bool
-    }
-    
-    class ConfigManager {
-        -config_cache: Dict
-        -config_watchers: List
-        +watch_config_changes()
-        +reload_config()
-        +notify_config_change(section)
-        +backup_config()
-        +restore_config(backup_path)
-    }
-    
-    TradingConfig --> ParameterValidator
-    TradingConfig --> ConfigManager
-```
+Additional per-domain YAML lives under `trading/config/` (`data_config.yaml`,
+`model_config.yaml`, `risk_config.yaml`, `validation_config.yaml`) and
+`config/config.py` holds `TRADING_CONFIG` / `PAPER_TRADING_CONFIG` /
+`API_CONFIG`.
 
----
+### Notes on the `monitoring` block
 
-## Error Handling and Recovery
-
-### Error Management System
-
-```mermaid
-flowchart TD
-    Error([Error Detected]) --> ClassifyError{Classify Error Type}
-    
-    ClassifyError --> |Network Error| NetworkRecovery[Network Recovery]
-    ClassifyError --> |API Error| APIRecovery[API Recovery]
-    ClassifyError --> |Execution Error| ExecutionRecovery[Execution Recovery]
-    ClassifyError --> |Risk Error| RiskRecovery[Risk Recovery]
-    ClassifyError --> |System Error| SystemRecovery[System Recovery]
-    
-    NetworkRecovery --> RetryConnection[Retry Connection]
-    RetryConnection --> CheckConnection{Connection OK?}
-    CheckConnection --> |Yes| Resume[Resume Trading]
-    CheckConnection --> |No| WaitBackoff[Wait Backoff Period]
-    WaitBackoff --> RetryConnection
-    
-    APIRecovery --> CheckAPILimits[Check API Limits]
-    CheckAPILimits --> WaitRateLimit[Wait Rate Limit]
-    WaitRateLimit --> RetryAPI[Retry API Call]
-    RetryAPI --> Resume
-    
-    ExecutionRecovery --> CancelPendingOrders[Cancel Pending Orders]
-    CancelPendingOrders --> ReconcilePositions[Reconcile Positions]
-    ReconcilePositions --> Resume
-    
-    RiskRecovery --> HaltTrading[Halt Trading]
-    HaltTrading --> SendAlert[Send Risk Alert]
-    SendAlert --> WaitManualIntervention[Wait Manual Intervention]
-    
-    SystemRecovery --> SaveState[Save System State]
-    SaveState --> RestartComponents[Restart Components]
-    RestartComponents --> LoadState[Load Saved State]
-    LoadState --> Resume
-    
-    Resume --> ContinueTrading[Continue Trading]
-```
+- `trade_history_port: 5050` — the trade-history Flask API
+  (`utils/trade_history_api.py`) binds `0.0.0.0:5050` and serves
+  `/api/trade_history`.
+- `grafana_port: 3001` — Grafana's host port in the compose stack.
+- `prometheus_pushgateway: localhost:9091` — Prometheus Pushgateway target.
 
 ---
 
 ## Testing and Validation
 
-### Trading System Tests
+The repo ships two real testing/validation components (both differ from the
+earlier fictional `TradingSystemTests`/`PaperTradingSystem` sketch):
 
-```mermaid
-classDiagram
-    class TradingSystemTests {
-        +test_strategy_signal_generation()
-        +test_risk_management_limits()
-        +test_order_execution()
-        +test_portfolio_tracking()
-        +test_performance_calculation()
-        +test_error_handling()
-    }
-    
-    class BacktestingFramework {
-        -historical_data: DataFrame
-        -strategy: BaseStrategy
-        -initial_capital: float
-        +run_backtest(start_date, end_date) Dict
-        +calculate_metrics() Dict
-        +generate_report() str
-        +plot_equity_curve()
-        +analyze_drawdowns()
-    }
-    
-    class PaperTradingSystem {
-        -virtual_portfolio: Portfolio
-        -execution_simulator: ExecutionSimulator
-        +simulate_trade_execution(order) Dict
-        +track_virtual_performance() Dict
-        +compare_to_live_trading() Dict
-        +validate_strategy_logic() bool
-    }
-    
-    TradingSystemTests --> BacktestingFramework
-    TradingSystemTests --> PaperTradingSystem
-```
+- **`BacktestEngine`** (`trading/backtesting/backtest_engine.py`) — with
+  `BacktestConfig` and `Trade` dataclasses.
+- **`StrategyValidator`** (`trading/testing/strategy_validator.py`) — statistical
+  validation with `MonteCarloConfig`, `WalkForwardConfig`, and `StatisticalConfig`.
 
----
-
-## Performance Optimization
-
-### Optimization Strategies
-
-1. **Execution Optimization**
-   - Order routing optimization
-   - Latency reduction techniques
-   - Smart order management
-   - Execution cost minimization
-
-2. **Risk Optimization**
-   - Dynamic risk adjustment
-   - Portfolio optimization
-   - Correlation-based position sizing
-   - Regime-aware risk management
-
-3. **Strategy Optimization**
-   - Parameter optimization
-   - Model ensemble optimization
-   - Signal timing optimization
-   - Multi-timeframe coordination
-
----
-
-## Future Enhancements
-
-### Planned Improvements
-
-1. **Advanced Strategies**
-   - Multi-asset strategies
-   - Cross-exchange arbitrage
-   - Options strategies integration
-   - Futures and derivatives support
-
-2. **Enhanced Risk Management**
-   - Real-time stress testing
-   - Scenario analysis
-   - Dynamic hedging strategies
-   - Regulatory compliance monitoring
-
-3. **Execution Improvements**
-   - Smart order routing
-   - Dark pool integration
-   - Algorithmic execution strategies
-   - Transaction cost analysis
-
-4. **Portfolio Management**
-   - Multi-strategy allocation
-   - Dynamic rebalancing
-   - Factor-based investing
-   - ESG integration
+Paper trading is not a separate simulator class; it is the `is_testnet` spot path
+of `BinanceExecutor`, backed by the Postgres paper trade DB (`utils.paper_trade_db`).
+Unit tests live under `tests/`.
 
 ---
 
 ## References
 
 ### Core Files
-- `trading/strategies/base_strategy.py` - Strategy interface
-- `trading/strategies/ensemble_strategy.py` - Ensemble implementation
-- `trading/execution/base_executor.py` - Execution interface
-- `trading/execution/binance_executor.py` - Binance implementation
-- `trading/risk/advanced_risk_manager.py` - Risk management
+
+- `trading/strategies/base_strategy.py` — abstract strategy interface
+- `trading/strategies/ensemble_strategy.py` — default ensemble strategy
+- `trading/strategy_manager.py` — regime-based strategy router
+- `trading/execution/base_executor.py` — abstract executor interface
+- `trading/execution/binance_executor.py` — Binance paper/spot/futures executor
+- `trading/execution/exchange_manager.py` — multi-exchange coordinator
+- `trading/risk/risk_manager.py` — `AdvancedRiskManager` (margin/liquidation)
+- `trading/risk/advanced_risk_manager.py` — re-export shim for the above
+- `trading/risk/dollar_risk_manager.py` — `DollarBasedRiskManager`
+- `trading/backtesting/backtest_engine.py` — backtesting
+- `trading/testing/strategy_validator.py` — statistical strategy validation
+- `config/trading_config.py` + `trading_config.yaml` — unified config loader/file
+- `config/config.py` — `TRADING_CONFIG`, `PAPER_TRADING_CONFIG`, `validate_leverage_config`
+- `utils/paper_trade_db.py` — paper trade persistence (Postgres)
+- `trading/utils/telegram_notifier.py` — `TelegramNotifier`
 
 ### Related Documentation
+
 - [Architecture Overview](../README.md)
 - [Training Pipeline](training.md)
 - [Utilities & Monitoring](utilities_monitoring.md)
 - [Random Forest Model](random_forest.md)
-
----
-
-This documentation will be continuously updated as new trading features and strategies are added to the system.

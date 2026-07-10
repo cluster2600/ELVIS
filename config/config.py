@@ -37,6 +37,48 @@ class APIConfig:
             "BINANCE_FUTURES_TESTNET_API_SECRET", "your_futures_testnet_api_secret_here"
         )
 
+    # Optional secondary exchanges. Return None (not a placeholder) when unset
+    # so core/bootstrap.create_exchange_manager only registers them when real
+    # credentials are present (Vault first, then environment).
+    @property
+    def KRAKEN_API_KEY(self):
+        return self._secrets.get_secret(
+            "KRAKEN_API_KEY", "api_keys", warn_if_missing=False
+        ) or os.getenv("KRAKEN_API_KEY")
+
+    @property
+    def KRAKEN_API_SECRET(self):
+        return self._secrets.get_secret(
+            "KRAKEN_API_SECRET", "api_keys", warn_if_missing=False
+        ) or os.getenv("KRAKEN_API_SECRET")
+
+    @property
+    def COINBASE_API_KEY(self):
+        return self._secrets.get_secret(
+            "COINBASE_API_KEY", "api_keys", warn_if_missing=False
+        ) or os.getenv("COINBASE_API_KEY")
+
+    @property
+    def COINBASE_API_SECRET(self):
+        return self._secrets.get_secret(
+            "COINBASE_API_SECRET", "api_keys", warn_if_missing=False
+        ) or os.getenv("COINBASE_API_SECRET")
+
+    @property
+    def COINBASE_PASSPHRASE(self):
+        return self._secrets.get_secret(
+            "COINBASE_PASSPHRASE", "api_keys", warn_if_missing=False
+        ) or os.getenv("COINBASE_PASSPHRASE")
+
+    def get(self, name, default=None):
+        """Dict-style accessor so callers can use api_config.get('X').
+
+        core/bootstrap.create_exchange_manager reads credentials with both
+        attribute and .get() access; without this method the .get() fallback
+        raised AttributeError on this object.
+        """
+        return getattr(self, name, default)
+
 
 API_CONFIG = APIConfig()
 

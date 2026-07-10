@@ -70,6 +70,11 @@ VAULT_TOKEN=your_actual_vault_token_here
 python scripts/vault_admin.py --list
 ```
 
+Lists field **names only** (never values), covering both the legacy category
+paths (`trading/api-keys`, `database/credentials`, …) and the flat per-service
+paths the bot actually reads via `_VAULT_KEY_MAP` — `secrets/binance` and
+`secrets/binance_testnet` (`api_key` / `secret_key`).
+
 ### Add a New Secret
 
 ```bash
@@ -102,30 +107,44 @@ python scripts/vault_admin.py --status
 
 ## Secret Organization
 
-Secrets are organized in the following structure:
+The KV v2 secrets engine is mounted at **`secrets`** (plural). The credentials
+ELVIS actually reads live at flat, per-service paths under that mount, matching
+the native OpenBao convention (see `_VAULT_KEY_MAP` in
+`utils/secrets_manager.py`):
 
 ```
-secret/
-├── trading/
-│   ├── api-keys/          # Binance API credentials
-│   └── binance-testnet/   # Testnet credentials
-├── database/
-│   └── credentials/       # PostgreSQL credentials
-├── notifications/
-│   └── webhooks/          # Telegram, Discord webhooks
-├── monitoring/
-│   ├── prometheus/        # Monitoring credentials
-│   └── grafana/          # Grafana API keys
-└── general/
-    └── secrets/          # Other secrets
+secrets/
+├── binance/            # Live Binance API credentials
+│   ├── api_key
+│   └── secret_key
+└── binance_testnet/    # Binance Futures testnet credentials
+    ├── api_key
+    └── secret_key
 ```
+
+Anything not listed in `_VAULT_KEY_MAP` (database, webhooks, and other
+categories set via `set_secret`) is written to the legacy category paths
+derived by `_category_to_vault_path`, still under the `secrets` mount:
+
+```
+secrets/
+├── trading/api-keys       # api_keys category
+├── database/credentials   # database category (PostgreSQL, Redis)
+├── notifications/webhooks # webhooks category (Discord, Slack)
+└── general/secrets        # default / uncategorized
+```
+
+Note the field-name convention differs between the two layouts: the flat
+per-service paths use `api_key` / `secret_key` verbatim, while the legacy
+category paths lowercase-and-hyphenate the secret name (e.g. `BINANCE_API_KEY`
+→ `binance-api-key`).
 
 ## Code Usage
 
-### Using Enhanced Secrets Manager
+### Using the Enhanced Secrets Manager
 
 ```python
-from utils.secrets_manager_enhanced import get_enhanced_secrets_manager
+from utils.secrets_manager import get_enhanced_secrets_manager
 
 # Initialize
 secrets = get_enhanced_secrets_manager()
@@ -219,7 +238,7 @@ WARNING: Failed to get BINANCE_API_KEY from Vault, falling back to environment
 
 - **Cache TTL**: 300 seconds (5 minutes)
 - **Connection Timeout**: 5 seconds
-- **Mount Point**: `secret` (KV v2)
+- **Mount Point**: `secrets` (KV v2; API data paths are `secrets/data/...`)
 - **Retry Policy**: Automatic fallback to environment
 
 ## Migration from .env
@@ -248,6 +267,46 @@ python scripts/vault_admin.py --add
 # Name: BINANCE_API_SECRET
 # Value: your_api_secret
 ```
+
+## Backups
+
+`scripts/vault_admin.py --backup` writes an **encrypted** dump of the known
+Vault secret paths so credentials can be restored after a Vault rebuild or
+disaster. Plaintext secrets are never written to disk.
+
+### How it works
+
+1. **Collect** — reads each known KV path through the secrets manager's Vault
+   client: `secrets/binance`, `secrets/binance_testnet`, plus every distinct
+   path referenced by `_VAULT_KEY_MAP` in `utils/secrets_manager.py`. The set
+   stays in sync with the secrets ELVIS actually reads.
+2. **Encrypt** — the collected secrets are serialised to JSON and encrypted
+   with [Fernet](https://cryptography.io/en/latest/fernet/) (AES-128-CBC +
+   HMAC). Only the ciphertext is ever written; the JSON never touches disk.
+3. **Write** — the ciphertext is saved to the `--out` path (default
+   `.vault-backup.enc`, which is gitignored) with `0600` permissions.
+
+The Fernet key comes from the `BACKUP_KEY` environment variable. If it is
+unset, a fresh key is generated and **printed once** — save it, because it is
+the only way to decrypt the backup and it will not be shown again.
+
+### How to use
+
+```bash
+# Reuse a persistent key (recommended for scripted/scheduled backups)
+export BACKUP_KEY='<your-fernet-key>'
+python scripts/vault_admin.py --backup                 # -> .vault-backup.enc
+python scripts/vault_admin.py --backup --out /secure/vault-2026.enc
+
+# First run without BACKUP_KEY: a key is generated and printed once.
+python scripts/vault_admin.py --backup
+# 🔑 ...  BACKUP_KEY=<copy this and store it in a password manager>
+```
+
+Restore is a decrypt: load the file, `Fernet(BACKUP_KEY).decrypt(...)`, then
+`json.loads(...)` to recover a `{path: {field: value}}` mapping and re-`--add`
+the secrets. Store `BACKUP_KEY` **separately** from the `.enc` file — the
+backup is only as safe as the key.
 
 ## Monitoring and Logging
 

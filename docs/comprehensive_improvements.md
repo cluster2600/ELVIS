@@ -35,6 +35,22 @@ Testing Strategy:
     - Market volatility stress tests
 ```
 
+### API Latency Harness: `tests/perf/test_api_latency.py`
+
+Implements the "Load testing for API endpoints" item as a lightweight
+**regression tripwire** (not a load generator). Using the Flask test client
+with the DB mocked, it measures p50/p95 wall-clock over 50 calls to the
+trade-history API's `/health` and `/trades` read endpoints and asserts a
+generous p95 ceiling (0.5s) so it fails only on a real regression.
+
+**How to use:** the tests carry the `perf` marker (registered in
+`pyproject.toml`) and are **excluded from the default CI run** (`-m "not perf"`).
+Run them explicitly:
+
+```bash
+venv314/bin/python -m pytest tests/perf -m perf -v   # prints p50/p95 per endpoint
+```
+
 ## 2. Architecture & Design Patterns
 
 ### Current Issues
@@ -133,6 +149,84 @@ MLOps Components:
 - **Feast**: Feature store
 - **Evidently AI**: Model monitoring and drift detection
 - **DVC**: Data version control
+
+### Experiment Tracking: `utils/experiment_tracker.py`
+
+A minimal, dependency-optional `ExperimentTracker` implements the "MLflow /
+Weights & Biases integration" recommendation above.
+
+**How it works**
+- If [MLflow](https://mlflow.org) is importable, params, metrics, and artifacts
+  are forwarded to MLflow (honouring `MLFLOW_TRACKING_URI` and any active
+  experiment).
+- If MLflow is **not** installed (e.g. a minimal CI environment), the tracker
+  degrades gracefully to a **no-op local fallback** that appends one JSON object
+  per run to `models/experiments.jsonl`. Experiment tracking therefore always
+  works, with zero required dependencies.
+- The backend is chosen automatically at construction; pass `use_mlflow=False`
+  to force the JSON fallback. If an MLflow call fails mid-run, the tracker logs
+  a warning and falls back to writing the JSON record so a run is never lost.
+
+**How to use**
+```python
+from utils.experiment_tracker import ExperimentTracker
+
+tracker = ExperimentTracker()          # or ExperimentTracker(use_mlflow=False)
+tracker.start_run("rf_baseline")
+tracker.log_params({"n_estimators": 200, "max_depth": 8})
+tracker.log_metrics({"accuracy": 0.71, "f1": 0.68})
+tracker.log_artifact("models/model_rf.joblib")
+tracker.end_run()
+
+# Context-manager form ends the run automatically:
+with ExperimentTracker(use_mlflow=False) as tracker:
+    tracker.log_params({"lr": 0.01})
+    tracker.log_metrics({"val_loss": 0.42})
+```
+
+Each fallback run is one JSON line with `run_name`, `start_time`/`end_time`,
+`duration_seconds`, `params`, `metrics`, `artifacts`, and `backend`. The module
+is standalone and importable without heavy dependencies; it is intentionally
+**not** wired into the training pipeline yet.
+
+### Model Registry: `core/models/model_registry.py`
+
+Implements the documented "version control for models" + "deployment approval
+workflow" with a JSON manifest at `models/registry.json` (atomic writes, stdlib
+only — no external service).
+
+**How it works:** `register(path, name, metrics=)` hashes the artifact (sha256)
+and appends a `pending` version; `approve(name, version)` promotes it to
+`production` and `reject(...)` marks it rejected; `get_production(name)` returns
+the latest approved version. Content-hashing means a changed file is always a
+distinct version.
+
+**How to use:**
+```python
+from core.models.model_registry import ModelRegistry
+reg = ModelRegistry()
+reg.register("models/model_rf.joblib", "rf", metrics={"f1": 0.71})  # -> pending v1
+reg.approve("rf", 1)                                                # -> production
+prod = reg.get_production("rf")                                     # latest approved
+```
+
+### Portfolio Allocation: `trading/risk/portfolio_allocation.py`
+
+Implements the documented "multi-asset allocation / risk parity / rebalancing"
+(numpy only, no scipy — 3.14-safe).
+
+**How it works:** `inverse_volatility_weights(returns)` weights assets by
+1/volatility; `risk_parity_weights(cov)` solves equal-risk-contribution weights
+iteratively; `rebalance_orders(current, target_weights, equity, min_trade_usd)`
+emits the BUY/SELL orders to reach the target allocation, skipping dust.
+
+**How to use:**
+```python
+from trading.risk.portfolio_allocation import risk_parity_weights, rebalance_orders
+w = risk_parity_weights(cov_matrix)                    # ERC weights, sum to 1
+orders = rebalance_orders({"BTC": 600, "ETH": 400},
+                          {"BTC": 0.5, "ETH": 0.5}, equity=1000)
+```
 
 ## 4. Data Engineering
 
@@ -407,6 +501,58 @@ Trading Enhancements:
     - Liquidity provision
     - Order book analysis
 ```
+
+### Kelly Criterion Sizing (implemented)
+
+The "Kelly criterion sizing" item above is now implemented as an opt-in
+sizing helper in `trading/risk_management.py`.
+
+**How it works**
+
+The core is the pure function `kelly_fraction(win_rate, payoff_ratio,
+cap=0.2)`, which applies the standard Kelly formula:
+
+```
+f* = W - (1 - W) / R
+```
+
+where `W` is the win probability (in `[0, 1]`) and `R` is the payoff ratio
+(average win / average loss). The result is clamped to `[0, cap]`:
+
+- Negative edges floor to `0` (skip the trade rather than size negative).
+- The `cap` (default `0.2`) enforces *fractional Kelly* so a single trade
+  never risks more than the configured share of capital.
+
+Examples: `W=0.6, R=2 -> 0.4`; `W=0.4, R=1 -> 0` (floored); `W=0.9, R=5`
+raw `0.88` but returns `0.2` at the default cap.
+
+**How to use**
+
+`RiskManager.calculate_kelly_position_size(...)` wires the fraction into a
+BTC quantity. It is *not* the default path — `calculate_dynamic_position_size`
+remains the built-in sizer; call the Kelly method explicitly when you want
+edge-based sizing:
+
+```python
+from trading.risk_management import RiskManager, kelly_fraction
+
+# Standalone fraction
+f = kelly_fraction(win_rate=0.6, payoff_ratio=2.0)  # -> 0.2 (default cap)
+
+# Full position size (BTC), leverage- and price-aware.
+# win_rate defaults to the manager's tracked self.win_rate when omitted.
+size = risk_manager.calculate_kelly_position_size(
+    available_capital=1000.0,
+    current_price=65000.0,
+    payoff_ratio=2.0,
+    win_rate=0.6,   # optional
+    leverage=50.0,  # subject to enforce_minimum_leverage
+    cap=0.2,
+)
+```
+
+Invalid inputs (`win_rate` outside `[0, 1]`, non-positive `payoff_ratio`,
+negative `cap`, or non-positive `current_price`) raise `ValueError`.
 
 ## 10. Backtesting Framework
 
