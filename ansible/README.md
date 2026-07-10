@@ -46,7 +46,8 @@ The Ansible playbook automatically installs and configures:
 - **Docker Compose** - Multi-container orchestration
 
 ### Web Technologies
-- **Node.js 18** - JavaScript runtime for web dashboard
+- **Node.js 18** - installed for tooling and any future web UI (the bot itself
+  uses the curses console dashboard + Grafana, not a bundled web app)
 
 ### Python Environment
 - **Virtual environment** - Isolated Python environment

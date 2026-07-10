@@ -786,8 +786,8 @@ The Docker deployment creates a complete ecosystem:
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   ELVIS Bot     │    │   PostgreSQL    │    │     Redis       │
-│   Port: 5050    │◄──►│   Port: 5432    │    │   Port: 6379    │
-│   Port: 8000    │    │   DB: trading   │    │   Cache/Queue   │
+│   API: 5050     │◄──►│   Port: 5432    │    │   Port: 6379    │
+│   /metrics      │    │   DB: trading   │    │   Cache/Queue   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
@@ -800,8 +800,8 @@ The Docker deployment creates a complete ecosystem:
 ```
 
 **Access Points:**
-- Trading Bot API: http://localhost:5050/api/docs
-- Web Dashboard: http://localhost:8000
+- Trade History API health: http://localhost:5050/health
+- Prometheus metrics: http://localhost:5050/metrics
 - Grafana Monitoring: http://localhost:3001
 - Prometheus Metrics: http://localhost:9090
 
