@@ -8,10 +8,11 @@
 
 - [Introduction](#introduction)
 - [2026-02-18 Hardening Notes](#2026-02-18-hardening-notes)
-- [Security & Performance](#security--performance-breakthrough-new)
-  - [Enterprise Security](#️-enterprise-grade-hashicorp-vault-integration)
-  - [Maximum Speed Trading](#-maximum-speed-trading)
-  - [API Monitoring](#-advanced-api-monitoring-dashboard)
+- [Current Status](#current-status-july-2026)
+- [Security & Performance](#security--performance)
+  - [Vault / OpenBao Integration](#hashicorp-vault--openbao-integration)
+  - [Fast Trading Loop](#fast-trading-loop)
+  - [API Monitoring](#api-monitoring-dashboard)
 - [System Architecture](#system-architecture)
 - [Core Components](#core-components)
   - [Models](#models)
@@ -46,39 +47,40 @@ Operational runbook and troubleshooting:
 - `docs/ops/2026-02-18_container_observability_runbook.md`
 - `SECURITY.md`
 
-## 🚀 Current Status (July 2025)
+## Current Status (July 2026)
 
-**✅ FULLY OPERATIONAL TRADING BOT WITH ENTERPRISE SECURITY**
+The bot runs on **Python 3.14**, trades in **paper mode** against live Binance
+market data, and ships as a Docker image (`ghcr.io/cluster2600/elvis`). Secrets
+are Vault/OpenBao-backed, the control API is JWT+RBAC protected, and the test
+suite runs green in CI. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the
+current release.
 
-The ELVIS Trading Bot is now fully functional and actively trading with enterprise-grade security! Recent major updates include maximum speed trading and comprehensive security implementation:
+## Security & Performance
 
-## 🔐 **SECURITY & PERFORMANCE BREAKTHROUGH (NEW!)**
+### HashiCorp Vault / OpenBao Integration
+- **Centralized Secret Management**: API keys live in the Vault KV v2 mount `secrets`, one path per service (`secrets/binance`, `secrets/binance_testnet`)
+- **Encrypted local fallback**: Fernet (AES-128-CBC + HMAC-SHA256) encrypted file, master key in the OS keyring
+- **Zero Hardcoded Secrets**: credentials are never committed as literals
+- **Lookup order**: Vault → environment variables → encrypted local file
+- **Live monitoring**: console dashboard shows per-service Vault/DB/exchange health
 
-### 🛡️ **Enterprise-Grade HashiCorp Vault Integration**
-- **Centralized Secret Management**: All API keys and credentials secured in Vault KV v2 engine
-- **AES-256-GCM Encryption**: Military-grade encryption for all sensitive data
-- **Zero Hardcoded Secrets**: Complete elimination of credentials in source code
-- **Multi-Layer Security**: Vault → OS Keyring → Encrypted Files → Environment variables
-- **Real-time Security Monitoring**: Live dashboard with Vault health indicators (✅ ~3ms response)
+### Fast Trading Loop
+- **No per-iteration sleep** in the trading loop; pacing follows the active strategy's `trading_frequency_minutes` when set
+- **Inter-trade cooldown**: a configurable cooldown (default ~15 min) is enforced by `TradeCooldownManager` — deliberate, not zero
+- **Fast secrets**: Vault reads are cached (encrypted, short TTL)
 
-### ⚡ **Maximum Speed Trading**
-- **Zero Cooldowns**: All trading delays removed for maximum execution speed
-- **Ultra-Fast Risk Management**: `cooldown_period = 0` for instant position management
-- **Sub-5ms Performance**: Vault secrets retrieval in under 3ms average
-- **88% System Health**: Real-time monitoring of all critical services
-
-### 📊 **Advanced API Monitoring Dashboard**
+### API Monitoring Dashboard
 - **Visual Status Indicators**: ✅❌⏳ for Binance, Postgres, Vault, Redis, Telegram
-- **Response Time Tracking**: Live monitoring of API latency and performance
-- **Comprehensive Error Protection**: Zero NoneType errors with robust error handling
-- **Overall Health Score**: Real-time calculation of system health percentage
+- **Response Time Tracking**: live per-service latency
+- **Overall Health Score**: connected services ÷ total, shown in the dashboard
+- **Prometheus**: `/metrics` on the trade-history API (port 5050), Grafana on 3001
 
 **Quick Security Setup:**
 ```bash
-# Start Vault (Development)
-vault server -dev -dev-root-token-id=trading-bot-token
+# Start Vault/OpenBao (Development)
+vault server -dev -dev-root-token-id=<choose-a-local-dev-token>
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN=<choose-a-local-dev-token>
 
 # Store secrets securely (KV v2 mount `secrets`, one path per service)
 vault kv put secrets/binance \
@@ -89,17 +91,17 @@ vault kv put secrets/binance \
 python main.py --mode paper  # Shows ✅ Vault connected
 ```
 
-### 🔬 **Research-Based Strategy (NEW!)**
+### Research-Based Strategy
 
-**ELVIS now includes an academic research-based strategy** following the methodology from:
+**ELVIS includes an academic research-based strategy** following the methodology from:
 *"High-Frequency Algorithmic Bitcoin Trading Using Both Financial and Social Features"* by Bonenkamp (2021)
 
 **Key Features:**
-- **14.9% Target Annual Return** (proven in research)
+- **14.9% annual return / 2.02 Sharpe** — the *paper's reported results*, used as targets; **not** verified live results of this bot
 - **Binary Classification** (BUY/SELL only - no HOLD signals)
 - **9 Financial Indicators** (RSI, STOCH, ROC, EMA, MACD, CCI, OBV, ATR, WILLR)
-- **2 Social Features** (Twitter sentiment + Google Trends)
-- **Random Forest Model** (600 trees, 10-fold cross-validation)
+- **2 Social Features** (Twitter sentiment + Google Trends; require optional `tweepy`/`pytrends` + API keys, else neutral defaults)
+- **Random Forest Model** (600 trees, 10-fold time-series cross-validation)
 - **5-Minute Trading Frequency** as specified in research
 
 **Usage:**
@@ -114,13 +116,12 @@ STRATEGY_MODE=research SOCIAL_DATA_ENABLED=true python main.py --mode paper
 ROLLING_TRAINING_ENABLED=true STRATEGY_MODE=research python main.py --mode paper
 ```
 
-**Why This Solves Trading Issues:**
-- ❌ **Bot not trading** → ✅ **Binary classification ensures active trading**
-- ❌ **Losing money** → ✅ **Research-proven 14.9% annual returns**
-- ❌ **Low confidence** → ✅ **Academic methodology with 57.6% accuracy**
+**What it changes:**
+- ❌ **Bot idles in chop** → ✅ **Binary classification always takes a side**
+- ❌ **Ad-hoc methodology** → ✅ **Published academic methodology** (the paper reports 14.9%/yr and 57.6% F1 — treat as targets, not guarantees; live results depend on market regime and fees)
 - ❌ **HOLD signals** → ✅ **Always BUY or SELL decisions**
 
-### 🎯 **Quick Start**
+### Quick Start
 
 **Option 1: Docker Deployment (Recommended)**
 ```bash
@@ -139,18 +140,18 @@ git clone https://github.com/cluster2600/ELVIS.git
 cd ELVIS
 
 # 2. Start HashiCorp Vault for secure secrets
-vault server -dev -dev-root-token-id=trading-bot-token &
+vault server -dev -dev-root-token-id=<choose-a-local-dev-token> &
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN=<choose-a-local-dev-token>
 
 # 3. Store your API keys securely in Vault (KV v2 mount `secrets`)
 vault kv put secrets/binance \
     api_key=your-binance-api-key \
     secret_key=your-binance-api-secret
 
-# 4. Start trading with enterprise security
+# 4. Start trading (paper mode)
 python main.py --mode paper
-# ✅ Vault connected - Maximum speed trading enabled
+# Dashboard shows ✅ Vault connected
 ```
 
 **Option 3: Direct Execution**
@@ -160,9 +161,9 @@ cd ELVIS
 python main.py --mode paper --log-level INFO
 ```
 
-**Option 3: Research-Based Strategy (New!)**
+**Option 4: Research-Based Strategy**
 ```bash
-# Use academic research methodology for proven 14.9% returns
+# Use the academic research methodology (paper targets 14.9%/yr; not a guarantee)
 STRATEGY_MODE=research python main.py --mode paper --log-level INFO
 
 # With social features (Twitter + Google Trends)
@@ -191,7 +192,7 @@ The bot continuously:
 5. Executes paper trades with proper logging
 6. Updates performance metrics in real-time
 
-### 📈 **Sample Output**
+### 📈 **Sample Output** (illustrative — prices from an earlier session)
 ```
 [INFO] Fetched and cached 200 klines for BTCUSDT 1m.
 [INFO] Signal Check: Fast MA=105168.01, Slow MA=104313.11, ADX=53.15, Buy=False, Sell=False
@@ -859,41 +860,37 @@ ELVIS Trading Bot implements comprehensive security with HashiCorp Vault integra
 
 #### **Key Security Features**
 ```
-🛡️ HashiCorp Vault Integration
-├── AES-256-GCM encryption for all secrets
-├── KV v2 secrets engine with versioning
-├── Multi-layer fallback security (Vault → Keyring → Files → Env)
+🛡️ HashiCorp Vault / OpenBao Integration
+├── KV v2 secrets engine (mount `secrets`) with versioning
+├── Fernet-encrypted local fallback (AES-128-CBC + HMAC-SHA256),
+│   master key in the OS keyring
+├── Lookup order: Vault → environment → encrypted local file
 ├── Encrypted local cache with 5-minute TTL
-└── Real-time health monitoring (✅ 3ms response)
+└── Live health monitoring in the console dashboard
 
 🔒 Zero Hardcoded Secrets
-├── All API keys secured in Vault
-├── Database credentials encrypted
-├── Comprehensive audit trail
-└── Role-based access control
+├── All API keys read at runtime (Vault or env), never committed
+└── Role-based access control on the control API (JWT `role` claim)
 
 📊 Security Monitoring
-├── Live dashboard with visual indicators
-├── Real-time connection status (✅❌⏳)
-├── Response time tracking
-└── Comprehensive error protection
+├── Live dashboard with visual indicators (✅❌⏳)
+├── Response time tracking per service
+└── Overall health percentage
 ```
 
-#### **Security Compliance**
-- **OWASP Top 10**: Industry security standards
-- **SOC 2 Type II**: Enterprise audit compliance  
-- **FIPS 140-2**: Cryptographic module standards
-- **Principle of Least Privilege**: Role-based access
-- **Comprehensive Audit Trail**: Complete secret access logging
+> **Honest scope**: this is a personal/experimental bot. It has **no** SOC 2,
+> FIPS 140-2, or OWASP certification, and does not use AES-256-GCM. Any formal
+> compliance would come from the Vault/OpenBao deployment you run, not from
+> this repository. See [SECURITY.md](SECURITY.md) for the authoritative posture.
 
 #### **Quick Security Setup**
 ```bash
 # 1. Start Vault (Development)
-vault server -dev -dev-root-token-id=trading-bot-token
+vault server -dev -dev-root-token-id=<choose-a-local-dev-token>
 
 # 2. Configure environment
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN=<choose-a-local-dev-token>
 
 # 3. Store secrets securely (KV v2 mount `secrets`, one path per service)
 vault kv put secrets/binance \
@@ -909,7 +906,7 @@ python main.py --mode paper
 The console dashboard provides real-time security monitoring:
 ```
 --- API Status ---
-✅ Overall: 88%
+✅ Overall: 100%   (connected services ÷ total; example)
 ✅ Vault        3ms
 ✅ Binance Spot 45ms  
 ✅ Postgres     12ms
@@ -961,12 +958,17 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 
 ### Documentation Files
 
-- [Architecture Links Part 1](docs/architecture_links_part1.mmd)
-- [Architecture Links](docs/architecture_links.mmd)
+- [Verified Architecture (mermaid)](docs/architecture.md)
 - [Bot Architecture Mermaid](docs/bot_architecture_mermaid.md)
+- [Documentation Index](docs/README.md)
+- [Security Posture](SECURITY.md)
+- [Vault Setup](docs/VAULT_SETUP.md)
+- [Trading System](docs/trading_system.md)
+- [Paper Trading Setup](PAPER_TRADING_SETUP.md)
 - [Future Improvements](docs/future_improvements.md)
 - [Random Forest Model Documentation](docs/random_forest.md)
 - [Training Pipeline Documentation](docs/training.md)
+- [Release Notes](RELEASE_NOTES.md)
 
 ---
 
