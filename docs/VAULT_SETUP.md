@@ -22,11 +22,11 @@ choco install vault
 ### 2. Start Development Server
 ```bash
 # Start Vault in development mode (NOT for production)
-vault server -dev -dev-root-token-id=trading-bot-token
+vault server -dev -dev-root-token-id=<choose-a-local-dev-token>
 
 # Set environment variables
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN=<choose-a-local-dev-token>
 ```
 
 ### 3. Initialize Trading Secrets
@@ -173,7 +173,7 @@ export VAULT_ENABLED=true
 
 # Development environment  
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=trading-bot-token
+export VAULT_TOKEN=<choose-a-local-dev-token>
 export VAULT_ENABLED=true
 ```
 
