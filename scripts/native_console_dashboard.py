@@ -100,42 +100,45 @@ class NativeConsoleDashboard:
         except curses.error:
             pass
 
-    # Four dance frames for the King. The signatures that make him Elvis:
-    # d8P...Y8b pompadour swoosh, [8] sideburns, `3' curled-lip snarl,
-    # \===/ jumpsuit collar over the guitar, and the knee-shake legs.
-    # Cycled once per refresh tick (1s) via self.animation_frame.
+    # Four dance frames for the King — silhouette contributed by the owner
+    # (raised G hand, pompadour ,,)_ swoosh, mid-twist body). The note by his
+    # hand and the leg stance shimmy once per refresh tick (1s).
     ELVIS_FRAMES = [
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "     \\ `3' /   ♪  ",
-            "   ,__\\===/__,    ",
-            "      /   \\       ",
+            " G     __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "  /_\\   |_\\     ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "  ♪  \\ `3' /      ",
-            "   ,__\\===/__,    ",
-            "      \\   /       ",
+            " G ♪   __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "   /_\\ |_\\      ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "     \\ `3' /   ♫  ",
-            "   ,--\\===/--,    ",
-            "      /|  ~       ",
+            " G     __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "   |_\\  /_\\     ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "  ♫  \\ `3' /      ",
-            "   ,--\\===/--,    ",
-            "      ~  |\\       ",
+            " G ♫   __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "  /_\\    |_\\    ",
         ],
     ]
 
@@ -172,12 +175,6 @@ class NativeConsoleDashboard:
                 self.safe_addstr(
                     start_y + i, 6, line, curses.color_pair(3) | curses.A_BOLD
                 )
-            self.safe_addstr(
-                start_y + 6,
-                7,
-                self.ELVIS_CAPTIONS[step],
-                curses.color_pair(4) | curses.A_BOLD,
-            )
 
             # Twinkling stars on the right, phase-shifted by frame
             twinkle = ["✧ ･ﾟ", "･ﾟ ✧", "ﾟ✧ ･", " ✧･ﾟ"]
@@ -185,11 +182,11 @@ class NativeConsoleDashboard:
                 spark = twinkle[(self.animation_frame + i) % len(twinkle)]
                 self.safe_addstr(start_y + i, max_x - 14, spark, curses.color_pair(5))
 
-            # Ribbon under the logo
-            ribbon = "･ﾟ✧ jailhouse kawaii mode ✧ﾟ･"
+            # Ribbon under the logo carries the King's cycling caption
+            ribbon = f"･ﾟ✧ {self.ELVIS_CAPTIONS[step].strip()} ✧ﾟ･"
             self.safe_addstr(
                 start_y + 6,
-                (max_x - len(ribbon)) // 2,
+                max(24, (max_x - len(ribbon)) // 2),
                 ribbon,
                 curses.color_pair(5) | curses.A_BOLD,
             )
