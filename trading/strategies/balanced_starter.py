@@ -711,10 +711,21 @@ class BalancedStarterStrategy:
                 self.logger.error("Could not get current price")
                 return {"action": "HOLD", "reason": "No price data"}
 
-            # EMERGENCY PORTFOLIO PROTECTION - Check for major losses FIRST
-            if available_capital < 200.0:  # If portfolio dropped below $200
+            # EMERGENCY PORTFOLIO PROTECTION - Check for major losses FIRST.
+            # Threshold is relative to the CONFIGURED deposit (the old
+            # hardcoded $200 assumed the $1000 paper world and fired every
+            # cycle once the deposit became $100).
+            import os as _os
+
+            from config.config import PAPER_TRADING_CONFIG as _PTC
+
+            _emergency_floor = float(_PTC.get("INITIAL_USDT_BALANCE", 100.0)) * float(
+                _os.getenv("ELVIS_EMERGENCY_CLOSE_PCT", "0.2")
+            )
+            if available_capital < _emergency_floor:
                 self.logger.error(
-                    f"🚨 EMERGENCY: Portfolio at ${available_capital:.2f} - CLOSING ALL LOSING POSITIONS"
+                    f"🚨 EMERGENCY: Portfolio at ${available_capital:.2f} "
+                    f"(< ${_emergency_floor:.2f}) - CLOSING ALL LOSING POSITIONS"
                 )
                 self.emergency_close_losing_positions(current_price)
                 return {
