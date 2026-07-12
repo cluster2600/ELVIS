@@ -1,7 +1,8 @@
-# ELVIS Architecture (verified 2026-07-02)
+# ELVIS Architecture (verified 2026-07-12)
 
-Diagrams below reflect the **actual** code after the doc-audit fixes — every
-module, class, and path shown exists and is import-verified.
+Diagrams below reflect the **actual** code after the doc-audit fixes and the
+2026-07 root reorganization — every module, class, and path shown exists and
+is import-verified.
 
 ## System / runtime flow
 
@@ -14,8 +15,12 @@ flowchart TD
     C --> P["utils.price_fetcher.PriceFetcher"]
     C --> R["trading.risk.AdvancedRiskManager"]
     P -->|real Binance klines| S
-    S -->|BUY / SELL / HOLD| X
+    S -->|BUY / SELL / HOLD| G["signal-quality gates: regime detector + winrate filter + trading.signals (RSI, momentum, BB squeeze, hours, MACD, order flow, MTF)"]
+    G -->|approved signal| SZ["sizing + fee gate: trading.risk.position_sizing + trading.fees.fee_gate"]
+    G -->|vetoed| H["HOLD"]
+    SZ -->|viable trade| X
     X -->|paper fills + PnL| DB[("Postgres: np.trades / np.open_positions")]
+    X -.->|"exits: trading.execution.exits (trailing stop, regime take-profit)"| X
     DB --> API["trading.utils.trade_history_api Flask :5050"]
     X -.->|balance = deposit + realized PnL| DB
 ```
@@ -61,5 +66,12 @@ flowchart TD
   `tune_hyperparameters` **degrade gracefully** (feature-importance export and
   `GridSearchCV` respectively) so the documented interface works everywhere.
 - `ydf` / `tensorflow` are likewise absent on 3.14; the ensemble skips those
-  members via import guards. Install the `[ml]` extra on Python 3.13 for the
-  full stack.
+  members via import guards. The `[ml]` extra (torch, coremltools, gymnasium,
+  openai, TA-Lib, xgboost, lightgbm) covers the 3.14-compatible add-ons and
+  **deliberately excludes** ydf/tensorflow.
+- The full TF/YDF stack runs in a dedicated **Python 3.10 container**
+  (`docker/Dockerfile.ml310`, compose profile `ml`:
+  `docker compose --profile ml run --rm elvis-ml-trainer`). The two runtimes
+  share only the `models/` volume — never imports — so trained artifacts flow
+  to the 3.14 bot without dependency coupling. See
+  [DEPLOYMENT.md](DEPLOYMENT.md).
