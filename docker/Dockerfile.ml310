@@ -10,7 +10,7 @@
 # Run:    docker compose --profile ml run --rm elvis-ml-trainer
 FROM python:3.10-slim
 
-ARG TARGETARCH=arm64
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
