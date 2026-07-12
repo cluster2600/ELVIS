@@ -255,6 +255,40 @@ def _protection_floor(mode: str, current_balance: float, baseline_state: dict):
     return baseline * pct, baseline, pct
 
 
+def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
+    """Adaptive-ensemble feedback (#11): store each member's vote at entry.
+
+    Guarded so a feedback failure never interrupts the trading loop.
+    """
+    if os.getenv("ELVIS_ADAPTIVE_ENSEMBLE", "1") != "1":
+        return
+    try:
+        from trading.signals.model_feedback import record_entry
+
+        votes = getattr(strategy, "last_model_votes", {}).get(symbol, {})
+        if votes:
+            record_entry(symbol, side, votes)
+    except Exception as exc:
+        logger.error(f"⚠️ Model-feedback record error: {exc}")
+
+
+def _score_model_votes(logger: logging.Logger):
+    """Adaptive-ensemble feedback (#11): score votes of closed positions.
+
+    Runs once per loop cycle; EMA-updates the persisted adaptive weights.
+    """
+    if os.getenv("ELVIS_ADAPTIVE_ENSEMBLE", "1") != "1":
+        return
+    try:
+        from trading.signals.model_feedback import score_closed_trades
+
+        scored = score_closed_trades()
+        if scored:
+            logger.info(f"🧠 Adaptive ensemble: scored {scored} model votes")
+    except Exception as exc:
+        logger.error(f"⚠️ Model-feedback scoring error: {exc}")
+
+
 def main(mode: str, log_level: str):
     """
     Main entry point for the trading bot using dependency injection.
@@ -1936,6 +1970,12 @@ def main(mode: str, log_level: str):
                                                     logger.info(
                                                         f"✅ [SUCCESS] {symbol} BUY executed successfully"
                                                     )
+                                                    _record_model_votes(
+                                                        active_strategy,
+                                                        symbol,
+                                                        "BUY",
+                                                        logger,
+                                                    )
                                                 else:
                                                     logger.error(
                                                         f"❌ [FAIL] Failed to execute {symbol} BUY order"
@@ -1952,6 +1992,12 @@ def main(mode: str, log_level: str):
                                                 if result:
                                                     logger.info(
                                                         f"✅ [SUCCESS] {symbol} SELL executed successfully"
+                                                    )
+                                                    _record_model_votes(
+                                                        active_strategy,
+                                                        symbol,
+                                                        "SELL",
+                                                        logger,
                                                     )
                                                 else:
                                                     logger.error(
@@ -1974,6 +2020,9 @@ def main(mode: str, log_level: str):
 
                             # END OF SYMBOL LOOP
                             logger.info("✅ Completed processing all trading symbols")
+
+                            # Score closed positions' model votes once per cycle
+                            _score_model_votes(logger)
 
                             # CRITICAL: Check for stop losses on open positions FIRST
                             try:

@@ -29,9 +29,16 @@ class NativeConsoleDashboard:
         self.running = False
         self.animation_frame = 0
 
-    def safe_addstr(self, y, x, text, attr=0):
-        """Safely add string to screen with bounds checking"""
+    def safe_addstr(self, y, x, text, attr=0, max_w=None):
+        """Safely add string to screen with bounds checking.
+
+        ``max_w`` clips to a pane-relative width so long content can never
+        punch through a pane border (the screen-edge clip alone can't know
+        where the pane ends).
+        """
         try:
+            if max_w is not None and len(text) > max_w:
+                text = text[: max(0, max_w)]
             max_y, max_x = self.stdscr.getmaxyx()
             if 0 <= y < max_y and 0 <= x < max_x:
                 # Truncate text if it would exceed screen width
@@ -77,6 +84,64 @@ class NativeConsoleDashboard:
         except Exception:
             return None
 
+    def _get_json_cached(self, url, params=None, ttl=5.0):
+        """GET a JSON endpoint through a small TTL cache.
+
+        The render loop runs every second; without this, several serial
+        network calls per frame (prices, depth) could exceed the refresh
+        interval under latency. Failures cache as None (retried after ttl).
+        """
+        key = (url, tuple(sorted((params or {}).items())))
+        now = time.time()
+        if not hasattr(self, "_net_cache"):
+            self._net_cache = {}
+        hit = self._net_cache.get(key)
+        if hit and now - hit[0] < ttl:
+            return hit[1]
+        try:
+            resp = requests.get(url, params=params, timeout=2)
+            data = resp.json() if resp.ok else None
+        except Exception:
+            data = None
+        self._net_cache[key] = (now, data)
+        return data
+
+    def _ticker_price(self, symbol, default):
+        """Current price for symbol via the cached public ticker."""
+        data = self._get_json_cached(
+            "https://api.binance.com/api/v3/ticker/price", {"symbol": symbol}
+        )
+        try:
+            return float(data["price"]) if data else default
+        except (KeyError, TypeError, ValueError):
+            return default
+
+    def _system_statuses(self, ttl=10.0):
+        """Real Redis/Postgres connectivity, cached for ttl seconds."""
+        now = time.time()
+        cached = getattr(self, "_status_cache", None)
+        if cached and now - cached[0] < ttl:
+            return cached[1]
+        statuses = {}
+        try:
+            import socket
+
+            with socket.create_connection(("localhost", 6379), timeout=0.5):
+                statuses["redis"] = True
+        except Exception:
+            statuses["redis"] = False
+        try:
+            from utils.paper_trade_db import get_conn
+
+            conn = get_conn()
+            statuses["postgres"] = conn is not None
+            if conn is not None:
+                conn.close()
+        except Exception:
+            statuses["postgres"] = False
+        self._status_cache = (now, statuses)
+        return statuses
+
     def _draw_box(self, start_y: int, start_x: int, end_y: int, end_x: int):
         """Draw a rectangular box using ASCII characters"""
         try:
@@ -93,42 +158,45 @@ class NativeConsoleDashboard:
         except curses.error:
             pass
 
-    # Four dance frames for the King. The signatures that make him Elvis:
-    # d8P...Y8b pompadour swoosh, [8] sideburns, `3' curled-lip snarl,
-    # \===/ jumpsuit collar over the guitar, and the knee-shake legs.
-    # Cycled once per refresh tick (1s) via self.animation_frame.
+    # Four dance frames for the King — silhouette contributed by the owner
+    # (raised G hand, pompadour ,,)_ swoosh, mid-twist body). The note by his
+    # hand and the leg stance shimmy once per refresh tick (1s).
     ELVIS_FRAMES = [
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "     \\ `3' /   ♪  ",
-            "   ,__\\===/__,    ",
-            "      /   \\       ",
+            " G     __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "  /_\\   |_\\     ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "  ♪  \\ `3' /      ",
-            "   ,__\\===/__,    ",
-            "      \\   /       ",
+            " G ♪   __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "   /_\\ |_\\      ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "     \\ `3' /   ♫  ",
-            "   ,--\\===/--,    ",
-            "      /|  ~       ",
+            " G     __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "   |_\\  /_\\     ",
         ],
         [
-            "    ,d8888b.      ",
-            "   d8P'--'Y8b     ",
-            "  [8](⌐■_■)[8]    ",
-            "  ♫  \\ `3' /      ",
-            "   ,--\\===/--,    ",
-            "      ~  |\\       ",
+            " G ♫   __       ",
+            " \\\\   ,,)_      ",
+            "  \\'-\\( /       ",
+            "    \\ | ,\\      ",
+            "    \\|_/\\\\      ",
+            "    / _ '.D     ",
+            "  /_\\    |_\\    ",
         ],
     ]
 
@@ -165,12 +233,6 @@ class NativeConsoleDashboard:
                 self.safe_addstr(
                     start_y + i, 6, line, curses.color_pair(3) | curses.A_BOLD
                 )
-            self.safe_addstr(
-                start_y + 6,
-                7,
-                self.ELVIS_CAPTIONS[step],
-                curses.color_pair(4) | curses.A_BOLD,
-            )
 
             # Twinkling stars on the right, phase-shifted by frame
             twinkle = ["✧ ･ﾟ", "･ﾟ ✧", "ﾟ✧ ･", " ✧･ﾟ"]
@@ -178,20 +240,25 @@ class NativeConsoleDashboard:
                 spark = twinkle[(self.animation_frame + i) % len(twinkle)]
                 self.safe_addstr(start_y + i, max_x - 14, spark, curses.color_pair(5))
 
-            # Ribbon under the logo
-            ribbon = "･ﾟ✧ jailhouse kawaii mode ✧ﾟ･"
+            # Ribbon under the logo carries the King's cycling caption
+            ribbon = f"･ﾟ✧ {self.ELVIS_CAPTIONS[step].strip()} ✧ﾟ･"
             self.safe_addstr(
                 start_y + 6,
-                (max_x - len(ribbon)) // 2,
+                max(24, (max_x - len(ribbon)) // 2),
                 ribbon,
                 curses.color_pair(5) | curses.A_BOLD,
             )
         except curses.error:
             pass
 
-    def _draw_info_pane(self, start_y: int, start_x: int):
-        """Draw the left pane with general info, PnL, and system status"""
+    def _draw_info_pane(self, start_y: int, start_x: int, limit_y: int = None):
+        """Draw the left pane with general info, PnL, and system status.
+
+        ``limit_y`` is the pane's bottom border row; content never crosses it.
+        """
         y = start_y
+        if limit_y is None:
+            limit_y = self.stdscr.getmaxyx()[0] - 2
 
         # Time and Status
         current_time = datetime.now()
@@ -285,15 +352,7 @@ class NativeConsoleDashboard:
         bnb_balance = balance_data.get("BNB", 1.67)  # BNB amount
 
         # Get current BNB price in USDT for accurate USD equivalent calculation
-        bnb_price_usdt = 600.0  # Default BNB price in USDT
-        try:
-            response = requests.get(
-                "https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=2
-            )
-            if response.status_code == 200:
-                bnb_price_usdt = float(response.json()["price"])
-        except:
-            pass
+        bnb_price_usdt = self._ticker_price("BNBUSDT", 600.0)
 
         # Calculate USD equivalent value (USDT ≈ USD)
         bnb_usd_value = bnb_balance * bnb_price_usdt
@@ -302,15 +361,7 @@ class NativeConsoleDashboard:
         btc_balance = balance_data.get("BTC", 0.008583)  # BTC amount (≈$1000 worth)
 
         # Get current BTC price in USDT for accurate USD equivalent calculation
-        btc_price_usdt = 116500.0  # Default BTC price in USDT
-        try:
-            response = requests.get(
-                "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2
-            )
-            if response.status_code == 200:
-                btc_price_usdt = float(response.json()["price"])
-        except:
-            pass
+        btc_price_usdt = self._ticker_price("BTCUSDT", 116500.0)
 
         # Calculate USD equivalent value (USDT ≈ USD)
         btc_usd_value = btc_balance * btc_price_usdt
@@ -338,16 +389,7 @@ class NativeConsoleDashboard:
                     continue
 
                 # Get current price for P&L calculation
-                current_price = entry_price  # Default fallback
-                try:
-                    response = requests.get(
-                        f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
-                        timeout=2,
-                    )
-                    if response.status_code == 200:
-                        current_price = float(response.json()["price"])
-                except:
-                    pass
+                current_price = self._ticker_price(symbol, entry_price)
 
                 # Calculate unrealized P&L
                 if side.upper() == "BUY":
@@ -360,13 +402,16 @@ class NativeConsoleDashboard:
                 continue
 
         y += 1
-        # Portfolio breakdown with clear USD conversion
+        # Portfolio breakdown; values compact enough to stay inside the
+        # 38-col pane (per-asset USD detail lives in Total Value)
+        pane_val_w = 24  # cols available from start_x+10 to the pane border
         self.safe_addstr(y, start_x, "💰 USDT:", curses.color_pair(6))
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{usdt_balance:,.2f} (≈${usdt_balance:,.2f} USD)",
+            f"${usdt_balance:,.2f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -374,8 +419,9 @@ class NativeConsoleDashboard:
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{bnb_balance:.4f} @ ${bnb_price_usdt:.2f} = ${bnb_usd_value:,.2f}",
+            f"{bnb_balance:.4f} @ ${bnb_price_usdt:,.2f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -383,8 +429,9 @@ class NativeConsoleDashboard:
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{btc_balance:.6f} @ ${btc_price_usdt:,.0f} = ${btc_usd_value:,.2f}",
+            f"{btc_balance:.6f} @ ${btc_price_usdt:,.0f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -517,16 +564,15 @@ class NativeConsoleDashboard:
             y += 1
 
         # Recent Trades section
-        y += 1
         self.safe_addstr(
             y, start_x, "--- Recent Trades ---", curses.color_pair(3) | curses.A_BOLD
         )
 
-        recent_trades = trades[:6]  # Show fewer trades to make room for positions
+        recent_trades = trades[:4]  # Show fewer trades to make room for positions
         y += 1
 
         for i, trade in enumerate(recent_trades):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
 
             try:
@@ -543,8 +589,10 @@ class NativeConsoleDashboard:
             except:
                 continue
 
-        # System Info section
-        y += len(recent_trades) + 2
+        # System Info section (compact, two lines)
+        y += len(recent_trades) + 1
+        if y + 2 >= limit_y:
+            return
         self.safe_addstr(
             y, start_x, "--- System Info ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -559,17 +607,11 @@ class NativeConsoleDashboard:
             curses.color_pair(1) if api_status == "HEALTHY" else curses.color_pair(2)
         )
         self.safe_addstr(
-            y, start_x, f"API Status: {api_status}", api_color | curses.A_BOLD
+            y, start_x, f"API: {api_status} · Ensemble", api_color | curses.A_BOLD
         )
 
         y += 1
-        self.safe_addstr(y, start_x, "Strategy: Ensemble", curses.color_pair(6))
-
-        y += 1
-        self.safe_addstr(y, start_x, "Mode: Paper Trading", curses.color_pair(4))
-
-        y += 1
-        self.safe_addstr(y, start_x, "Frequency: 5min HFT", curses.color_pair(6))
+        self.safe_addstr(y, start_x, "Mode: Paper · 5min HFT", curses.color_pair(4))
 
     def get_ohlc_data(self):
         """Generate OHLC candlestick data like the original console dashboard"""
@@ -649,9 +691,11 @@ class NativeConsoleDashboard:
             )
             return
 
-        # Chart dimensions
+        # Chart dimensions: reserve 12 cols on the right for the in-pane
+        # price scale (it used to be drawn PAST the pane border, bleeding
+        # into the market-depth pane)
         chart_height = height - 5
-        chart_width = min(width - 2, len(ohlc_data))
+        chart_width = min(max(10, width - 14), len(ohlc_data))
 
         # Use the most recent candles that fit
         candles = (
@@ -725,8 +769,8 @@ class NativeConsoleDashboard:
                 close_y, candle_x, "●", candle_color | curses.A_BOLD
             )  # Close
 
-        # Draw price scale on the right exactly like original
-        scale_x = start_x + chart_width + 4
+        # Draw price scale inside the pane's right edge
+        scale_x = start_x + width - 10
         num_levels = min(8, chart_height // 2)
         for i in range(num_levels):
             if num_levels > 1:
@@ -736,7 +780,7 @@ class NativeConsoleDashboard:
             scale_y = start_y + 2 + int(i * (chart_height - 1) / max(1, num_levels - 1))
             scale_y = max(start_y + 2, min(scale_y, start_y + chart_height - 1))
             self.safe_addstr(
-                scale_y, scale_x, f"${scale_price:.0f}", curses.color_pair(6)
+                scale_y, scale_x, f"${scale_price:.0f}", curses.color_pair(6), max_w=9
             )
 
         # Draw volume bars at the bottom exactly like original
@@ -816,58 +860,59 @@ class NativeConsoleDashboard:
     def _draw_market_depth_pane(
         self, start_y: int, start_x: int, height: int, width: int
     ):
-        """Draw the right pane with market depth (columns 94-120)"""
+        """Draw the right pane: live market depth + system status"""
         y = start_y
+        limit_y = start_y + height
 
-        # Right pane marker (as per original)
-        max_y, max_x = self.stdscr.getmaxyx()
-        self.safe_addstr(
-            y, start_x, f"RIGHT PANE (cols {start_x}-{max_x-2})", curses.color_pair(4)
-        )
-
-        y += 2
         self.safe_addstr(
             y, start_x, "--- Market Depth ---", curses.color_pair(3) | curses.A_BOLD
         )
 
-        y += 2
+        # Real public order book (same source paper trading uses); falls
+        # back to placeholders if the fetch fails
+        asks = [("--", "--")] * 4
+        bids = [("--", "--")] * 4
+        try:
+            book = self._get_json_cached(
+                "https://api.binance.com/api/v3/depth",
+                {"symbol": "BTCUSDT", "limit": 5},
+                ttl=3.0,
+            )
+            self._binance_ok = book is not None
+            book = book or {}
+            asks = [
+                (f"{float(p):,.2f}", f"{float(q):.3f}")
+                for p, q in reversed(book.get("asks", [])[:4])
+            ] or asks
+            bids = [
+                (f"{float(p):,.2f}", f"{float(q):.3f}")
+                for p, q in book.get("bids", [])[:4]
+            ] or bids
+        except Exception:
+            pass
+
+        y += 1
         self.safe_addstr(y, start_x, "      ASKS", curses.color_pair(2) | curses.A_BOLD)
-
-        # Mock ask orders
-        asks = [
-            ("67245.50", "0.245"),
-            ("67244.25", "0.156"),
-            ("67243.00", "0.342"),
-            ("67242.15", "0.089"),
-            ("67241.50", "0.278"),
-        ]
-
         y += 1
         for i, (price, size) in enumerate(asks):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
-            self.safe_addstr(y + i, start_x, f"{price} {size}", curses.color_pair(2))
+            self.safe_addstr(
+                y + i, start_x, f"{price:>12} {size}", curses.color_pair(2)
+            )
 
-        y += len(asks) + 1
+        y += len(asks)
         self.safe_addstr(y, start_x, "      BIDS", curses.color_pair(1) | curses.A_BOLD)
-
-        # Mock bid orders
-        bids = [
-            ("67234.75", "0.198"),
-            ("67233.50", "0.267"),
-            ("67232.25", "0.145"),
-            ("67231.00", "0.356"),
-            ("67230.50", "0.123"),
-        ]
-
         y += 1
         for i, (price, size) in enumerate(bids):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
-            self.safe_addstr(y + i, start_x, f"{price} {size}", curses.color_pair(1))
+            self.safe_addstr(
+                y + i, start_x, f"{price:>12} {size}", curses.color_pair(1)
+            )
 
         # API Status
-        y += len(bids) + 2
+        y += len(bids) + 1
         self.safe_addstr(
             y, start_x, "--- API Status ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -878,17 +923,23 @@ class NativeConsoleDashboard:
         status_color = curses.color_pair(1) if health else curses.color_pair(2)
         self.safe_addstr(y, start_x, f"ELVIS API: {status_text}", status_color)
 
-        y += 1
-        self.safe_addstr(y, start_x, "Binance: ✓ Connected", curses.color_pair(1))
+        statuses = self._system_statuses()
+        rows = [
+            ("Binance", getattr(self, "_binance_ok", False)),
+            ("Redis", statuses.get("redis", False)),
+            ("PostgreSQL", statuses.get("postgres", False)),
+        ]
+        for name, ok in rows:
+            y += 1
+            if y >= limit_y:
+                return
+            mark, color = ("✓ Connected", 1) if ok else ("✗ Down", 2)
+            self.safe_addstr(y, start_x, f"{name}: {mark}", curses.color_pair(color))
 
-        y += 1
-        self.safe_addstr(y, start_x, "Redis: ✓ Connected", curses.color_pair(1))
-
-        y += 1
-        self.safe_addstr(y, start_x, "PostgreSQL: ✓ Connected", curses.color_pair(1))
-
-        # Position Sizing
-        y += 3
+        # Position Sizing (bounded like the ladders above)
+        y += 2
+        if y + 3 >= limit_y:
+            return
         self.safe_addstr(
             y, start_x, "--- Position Sizing ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -922,7 +973,7 @@ class NativeConsoleDashboard:
         ]
 
         for i, message in enumerate(messages[: height - 2]):
-            if y + i + 1 >= self.stdscr.getmaxyx()[0] - 1:
+            if y + i + 1 >= start_y + height:
                 break
             # Truncate message to fit width
             if len(message) > width - 2:
@@ -956,26 +1007,34 @@ class NativeConsoleDashboard:
             chart_pane_x = left_pane_width + 1
             right_pane_x = chart_pane_x + chart_pane_width + 1
 
+            # Three panes on top, a full-width console strip in its own box
+            # below (it used to be painted straight across all three panes)
+            bottom_split = max_y - 8
+
             # Draw panes
-            self._draw_box(8, 1, max_y - 2, left_pane_width)  # Left pane
+            self._draw_box(8, 1, bottom_split, left_pane_width)  # Left pane
             self._draw_box(
-                8, chart_pane_x, max_y - 2, chart_pane_x + chart_pane_width
+                8, chart_pane_x, bottom_split, chart_pane_x + chart_pane_width
             )  # Chart pane
-            self._draw_box(8, right_pane_x, max_y - 2, max_x - 2)  # Right pane
+            self._draw_box(8, right_pane_x, bottom_split, max_x - 2)  # Right pane
 
             # Draw content in panes
-            self._draw_info_pane(9, 3)
-            self._draw_chart_pane(9, chart_pane_x + 1, max_y - 15, chart_pane_width - 1)
+            self._draw_info_pane(9, 3, limit_y=bottom_split)
+            self._draw_chart_pane(
+                9, chart_pane_x + 1, bottom_split - 11, chart_pane_width - 1
+            )
 
-            # Market depth in right pane (columns 94-120 as noted in original)
-            market_depth_height = min(18, max_y - 25)
+            market_depth_height = bottom_split - 10
             if market_depth_height > 10:
                 self._draw_market_depth_pane(
                     9, right_pane_x + 2, market_depth_height, right_pane_width - 2
                 )
 
-            # Console messages at the bottom
-            self._draw_console_messages(max_y - 10, 3, 8, max_x - 6)
+            # Console messages strip
+            self._draw_box(bottom_split + 1, 1, max_y - 2, max_x - 2)
+            self._draw_console_messages(
+                bottom_split + 2, 3, max_y - 2 - (bottom_split + 2), max_x - 8
+            )
 
             self.animation_frame = (self.animation_frame + 1) % 10
             self.stdscr.refresh()

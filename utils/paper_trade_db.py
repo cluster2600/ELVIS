@@ -111,6 +111,25 @@ def init_db():
                 reason TEXT
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.model_predictions (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT NOW(),
+                symbol TEXT,
+                side TEXT,
+                model TEXT,
+                vote TEXT,
+                scored BOOLEAN DEFAULT FALSE
+            )
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_model_predictions_scored
+            ON np.model_predictions (scored, created_at)
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts
+            ON np.trades (symbol, timestamp)
+        """)
         conn.commit()
         print("[INFO] Database tables initialized successfully")
     except Exception as e:
@@ -271,6 +290,127 @@ def get_open_positions():
     except Exception as e:
         print(f"[ERROR] Failed to get open positions: {e}")
         return []
+    finally:
+        conn.close()
+
+
+def record_model_predictions(symbol, side, votes):
+    """Store each ensemble member's vote at trade entry (feedback pipeline).
+
+    Args:
+        symbol: traded symbol, e.g. "BTCUSDT"
+        side: the EXECUTED direction ("BUY"/"SELL")
+        votes: dict of {model_name: vote} where vote is BUY/SELL/HOLD
+
+    Returns True on success, False otherwise.
+    """
+    if not votes:
+        return False
+    conn = get_conn()
+    if conn is None:
+        print("[WARNING] Cannot record model predictions - database not available")
+        return False
+    try:
+        c = conn.cursor()
+        for model, vote in votes.items():
+            c.execute(
+                """
+                INSERT INTO np.model_predictions (symbol, side, model, vote)
+                VALUES (%s, %s, %s, %s)
+            """,
+                (str(symbol), str(side), str(model), str(vote)),
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to record model predictions: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def get_unscored_predictions(limit=500):
+    """Return unscored model votes as (id, created_at, symbol, side, model, vote)."""
+    conn = get_conn()
+    if conn is None:
+        return []
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT id, created_at, symbol, side, model, vote
+            FROM np.model_predictions
+            WHERE scored = FALSE
+            ORDER BY created_at ASC
+            LIMIT %s
+        """,
+            (int(limit),),
+        )
+        return c.fetchall()
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch unscored predictions: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def mark_predictions_scored(ids):
+    """Mark the given model_predictions ids as scored."""
+    if not ids:
+        return True
+    conn = get_conn()
+    if conn is None:
+        return False
+    try:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE np.model_predictions SET scored = TRUE WHERE id = ANY(%s)",
+            (list(int(i) for i in ids),),
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"[ERROR] Failed to mark predictions scored: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def get_first_closing_trade_after(symbol, ts):
+    """First trade for `symbol` after `ts` (the close of that position).
+
+    Returns (timestamp, pnl) or None if the position hasn't closed yet.
+
+    Relies on the bot's single-position-per-symbol invariant: the row
+    sequence per symbol is entry-fill (pnl 0) -> votes recorded -> close
+    (realized pnl), so the first trade AFTER the votes' timestamp is that
+    position's close. A breakeven close (pnl == 0) is deliberately
+    returned — the scorer marks it "no information" — rather than filtered
+    out, because skipping it would misattribute the NEXT position's exit
+    to this vote batch.
+    """
+    conn = get_conn()
+    if conn is None:
+        return None
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT timestamp, pnl FROM np.trades
+            WHERE symbol = %s AND timestamp > %s
+              AND pnl IS NOT NULL
+            ORDER BY timestamp ASC
+            LIMIT 1
+        """,
+            (str(symbol), ts),
+        )
+        row = c.fetchone()
+        return (row[0], float(row[1])) if row else None
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch closing trade: {e}")
+        return None
     finally:
         conn.close()
 
@@ -647,6 +787,28 @@ def init_db_with_balances():
                 reset_timestamp TIMESTAMP DEFAULT NOW(),
                 reason TEXT
             )
+        """)
+
+        # Per-model ensemble votes recorded at trade entry, scored at exit
+        # (adaptive-ensemble feedback pipeline, roadmap item #11)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS np.model_predictions (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT NOW(),
+                symbol TEXT,
+                side TEXT,
+                model TEXT,
+                vote TEXT,
+                scored BOOLEAN DEFAULT FALSE
+            )
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_model_predictions_scored
+            ON np.model_predictions (scored, created_at)
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts
+            ON np.trades (symbol, timestamp)
         """)
 
         conn.commit()

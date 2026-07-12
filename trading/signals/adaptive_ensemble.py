@@ -293,3 +293,45 @@ class AdaptiveEnsembleWeights:
             f"{type(self).__name__}(models={sorted(self._accuracies)}, "
             f"ema_alpha={self._ema_alpha}, state_path={self._state_path!r})"
         )
+
+
+def combine_weights(
+    static: dict[str, float],
+    adaptive: dict[str, float],
+    min_multiplier: float = 0.25,
+    max_multiplier: float = 4.0,
+) -> dict[str, float]:
+    """Modulate hand-tuned static source weights by learned adaptive weights.
+
+    How it works: with N tracked models the neutral adaptive weight is 1/N,
+    so each source's multiplier is ``adaptive[k] / neutral`` — exactly 1.0
+    when weights are uniform (zero behavior change until real feedback
+    accumulates). Multipliers are clamped to [min_multiplier, max_multiplier]
+    so no model can be silenced or dominate off a handful of scored trades.
+    Sources unknown to the adaptive tracker get a neutral 1.0. The result is
+    renormalized over the sources present in ``static``.
+
+    How to use::
+
+        combined = combine_weights({"Technical": 0.3, "Research": 0.35},
+                                   tracker.weights)
+    """
+    if not static:
+        return {}
+    n_known = len(adaptive)
+    neutral = (1.0 / n_known) if n_known else 1.0
+    combined: dict[str, float] = {}
+    for source, static_w in static.items():
+        adaptive_w = adaptive.get(source)
+        if adaptive_w is None or neutral <= 0:
+            multiplier = 1.0
+        else:
+            multiplier = adaptive_w / neutral
+        multiplier = max(min_multiplier, min(max_multiplier, multiplier))
+        combined[source] = max(0.0, float(static_w)) * multiplier
+    total = sum(combined.values())
+    if total <= 0:
+        # degenerate statics: fall back to uniform over present sources
+        uniform = 1.0 / len(combined)
+        return {source: uniform for source in combined}
+    return {source: weight / total for source, weight in combined.items()}
