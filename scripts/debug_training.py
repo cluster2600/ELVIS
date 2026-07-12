@@ -215,7 +215,7 @@ def run_quick_test():
         print("✅ Basic data processing OK")
 
         # Test configuration loading
-        sys.path.append(".")
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from config.config import TRADING_CONFIG
 
         print("✅ Configuration loading OK")
@@ -253,7 +253,7 @@ def provide_recommendations():
 
     print("3. 🗄️  For database issues:")
     print("   - Check PostgreSQL is running: pg_ctl status")
-    print("   - Reset paper trading: python reset_paper_trading.py")
+    print("   - Reset paper trading: python scripts/reset_paper_trading.py")
     print()
 
     print("4. 🚀 For training issues:")

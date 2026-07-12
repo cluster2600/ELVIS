@@ -31,7 +31,7 @@ test_files() {
     
     required_files=(
         "Dockerfile"
-        "Dockerfile.simple"
+        "docker/Dockerfile.simple"
         "docker-compose.yml"
         "requirements.txt"
         ".env"
@@ -57,7 +57,7 @@ test_files() {
 test_build() {
     echo -n "Testing container build... "
     
-    if docker build -f Dockerfile.simple -t elvis-test:latest . &> /dev/null; then
+    if docker build -f docker/Dockerfile.simple -t elvis-test:latest . &> /dev/null; then
         echo -e "${GREEN}✅ PASS${NC}"
         # Clean up test image
         docker rmi elvis-test:latest &> /dev/null || true

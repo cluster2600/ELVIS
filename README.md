@@ -52,7 +52,7 @@ Operational runbook and troubleshooting:
 The bot runs on **Python 3.14**, trades in **paper mode** against live Binance
 market data, and ships as a Docker image (`ghcr.io/cluster2600/elvis`). Secrets
 are Vault/OpenBao-backed, the control API is JWT+RBAC protected, and the test
-suite runs green in CI. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the
+suite runs green in CI. See [RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the
 current release.
 
 ## Security & Performance
@@ -202,7 +202,7 @@ The bot continuously:
 ### 🐳 **Docker Quick Start**
 ```bash
 # Build and run in container
-docker build -f Dockerfile.simple -t elvis-trading-bot:simple .
+docker build -f docker/Dockerfile.simple -t elvis-trading-bot:simple .
 docker run --name elvis-bot elvis-trading-bot:simple
 ```
 
@@ -964,11 +964,11 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 - [Security Posture](SECURITY.md)
 - [Vault Setup](docs/VAULT_SETUP.md)
 - [Trading System](docs/trading_system.md)
-- [Paper Trading Setup](PAPER_TRADING_SETUP.md)
+- [Paper Trading Setup](docs/PAPER_TRADING_SETUP.md)
 - [Future Improvements](docs/future_improvements.md)
 - [Random Forest Model Documentation](docs/random_forest.md)
 - [Training Pipeline Documentation](docs/training.md)
-- [Release Notes](RELEASE_NOTES.md)
+- [Release Notes](docs/RELEASE_NOTES.md)
 
 ---
 

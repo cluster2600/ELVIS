@@ -197,7 +197,7 @@ graph TD
     INFRA --> MONITOR[Monitoring Layer]
     
     subgraph MONITOR[Monitoring Containers]
-        C[Prometheus<br/>Depends: None<br/>Config: prometheus.yml]
+        C[Prometheus<br/>Depends: None<br/>Config: observability/prometheus.yml]
         D[Loki<br/>Depends: None<br/>Config: loki/config.yml]
     end
     

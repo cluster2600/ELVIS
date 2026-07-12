@@ -83,11 +83,11 @@ If you prefer manual setup:
 
 ### 1. **Build Containers**
 ```bash
-# docker-compose builds the elvis-bot service from Dockerfile.minimal
+# docker-compose builds the elvis-bot service from docker/Dockerfile.minimal
 docker-compose build
 
-# Optional: standalone image from Dockerfile.simple (network-resilient variant)
-docker build -f Dockerfile.simple -t elvis-bot:latest .
+# Optional: standalone image from docker/Dockerfile.simple (network-resilient variant)
+docker build -f docker/Dockerfile.simple -t elvis-bot:latest .
 ```
 
 Both Dockerfiles are based on `python:3.14-slim`. The bot's runtime
@@ -111,10 +111,10 @@ docker-compose up -d
 ### 3. **Initialize Paper Trading**
 ```bash
 # Reset to initial balances
-docker-compose exec elvis-bot python reset_paper_trading.py
+docker-compose exec elvis-bot python scripts/reset_paper_trading.py
 
 # Check balances (script is excluded from the image, run it from the host)
-POSTGRES_HOST=localhost POSTGRES_PORT=5433 venv314/bin/python check_paper_balances.py
+POSTGRES_HOST=localhost POSTGRES_PORT=5433 venv314/bin/python scripts/check_paper_balances.py
 
 # Or query the database directly
 docker-compose exec postgres psql -U elvis_user -d elvis_trading \
@@ -199,10 +199,10 @@ docker-compose pull && docker-compose up -d
 ### **Trading Management**
 ```bash
 # Reset paper trading
-docker-compose exec elvis-bot python reset_paper_trading.py
+docker-compose exec elvis-bot python scripts/reset_paper_trading.py
 
 # Check balances (run from the host; check_*.py scripts are excluded from the image)
-POSTGRES_HOST=localhost POSTGRES_PORT=5433 venv314/bin/python check_paper_balances.py
+POSTGRES_HOST=localhost POSTGRES_PORT=5433 venv314/bin/python scripts/check_paper_balances.py
 
 # View open positions
 docker-compose exec postgres psql -U elvis_user -d elvis_trading \

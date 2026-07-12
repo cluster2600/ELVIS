@@ -599,7 +599,7 @@
       
     - name: Install CoreML dependencies (macOS)
       pip:
-        requirements: "{{ project_dir }}/requirements_coreml.txt"
+        requirements: "{{ project_dir }}/requirements/requirements_coreml.txt"
         virtualenv: "{{ project_dir }}/venv"
       become_user: "{{ project_user }}"
       become: no
@@ -607,7 +607,7 @@
       
     - name: Install YDF dependencies
       pip:
-        requirements: "{{ project_dir }}/requirements_ydf.txt"
+        requirements: "{{ project_dir }}/requirements/requirements_ydf.txt"
         virtualenv: "{{ project_dir }}/venv"
       become_user: "{{ project_user }}"
       become: no
@@ -737,7 +737,7 @@
           
           📚 Documentation:
           - System Guide: {{ project_dir }}/ELVIS_MONITORING_SYSTEM_COMPLETE.md
-          - Architecture: {{ project_dir }}/ELVIS_SYSTEM_ARCHITECTURE.md
+          - Architecture: {{ project_dir }}/docs/ELVIS_SYSTEM_ARCHITECTURE.md
           - Container Guide: {{ project_dir }}/ansible/deploy_containers.yml
           
           🎯 Production Features:

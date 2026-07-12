@@ -77,7 +77,7 @@ container inspect elvis-bot
 container logs elvis-bot
 
 # Execute commands in ELVIS
-container exec elvis-bot python check_paper_balances.py
+container exec elvis-bot python scripts/check_paper_balances.py
 
 # Stop specific container
 container stop elvis-bot
@@ -194,11 +194,11 @@ TRADE_API_HOST=0.0.0.0
 ### **Manual Container Management**
 
 #### **Build ELVIS Image**
-The setup script tries `Dockerfile.minimal` first (fewer network dependencies) and falls back to `Dockerfile.simple`:
+The setup script tries `docker/Dockerfile.minimal` first (fewer network dependencies) and falls back to `docker/Dockerfile.simple`:
 ```bash
-container build -f Dockerfile.minimal -t elvis-bot:latest .
+container build -f docker/Dockerfile.minimal -t elvis-bot:latest .
 # or, with full dependencies:
-container build -f Dockerfile.simple -t elvis-bot:latest .
+container build -f docker/Dockerfile.simple -t elvis-bot:latest .
 ```
 
 #### **Create Network**
@@ -252,10 +252,10 @@ container exec elvis-postgres psql -U elvis_user -d elvis_trading -c \
 ### **Trading Operations**
 ```bash
 # Reset paper trading balances
-container exec elvis-bot python reset_paper_trading.py
+container exec elvis-bot python scripts/reset_paper_trading.py
 
 # Check current balances
-container exec elvis-bot python check_paper_balances.py
+container exec elvis-bot python scripts/check_paper_balances.py
 
 # Test Bonenkamp strategy
 container exec elvis-bot python tests/test_bonenkamp_strategy.py
@@ -335,7 +335,7 @@ container rm elvis-bot
 ### **Paper Trading**
 - **Initial Balances**: $1000 USDT + $1000 BNB
 - **Reset Command**: `./scripts/apple_container_native.sh reset`
-- **Balance Check**: `container exec elvis-bot python check_paper_balances.py`
+- **Balance Check**: `container exec elvis-bot python scripts/check_paper_balances.py`
 
 ### **Bonenkamp HFT Strategy**
 - **Frequency**: 5-minute intervals

@@ -83,7 +83,7 @@ If ELVIS runs inside the same Compose network as Prometheus:
 If ELVIS runs on host and Prometheus runs in container:
 - Target can be: `host.docker.internal:5050`
 
-Update `prometheus.yml` accordingly and restart Prometheus:
+Update `observability/prometheus.yml` accordingly and restart Prometheus:
 ```bash
 docker compose restart prometheus
 ```
@@ -134,5 +134,5 @@ git commit -m "chore(repo): stop tracking local environment/build artifacts"
 - `README.md`
 - `SECURITY.md`
 - `docker-compose.yml`
-- `prometheus.yml`
+- `observability/prometheus.yml`
 - `trading/utils/trade_history_api.py`

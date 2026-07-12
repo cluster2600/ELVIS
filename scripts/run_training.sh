@@ -243,8 +243,8 @@ run_diagnostics() {
     echo -e "${PURPLE}🔧 Running System Diagnostics...${NC}"
     echo ""
     
-    if [[ -f "debug_training.py" ]]; then
-        python3 debug_training.py
+    if [[ -f "scripts/debug_training.py" ]]; then
+        python3 scripts/debug_training.py
     else
         echo -e "${BLUE}🔍 Manual Diagnostics:${NC}"
         check_dependencies
@@ -262,9 +262,9 @@ run_training_postgres() {
     echo -e "${GREEN}🚀 Starting PostgreSQL Training...${NC}"
     
     # Use Patient LLM training for slow LLMs, or ALL trades training for maximum data utilization
-    if [[ -f "train_all_trades_patient_llm.py" && "$LLM_ANALYSIS" == "true" ]]; then
+    if [[ -f "scripts/train_all_trades_patient_llm.py" && "$LLM_ANALYSIS" == "true" ]]; then
         # Use Patient LLM training for slow LLMs
-        cmd="python3 train_all_trades_patient_llm.py --trades $limit --epochs $epochs --horizon $horizon --include-test"
+        cmd="python3 scripts/train_all_trades_patient_llm.py --trades $limit --epochs $epochs --horizon $horizon --include-test"
         echo -e "${PURPLE}🐌 Using Patient LLM-enhanced training (optimized for slow LLMs)${NC}"
         echo -e "${CYAN}📊 Will use $limit individual paper trades with patient LLM processing${NC}"
         
@@ -272,11 +272,11 @@ run_training_postgres() {
         if [[ "$VAULT_MODE" == "true" ]]; then
             cmd="$cmd --vault"
         fi
-    elif [[ -f "train_all_paper_trades.py" ]]; then
+    elif [[ -f "scripts/train_all_paper_trades.py" ]]; then
         # Use ALL trades training for maximum data utilization
         local trades_limit=$limit
         
-        cmd="python3 train_all_paper_trades.py --method auto --trades $trades_limit --epochs $epochs --horizon $horizon --include-test"
+        cmd="python3 scripts/train_all_paper_trades.py --method auto --trades $trades_limit --epochs $epochs --horizon $horizon --include-test"
         echo -e "${PURPLE}🧠 Using ALL trades LLM-enhanced training (maximizes training samples)${NC}"
         echo -e "${CYAN}📊 Will use $trades_limit individual paper trades${NC}"
         
@@ -285,16 +285,16 @@ run_training_postgres() {
             cmd="$cmd --vault"
         fi
     # Use LLM-enhanced training if LLM is enabled
-    elif [[ "$LLM_ANALYSIS" == "true" && -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
+    elif [[ "$LLM_ANALYSIS" == "true" && -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
         echo -e "${PURPLE}🧠 Enhanced with LLM analysis${NC}"
-    elif [[ -f "train_with_postgres_llm.py" ]]; then
-        cmd="python3 train_with_postgres_llm.py --method auto --limit $limit --epochs $epochs --horizon $horizon --vault --include-test"
+    elif [[ -f "scripts/train_with_postgres_llm.py" ]]; then
+        cmd="python3 scripts/train_with_postgres_llm.py --method auto --limit $limit --epochs $epochs --horizon $horizon --vault --include-test"
         echo -e "${PURPLE}🧠 Using LLM-enhanced PostgreSQL training script${NC}"
-    elif [[ -f "train_with_postgres.py" ]]; then
-        cmd="python3 train_with_postgres.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
-    elif [[ -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
+    elif [[ -f "scripts/train_with_postgres.py" ]]; then
+        cmd="python3 scripts/train_with_postgres.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    elif [[ -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
         echo -e "${CYAN}📊 Using LLM script without LLM features${NC}"
     else
         echo -e "${RED}❌ No suitable training script found${NC}"
@@ -319,7 +319,7 @@ run_training_enhanced() {
     
     echo -e "${GREEN}🚀 Starting Enhanced Training...${NC}"
     
-    cmd="python3 train_with_trades.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    cmd="python3 scripts/train_with_trades.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
     
     if [[ "$debug_flag" == "true" ]]; then
         cmd="$cmd --debug"
@@ -344,13 +344,13 @@ run_training_no_vault() {
     echo -e "${GREEN}🚀 Starting No-Vault Training...${NC}"
     
     # Use LLM-enhanced training if LLM is enabled
-    if [[ "$LLM_ANALYSIS" == "true" && -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
+    if [[ "$LLM_ANALYSIS" == "true" && -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
         echo -e "${PURPLE}🧠 Enhanced with LLM analysis${NC}"
-    elif [[ -f "train_no_vault.py" ]]; then
-        cmd="python3 train_no_vault.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
-    elif [[ -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
+    elif [[ -f "scripts/train_no_vault.py" ]]; then
+        cmd="python3 scripts/train_no_vault.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    elif [[ -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
         echo -e "${CYAN}📊 Using LLM script without LLM features${NC}"
     else
         echo -e "${RED}❌ No suitable training script found${NC}"
@@ -421,36 +421,36 @@ run_training_research() {
     
     # Build command - use training script, NOT main.py (which starts the bot)
     # For research strategy, prioritize ALL trades training for maximum data
-    if [[ -f "train_all_paper_trades.py" ]]; then
+    if [[ -f "scripts/train_all_paper_trades.py" ]]; then
         # Use infinite trades (0 = all available) for research to maximize training samples
         local trades_limit=0
         if [[ "$limit" != "$DEFAULT_LIMIT" ]]; then
             trades_limit=$limit
         fi
         
-        cmd="python3 train_all_paper_trades.py --method all_trades --trades $trades_limit --epochs $epochs --horizon $horizon --include-test"
+        cmd="python3 scripts/train_all_paper_trades.py --method all_trades --trades $trades_limit --epochs $epochs --horizon $horizon --include-test"
         echo -e "${PURPLE}🧠 Using ALL trades LLM-enhanced training for research strategy${NC}"
         echo -e "${CYAN}📊 Will use ALL ${trades_limit:-25440+} individual paper trades for maximum research data${NC}"
     # For research strategy, use LLM-enhanced training if LLM is enabled
-    elif [[ "$LLM_ANALYSIS" == "true" && -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
+    elif [[ "$LLM_ANALYSIS" == "true" && -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --enable-llm"
         echo -e "${PURPLE}🧠 Using LLM-enhanced training script for research strategy${NC}"
-    elif [[ -f "train_research_strategy.py" ]]; then
-        cmd="python3 train_research_strategy.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
-    elif [[ -f "train_with_postgres_llm.py" ]]; then
-        cmd="python3 train_with_postgres_llm.py --method auto --limit $limit --epochs $epochs --horizon $horizon --vault --include-test"
+    elif [[ -f "scripts/train_research_strategy.py" ]]; then
+        cmd="python3 scripts/train_research_strategy.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    elif [[ -f "scripts/train_with_postgres_llm.py" ]]; then
+        cmd="python3 scripts/train_with_postgres_llm.py --method auto --limit $limit --epochs $epochs --horizon $horizon --vault --include-test"
         echo -e "${PURPLE}🧠 Using LLM-enhanced PostgreSQL training script${NC}"
-    elif [[ -f "train_with_postgres.py" ]]; then
-        cmd="python3 train_with_postgres.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    elif [[ -f "scripts/train_with_postgres.py" ]]; then
+        cmd="python3 scripts/train_with_postgres.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
         echo -e "${YELLOW}💡 Using PostgreSQL training script for research strategy${NC}"
-    elif [[ -f "train_with_trades.py" ]]; then
-        cmd="python3 train_with_trades.py --limit $limit --epochs $epochs --prediction-horizon $horizon --no-vault"
+    elif [[ -f "scripts/train_with_trades.py" ]]; then
+        cmd="python3 scripts/train_with_trades.py --limit $limit --epochs $epochs --prediction-horizon $horizon --no-vault"
         echo -e "${YELLOW}💡 Using enhanced training script for research strategy${NC}"
-    elif [[ -f "train_no_vault.py" ]]; then
-        cmd="python3 train_no_vault.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
+    elif [[ -f "scripts/train_no_vault.py" ]]; then
+        cmd="python3 scripts/train_no_vault.py --limit $limit --epochs $epochs --prediction-horizon $horizon"
         echo -e "${YELLOW}💡 Using no-vault training script for research strategy${NC}"
-    elif [[ -f "train_with_llm.py" ]]; then
-        cmd="python3 train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
+    elif [[ -f "scripts/train_with_llm.py" ]]; then
+        cmd="python3 scripts/train_with_llm.py --limit $limit --epochs $epochs --prediction-horizon $horizon --disable-llm"
         echo -e "${CYAN}📊 Using LLM training script without LLM features${NC}"
     else
         echo -e "${RED}❌ No suitable training script found!${NC}"

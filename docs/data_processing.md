@@ -389,15 +389,15 @@ Missing/placeholder keys degrade gracefully to public/keyless clients (and, for
 
 - **TA-Lib** (`talib`) is an **optional** import in `BinanceProcessor`; if the
   C library/wheel is unavailable it sets `HAS_TALIB = False` and logs a
-  warning. Pin `ta-lib==0.6.3` lives only in `requirements_coreml.txt`.
+  warning. Pin `ta-lib==0.6.3` lives only in `requirements/requirements_coreml.txt`.
 - **`ta`** (pure-Python) is a hard dependency (`requirements.txt`) and backs
   `DataProcessor` and `trading/analysis/technical_indicators.py`.
 - **`ccxt`** backs `BinanceProcessor`; **`python-binance`** (`binance.*`) backs
   `PriceFetcher` and `data_downloader.py`; **`websocket-client`** backs the live
   stream.
 - `tensorflow` / `ydf` and similar have **no Python 3.14 wheels** and are not
-  used by the data-processing path (they appear only in `requirements_coreml.txt`
-  / `requirements_ydf.txt` for the CoreML/YDF training variants).
+  used by the data-processing path (they appear only in `requirements/requirements_coreml.txt`
+  / `requirements/requirements_ydf.txt` for the CoreML/YDF training variants).
 
 ---
 

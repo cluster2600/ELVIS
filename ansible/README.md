@@ -51,7 +51,7 @@ The Ansible playbook automatically installs and configures:
 
 ### Python Environment
 - **Virtual environment** - Isolated Python environment
-- **All Python dependencies** - From requirements.txt, requirements_coreml.txt, requirements_ydf.txt
+- **All Python dependencies** - From requirements.txt, requirements/requirements_coreml.txt, requirements/requirements_ydf.txt
 
 ### Services & Monitoring
 - **Systemd service** - Auto-start ELVIS bot

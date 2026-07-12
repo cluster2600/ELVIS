@@ -1,0 +1,48 @@
+# ML-legacy training container — Python 3.10
+#
+# Why this exists: the live bot runs on Python 3.14, but several training
+# dependencies (tensorflow/keras, ydf, coremltools) have no 3.14 wheels.
+# This image isolates that stack on 3.10 and shares ONLY the models/ volume
+# with the bot container — the coupling is saved model files, not imports,
+# so the two Python versions never mix.
+#
+# Build:  docker build -f docker/Dockerfile.ml310 -t elvis-ml-trainer .
+# Run:    docker compose --profile ml run --rm elvis-ml-trainer
+FROM python:3.10-slim
+
+ARG TARGETARCH=arm64
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    wget \
+    gcc \
+    g++ \
+    libffi-dev \
+    pkg-config \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# TA-Lib C library, same per-arch package as the main Dockerfile
+RUN wget -q "https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && dpkg -i "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && rm "ta-lib_0.6.4_${TARGETARCH}.deb"
+
+WORKDIR /app
+
+# Core scientific deps resolve for 3.10 (pyproject requires-python >=3.10),
+# then the 3.10-only ML stack the 3.14 bot image cannot carry.
+COPY requirements.txt requirements/ /app/requirements/
+RUN pip install --no-cache-dir -r /app/requirements/requirements.txt \
+    && pip install --no-cache-dir \
+        tensorflow \
+        ydf \
+        -r /app/requirements/requirements_ydf.txt \
+        -r /app/requirements/requirements_coreml.txt
+
+COPY . /app
+
+# Trained artifacts land in /app/models — mount it as a shared volume so the
+# 3.14 bot container picks up new model files without a rebuild.
+VOLUME ["/app/models"]
+
+CMD ["bash", "scripts/run_training.sh"]

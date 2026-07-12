@@ -4,6 +4,12 @@ Training script for the Reinforcement Learning trading model
 This script trains a DQN agent on historical trading data to learn optimal trading patterns
 """
 
+# Make the repo root importable no matter where this script is run from
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+
 import argparse
 import logging
 import os
@@ -11,6 +17,7 @@ import sys
 from datetime import datetime
 
 from analyze_trades import analyze_recent_trades, get_all_trades_for_rl
+
 from core.models.trading_rl_model import TradingRLModel
 from utils.paper_trade_db import get_all_trades, get_conn
 

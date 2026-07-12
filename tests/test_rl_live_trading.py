@@ -9,7 +9,7 @@ import random
 import time
 from datetime import datetime, timedelta
 
-from analyze_trades import analyze_recent_trades
+from scripts.analyze_trades import analyze_recent_trades
 from trading.strategies.ensemble_strategy import EnsembleStrategy
 from utils.paper_trade_db import get_all_trades, record_trade
 

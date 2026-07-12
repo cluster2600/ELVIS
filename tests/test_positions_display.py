@@ -167,7 +167,7 @@ def main():
         print("\n🎯 Next steps:")
         print("   1. Start the dashboard: python trading/scripts/dashboard.py")
         print("   2. Verify all positions are visible")
-        print("   3. Clean up test data: python reset_paper_trading.py")
+        print("   3. Clean up test data: python scripts/reset_paper_trading.py")
 
     except Exception as e:
         print(f"\n❌ Error during test: {e}")

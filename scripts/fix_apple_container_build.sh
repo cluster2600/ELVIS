@@ -40,7 +40,7 @@ if command -v docker &> /dev/null && docker info &> /dev/null; then
     print_success "Docker Desktop is available and running"
     echo "Building ELVIS with minimal dependencies..."
     
-    if docker build -f Dockerfile.minimal -t elvis-bot:latest .; then
+    if docker build -f docker/Dockerfile.minimal -t elvis-bot:latest .; then
         print_success "✅ Docker build successful!"
         echo ""
         echo "You can now use either:"
@@ -86,7 +86,7 @@ echo ""
 echo "If you prefer containerized deployment:"
 echo ""
 echo "1. Use Docker Desktop:"
-echo "   docker build -f Dockerfile.minimal -t elvis-bot:latest ."
+echo "   docker build -f docker/Dockerfile.minimal -t elvis-bot:latest ."
 echo "   docker-compose up"
 echo ""
 echo "2. Fix Apple Container networking:"

@@ -1,6 +1,6 @@
 # Profitability Roadmap — Implementation Status
 
-Implementation of the 15 ideas in [`profitability_roadmap.md`](../profitability_roadmap.md).
+Implementation of the 15 ideas in [`profitability_roadmap.md`](./profitability_roadmap.md).
 Every mechanism below exists in code, is unit-tested, and (where it belongs in
 the live loop) is wired into `main.py` behind an environment flag.
 

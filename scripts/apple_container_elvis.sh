@@ -208,7 +208,7 @@ cmd_reset() {
     read -p "Continue? (y/N): " confirm
     
     if [[ $confirm =~ ^[Yy]$ ]]; then
-        docker-compose exec elvis-bot python reset_paper_trading.py
+        docker-compose exec elvis-bot python scripts/reset_paper_trading.py
         print_success "✅ Paper trading reset complete"
     else
         echo "Reset cancelled"

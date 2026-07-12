@@ -4,6 +4,12 @@ Native ELVIS Console Dashboard - Exact Replica
 Mimics the exact layout and appearance of the native console dashboard
 """
 
+# Make the repo root importable no matter where this script is run from
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+
 import curses
 import json
 import os

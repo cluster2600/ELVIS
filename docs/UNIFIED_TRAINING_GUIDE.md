@@ -42,7 +42,7 @@ authoritative list — the script's `print_usage` is the source of truth).
 
 ### **Training Methods**
 - `--method postgres` - **Recommended**: trains against the PostgreSQL trade DB
-- `--method enhanced` - Runs `train_with_trades.py` (Vault fixes + fallbacks)
+- `--method enhanced` - Runs `scripts/train_with_trades.py` (Vault fixes + fallbacks)
 - `--method no-vault` - Complete Vault bypass for testing
 - `--method research` - Research-based strategy training (Bonenkamp 2021); runs
   with Vault disabled and paper-mode credentials
@@ -81,7 +81,7 @@ warning:
 - `--quick` - Quick test: sets `--limit 100 --epochs 5` and enables debug mode
 - `--production` - Production: sets `--limit 5000 --epochs 50`
 - `--research` - Research strategy mode (also enables `--social` and `--rolling`)
-- `--check` - Run system diagnostics only (runs `debug_training.py`)
+- `--check` - Run system diagnostics only (runs `scripts/debug_training.py`)
 - `--help` - Show detailed help
 
 ## 🎯 **Auto-Detection Logic**
@@ -171,22 +171,22 @@ selection precedence (see `run_training_postgres` / `run_training_no_vault` /
 model type you get:
 
 ### **`postgres` / `auto` method**
-- If `--llm` is set and `train_all_trades_patient_llm.py` exists → runs that
+- If `--llm` is set and `scripts/train_all_trades_patient_llm.py` exists → runs that
   ("patient" LLM path for slow LLMs)
 - **Otherwise, the usual path**: `train_all_paper_trades.py --method auto` — this
   trains **scikit-learn RandomForest models** (a `RandomForestClassifier`, a
   `RandomForestRegressor`, and a `StandardScaler`), persisted with **joblib** to
   `models/all_trades_*_<timestamp>.joblib`. There is no TensorFlow / TFDF here.
-- Only if `train_all_paper_trades.py` is absent does it fall back to
-  `train_with_postgres.py`, which delegates to `training/train_models.py` and
+- Only if `scripts/train_all_paper_trades.py` is absent does it fall back to
+  `scripts/train_with_postgres.py`, which delegates to `training/train_models.py` and
   trains a **PyTorch `FinancialTransformer` plus RL agents**, writing
   `models/transformer_evaluation.json` and `models/rl_agents_evaluation.json`.
 
 ### **`enhanced` method**
-- Runs `train_with_trades.py` (Vault fixes; add `--no-vault` to bypass Vault).
+- Runs `scripts/train_with_trades.py` (Vault fixes; add `--no-vault` to bypass Vault).
 
 ### **`no-vault` method**
-- Runs `train_no_vault.py` (or the LLM script when `--llm` is set).
+- Runs `scripts/train_no_vault.py` (or the LLM script when `--llm` is set).
 
 ### **`research` method**
 - Prefers `train_all_paper_trades.py --method all_trades` (all available trades),
@@ -196,12 +196,12 @@ model type you get:
 ## 🛠️ **Integration Components**
 
 ### **Scripts Integrated** (all present in the repo root)
-1. `train_all_paper_trades.py` - Default data-maximizing path (RandomForest + joblib)
-2. `train_all_trades_patient_llm.py` - Patient LLM path for slow local LLMs
-3. `train_with_postgres.py` - Delegates to `training/train_models.py` (Transformer + RL)
-4. `train_with_trades.py` - Enhanced original with Vault fixes
-5. `train_no_vault.py` - Complete Vault bypass
-6. `debug_training.py` - System diagnostics (invoked by `--check`)
+1. `scripts/train_all_paper_trades.py` - Default data-maximizing path (RandomForest + joblib)
+2. `scripts/train_all_trades_patient_llm.py` - Patient LLM path for slow local LLMs
+3. `scripts/train_with_postgres.py` - Delegates to `training/train_models.py` (Transformer + RL)
+4. `scripts/train_with_trades.py` - Enhanced original with Vault fixes
+5. `scripts/train_no_vault.py` - Complete Vault bypass
+6. `scripts/debug_training.py` - System diagnostics (invoked by `--check`)
 
 ### **Features Integrated**
 - ✅ **Automatic Method Detection** (research → postgres → no-vault)
@@ -345,9 +345,9 @@ The unified training system provides a **single, reliable command** for all ELVI
 - **Integrates with** the local PostgreSQL `trades` table
 - **Bypasses Vault** on the `no-vault` and `research` methods
 - **Processes real trade data** with 35-feature / 6-target engineering
-- **Trains** either sklearn RandomForest models (default `train_all_paper_trades.py`
+- **Trains** either sklearn RandomForest models (default `scripts/train_all_paper_trades.py`
   path, saved as joblib) or a PyTorch Transformer + RL agents (via
-  `train_with_postgres.py` → `training/train_models.py`)
+  `scripts/train_with_postgres.py` → `training/train_models.py`)
 
 Use `./scripts/run_training.sh --help` for the complete, authoritative option list, or
 `./scripts/run_training.sh --quick` to get started immediately.

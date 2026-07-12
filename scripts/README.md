@@ -16,7 +16,7 @@ the repo root to keep the top level clean.
 | `run_console_dashboard.sh` | Launch the curses console dashboard. |
 | `run_research_strategy.sh` | Run the bot with the research-based strategy (`STRATEGY_MODE=research`). |
 | `run_tests.sh` | Run the test suite via `venv314`'s pytest. |
-| `run_training.sh` | Unified training entry point (see `../UNIFIED_TRAINING_GUIDE.md`). |
+| `run_training.sh` | Unified training entry point (see `../docs/UNIFIED_TRAINING_GUIDE.md`). |
 | `start_bot_with_vault.sh` | Start the bot with Vault/OpenBao auth (requires `VAULT_DEV_ROOT_TOKEN_ID`). |
 
 ## Setup

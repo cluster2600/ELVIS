@@ -63,7 +63,7 @@ build_elvis_image() {
     
     # Try building with the minimal Dockerfile first (no network dependencies)
     print_success "Attempting build with minimal Dockerfile (no network dependencies)..."
-    if container build -f Dockerfile.minimal -t elvis-bot:latest . 2>/dev/null; then
+    if container build -f docker/Dockerfile.minimal -t elvis-bot:latest . 2>/dev/null; then
         print_success "✅ ELVIS image built successfully with minimal Dockerfile"
         return 0
     fi
@@ -72,7 +72,7 @@ build_elvis_image() {
     
     # Fallback to full Dockerfile with network dependencies
     print_success "Building ELVIS trading bot image with full dependencies..."
-    if container build -f Dockerfile.simple -t elvis-bot:latest .; then
+    if container build -f docker/Dockerfile.simple -t elvis-bot:latest .; then
         print_success "✅ ELVIS image built successfully with full Dockerfile"
         return 0
     else
@@ -81,7 +81,7 @@ build_elvis_image() {
         echo "Troubleshooting options:"
         echo "1. Check your internet connection"
         echo "2. Try building with Docker Desktop instead:"
-        echo "   docker build -f Dockerfile.minimal -t elvis-bot:latest ."
+        echo "   docker build -f docker/Dockerfile.minimal -t elvis-bot:latest ."
         echo "3. Use the Docker Compose setup:"
         echo "   scripts/apple_container_elvis.sh setup"
         echo ""
@@ -358,7 +358,7 @@ reset_paper_trading() {
     print_header "🔄 Resetting Paper Trading"
     
     if container inspect elvis-bot &>/dev/null; then
-        container exec elvis-bot python reset_paper_trading.py
+        container exec elvis-bot python scripts/reset_paper_trading.py
         print_success "✅ Paper trading reset to \$1000 USDT + \$1000 BNB"
     else
         print_error "❌ ELVIS container not running"

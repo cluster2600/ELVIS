@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-Train LLM-enhanced models using ALL individual paper trades from PostgreSQL.
-This approach maximizes training samples by using trade-level features instead of OHLCV aggregation.
+Train LLM-enhanced models using ALL individual paper trades with patient LLM handling.
+This version is specifically designed for slow LLMs that need more time.
 """
+
+# Make the repo root importable no matter where this script is run from
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 
 import argparse
 import os
@@ -15,15 +21,17 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
+import time
+
 from training.llm_enhanced_trainer import LLMEnhancedTrainer, create_llm_config_from_env
 from utils.logging_utils import setup_logger
 from utils.paper_trade_db import get_conn
 
 
-def setup_llm_environment():
-    """Setup environment variables for LLM integration"""
+def setup_patient_llm_environment():
+    """Setup environment variables for patient LLM integration"""
 
-    # LLM configuration
+    # Patient LLM configuration - much longer timeouts
     if not os.getenv("ELVIS_LLM_PROVIDER"):
         os.environ["ELVIS_LLM_PROVIDER"] = "local"
     if not os.getenv("ELVIS_LLM_MODEL"):
@@ -33,7 +41,7 @@ def setup_llm_environment():
     if not os.getenv("ELVIS_LLM_TEMPERATURE"):
         os.environ["ELVIS_LLM_TEMPERATURE"] = "0.3"
     if not os.getenv("ELVIS_LLM_TIMEOUT"):
-        os.environ["ELVIS_LLM_TIMEOUT"] = "120"  # 2 minutes for slow LLMs
+        os.environ["ELVIS_LLM_TIMEOUT"] = "300"  # 5 minutes for very slow LLMs
 
     # Training configuration
     os.environ["VAULT_ENABLED"] = "false"
@@ -41,15 +49,17 @@ def setup_llm_environment():
     os.environ["VAULT_AVAILABLE"] = "false"
 
     # Safe training credentials
-    os.environ["BINANCE_API_KEY"] = "paper_training_key"
-    os.environ["BINANCE_API_SECRET"] = "paper_training_secret"
+    os.environ["BINANCE_API_KEY"] = "patient_training_key"
+    os.environ["BINANCE_API_SECRET"] = "patient_training_secret"
 
 
 def load_all_individual_trades(include_test_trades=False, max_trades=0):
     """Load all individual trades from PostgreSQL without aggregation"""
 
-    logger = setup_logger("trade_loader")
-    logger.info("🐘 Loading ALL individual paper trades from PostgreSQL...")
+    logger = setup_logger("patient_trade_loader")
+    logger.info(
+        "🐘 Loading ALL individual paper trades from PostgreSQL (Patient Mode)..."
+    )
 
     try:
         conn = get_conn()
@@ -101,7 +111,7 @@ def load_all_individual_trades(include_test_trades=False, max_trades=0):
 def create_trade_level_features(df):
     """Create features for individual trades instead of OHLCV aggregation"""
 
-    logger = setup_logger("feature_engineer")
+    logger = setup_logger("patient_feature_engineer")
     logger.info(f"🔧 Creating trade-level features for {len(df)} trades...")
 
     if df.empty:
@@ -219,7 +229,7 @@ def create_trade_level_features(df):
 def create_trade_level_targets(df, horizon=5):
     """Create prediction targets for individual trades"""
 
-    logger = setup_logger("target_creator")
+    logger = setup_logger("patient_target_creator")
     logger.info(f"🎯 Creating trade-level targets (horizon: {horizon} trades ahead)...")
 
     if df.empty:
@@ -275,34 +285,48 @@ def create_trade_level_targets(df, horizon=5):
     return df
 
 
-def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
-    """Train LLM-enhanced models on all individual trades"""
+def train_patient_llm_models(df, epochs=20, batch_size=5, debug=False, args=None):
+    """Train LLM-enhanced models with patient handling for slow LLMs"""
 
-    logger = setup_logger("trade_trainer")
-    logger.info(f"🧠 Training LLM-enhanced models on {len(df)} individual trades...")
+    logger = setup_logger("patient_llm_trainer")
+    logger.info(
+        f"🐌 Training Patient LLM-enhanced models on {len(df)} individual trades..."
+    )
 
-    # Setup LLM trainer
+    # Setup LLM trainer with patient configuration
     llm_config = create_llm_config_from_env()
     trainer = LLMEnhancedTrainer(llm_config)
 
     # Load existing LLM cache if available
-    cache_file = "all_trades_llm_cache.json"
+    cache_file = "patient_llm_cache.json"
     if os.path.exists(cache_file):
         trainer.load_llm_cache(cache_file)
         logger.info(f"📂 Loaded LLM cache from: {cache_file}")
 
-    # For large datasets, sample for LLM enhancement to save time
-    if len(df) > 1000:
+    # For large datasets, be very conservative with LLM sampling
+    sample_size = min(200, len(df) // 10)  # Use only 10% of data or 200 samples max
+    if len(df) > sample_size:
         logger.info(
-            f"📊 Large dataset detected ({len(df)} trades). Sampling 1000 for LLM analysis..."
+            f"📊 Large dataset detected ({len(df)} trades). Using patient sampling ({sample_size} samples)..."
         )
-        llm_sample_indices = np.random.choice(len(df), size=1000, replace=False)
+        llm_sample_indices = np.random.choice(len(df), size=sample_size, replace=False)
         llm_sample_df = df.iloc[llm_sample_indices].copy()
 
-        # Generate LLM features on sample
-        logger.info("🧠 Generating LLM features on sample...")
+        # Generate LLM features with very small batches for patient processing
+        logger.info("🐌 Generating LLM features with patient processing...")
+        logger.info(
+            f"⏰ Using {batch_size} batch size and 5-minute timeout per request..."
+        )
+
+        start_time = time.time()
         enhanced_sample = trainer.prepare_llm_features(
             llm_sample_df, batch_size=batch_size
+        )
+        end_time = time.time()
+
+        llm_processing_time = end_time - start_time
+        logger.info(
+            f"⏱️ LLM processing took {llm_processing_time/60:.1f} minutes for {sample_size} samples"
         )
 
         # Apply LLM features to full dataset using interpolation/mapping
@@ -324,8 +348,11 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
 
         enhanced_df = df
     else:
-        # Small dataset - process all trades with LLM
-        logger.info("🧠 Generating LLM features for all trades...")
+        # Small dataset - process all trades with LLM but be patient
+        logger.info(f"🐌 Generating patient LLM features for all {len(df)} trades...")
+        logger.info(
+            f"⏰ This may take {len(df) * batch_size * 5 / 60:.1f} minutes with patient processing..."
+        )
         enhanced_df = trainer.prepare_llm_features(df, batch_size=batch_size)
 
     # Save LLM cache
@@ -344,6 +371,9 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
     ]
     exclude_columns.extend(
         [col for col in enhanced_df.columns if col.startswith("future_")]
+    )
+    exclude_columns.extend(
+        [col for col in enhanced_df.columns if col.startswith("target_")]
     )
 
     feature_columns = [col for col in enhanced_df.columns if col not in exclude_columns]
@@ -466,9 +496,9 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     model_files = {
-        "classifier": f"models/all_trades_llm_classifier_{timestamp}.joblib",
-        "regressor": f"models/all_trades_llm_regressor_{timestamp}.joblib",
-        "scaler": f"models/all_trades_llm_scaler_{timestamp}.joblib",
+        "classifier": f"models/patient_llm_classifier_{timestamp}.joblib",
+        "regressor": f"models/patient_llm_regressor_{timestamp}.joblib",
+        "scaler": f"models/patient_llm_scaler_{timestamp}.joblib",
     }
 
     os.makedirs("models", exist_ok=True)
@@ -484,15 +514,16 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
     # Save metadata
     metadata = {
         "timestamp": datetime.now().isoformat(),
-        "data_source": "all_individual_paper_trades",
+        "data_source": "all_individual_paper_trades_patient_llm",
         "training_config": {
-            "method": "all_trades",
+            "method": "patient_llm",
             "total_trades_requested": (
                 "all_available"
                 if (args and args.trades == 0)
                 else (args.trades if args else "unknown")
             ),
             "total_trades_loaded": len(enhanced_df),
+            "llm_sample_size": sample_size if len(df) > sample_size else len(df),
             "training_samples": len(X_train),
             "test_samples": len(X_test),
             "epochs": epochs,
@@ -500,6 +531,8 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
             "n_estimators": n_estimators,
             "vault_enabled": args and hasattr(args, "vault") and args.vault,
             "horizon": args.horizon if args else 5,
+            "llm_timeout": int(os.getenv("ELVIS_LLM_TIMEOUT", "300")),
+            "patient_mode": True,
         },
         "data_info": {
             "total_samples": len(enhanced_df),
@@ -519,10 +552,11 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
             "provider": llm_config.provider,
             "model": llm_config.model,
             "base_url": llm_config.base_url,
+            "timeout": llm_config.timeout,
         },
     }
 
-    metadata_file = f"models/all_trades_metadata_{timestamp}.json"
+    metadata_file = f"models/patient_llm_metadata_{timestamp}.json"
     import json
 
     with open(metadata_file, "w") as f:
@@ -534,13 +568,10 @@ def train_on_all_trades(df, epochs=20, batch_size=50, debug=False, args=None):
 
 
 def main():
-    """Main training function"""
+    """Main training function for patient LLM processing"""
 
     parser = argparse.ArgumentParser(
-        description="Train LLM-enhanced models on ALL individual paper trades"
-    )
-    parser.add_argument(
-        "--method", type=str, default="auto", help="Training method (auto, all_trades)"
+        description="Train Patient LLM-enhanced models on ALL individual paper trades"
     )
     parser.add_argument(
         "--trades",
@@ -557,8 +588,8 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10,
-        help="LLM processing batch size (smaller for slow LLMs)",
+        default=5,
+        help="LLM batch size (very small for patient processing)",
     )
     parser.add_argument(
         "--include-test", action="store_true", help="Include TEST trades in training"
@@ -580,28 +611,29 @@ def main():
         os.environ.pop("USE_VAULT", None)
         os.environ.pop("VAULT_AVAILABLE", None)
         logger_level = "DEBUG" if args.debug else "INFO"
-        logger = setup_logger("all_trades_training", logger_level)
+        logger = setup_logger("patient_llm_training", logger_level)
         logger.info("🔐 Vault enabled for secrets management")
     else:
-        setup_llm_environment()
+        setup_patient_llm_environment()
         # Setup logging
-        logger = setup_logger("all_trades_training", "DEBUG" if args.debug else "INFO")
+        logger = setup_logger("patient_llm_training", "DEBUG" if args.debug else "INFO")
         logger.info("🔓 Using environment variables for secrets")
 
     # Determine trades limit
     trades_text = "ALL AVAILABLE" if args.trades == 0 else str(args.trades)
 
-    logger.info("🚀 Starting ALL TRADES LLM-Enhanced Training Pipeline")
-    logger.info("=" * 60)
+    logger.info("🐌 Starting PATIENT LLM Training Pipeline")
+    logger.info("=" * 50)
     logger.info(f"📊 Training Configuration:")
-    logger.info(f"   Method: {args.method}")
+    logger.info(f"   Mode: Patient LLM Processing")
     logger.info(f"   Trades: {trades_text}")
     logger.info(f"   Epochs: {args.epochs}")
     logger.info(f"   Horizon: {args.horizon} trades ahead")
-    logger.info(f"   Batch Size: {args.batch_size}")
+    logger.info(f"   Batch Size: {args.batch_size} (very small for patience)")
     logger.info(f"   Include TEST trades: {args.include_test}")
     logger.info(f"   Debug: {args.debug}")
     logger.info(f"   Vault: {args.vault}")
+    logger.info(f"   LLM Timeout: {os.getenv('ELVIS_LLM_TIMEOUT', '300')}s (5 minutes)")
 
     try:
         # Step 1: Load all individual trades
@@ -628,9 +660,9 @@ def main():
             logger.error("❌ No training samples created!")
             return 1
 
-        # Step 4: Train LLM-enhanced models
-        logger.info(f"\n🧠 Step 4: Training LLM-enhanced models on ALL trades...")
-        classifier, regressor, scaler, metadata = train_on_all_trades(
+        # Step 4: Train Patient LLM-enhanced models
+        logger.info(f"\n🐌 Step 4: Training Patient LLM-enhanced models...")
+        classifier, regressor, scaler, metadata = train_patient_llm_models(
             targets_df,
             epochs=args.epochs,
             batch_size=args.batch_size,
@@ -639,8 +671,8 @@ def main():
         )
 
         # Success
-        logger.info(f"\n🎉 ALL TRADES Training Complete!")
-        logger.info("=" * 60)
+        logger.info(f"\n🎉 Patient LLM Training Complete!")
+        logger.info("=" * 50)
         logger.info(
             f"✅ Classification Accuracy: {metadata['model_performance']['classification_accuracy']:.4f}"
         )
@@ -653,22 +685,25 @@ def main():
         logger.info(f"🧠 LLM Features Used: {metadata['data_info']['llm_features']}")
         logger.info(f"📁 Results saved in: models/")
 
-        print(f"\n🧠 ALL PAPER TRADES LLM-Enhanced ELVIS Training")
-        print("=" * 55)
+        print(f"\n🐌 PATIENT LLM-Enhanced ELVIS Training")
+        print("=" * 45)
         print(f"📊 Training Configuration:")
-        print(f"   Method: {metadata['training_config']['method']}")
+        print(f"   Mode: Patient LLM Processing")
         print(
             f"   Trades Requested: {metadata['training_config']['total_trades_requested']}"
         )
         print(
             f"   Trades Loaded: {metadata['training_config']['total_trades_loaded']:,}"
         )
+        print(f"   LLM Sample Size: {metadata['training_config']['llm_sample_size']:,}")
         print(
             f"   Training Samples: {metadata['training_config']['training_samples']:,}"
         )
         print(f"   Test Samples: {metadata['training_config']['test_samples']:,}")
         print(f"   Epochs: {metadata['training_config']['epochs']}")
         print(f"   Horizon: {metadata['training_config']['horizon']} trades ahead")
+        print(f"   Batch Size: {metadata['training_config']['batch_size']} (patient)")
+        print(f"   LLM Timeout: {metadata['training_config']['llm_timeout']}s")
         print(f"   Debug: {args.debug}")
         print(f"   Vault: {metadata['training_config']['vault_enabled']}")
         print(f"\n📊 Model Architecture:")
@@ -691,12 +726,13 @@ def main():
         print(
             f"   OOB Score (Regression): {metadata['model_performance']['oob_score_regression']:.4f}"
         )
-        print(f"\n🤖 LLM Configuration:")
+        print(f"\n🤖 Patient LLM Configuration:")
         print(f"   Model: {metadata['llm_config']['model']}")
         print(f"   URL: {metadata['llm_config']['base_url']}")
-        print(f"\n🎉 Training completed successfully!")
+        print(f"   Timeout: {metadata['llm_config']['timeout']}s (5 minutes)")
+        print(f"\n🎉 Patient training completed successfully!")
         print(
-            f"🧠 Your local LLM has been trained on ALL {metadata['training_config']['total_trades_loaded']:,} paper trades!"
+            f"🐌 Your slow LLM was given plenty of time to analyze {metadata['training_config']['llm_sample_size']:,} trades!"
         )
         print(f"📁 Check the models/ directory for results")
 
