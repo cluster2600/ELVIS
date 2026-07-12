@@ -335,7 +335,7 @@
                 httpMethod: POST
                 queryTimeout: 60s
                 timeInterval: 10s
-        dest: "{{ project_dir }}/observability/grafana/provisioning/datasources/observability/prometheus.yml"
+        dest: "{{ project_dir }}/observability/grafana/provisioning/datasources/prometheus.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -379,7 +379,7 @@
               updateIntervalSeconds: 10
               allowUiUpdates: true
               options:
-                path: /var/lib/observability/grafana/dashboards
+                path: /var/lib/grafana/dashboards
         dest: "{{ project_dir }}/observability/grafana/provisioning/dashboards/dashboard.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
