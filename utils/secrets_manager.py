@@ -33,6 +33,9 @@ _VAULT_KEY_MAP = {
     "BINANCE_API_SECRET": ("binance", "secret_key"),
     "BINANCE_FUTURES_TESTNET_API_KEY": ("binance_testnet", "api_key"),
     "BINANCE_FUTURES_TESTNET_API_SECRET": ("binance_testnet", "secret_key"),
+    # X-API-Key shared by the trade-history API and its dashboards
+    # (store: bao kv put -mount=secrets dashboard api_key=<value>)
+    "DASHBOARD_API_KEY": ("dashboard", "api_key"),
 }
 
 

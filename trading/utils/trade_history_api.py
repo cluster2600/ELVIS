@@ -43,10 +43,29 @@ CORS(app)
 # The Flask API was publicly accessible on 0.0.0.0:5050 with no authentication.
 # Any process on the network could read trade data or trigger actions.
 # Now every request (except /health) must supply the correct API key via header:
-#   X-API-Key: <value of API_KEY env variable>
-# Set the API_KEY environment variable before starting the bot.
+#   X-API-Key: <key>
+# Resolution order: API_KEY env var (dev/CI override), then OpenBao at
+# secrets/dashboard field api_key (store it with:
+#   bao kv put -mount=secrets dashboard api_key=<value>).
 # ---------------------------------------------------------------------------
-_API_KEY = os.getenv("API_KEY")
+
+
+def _resolve_dashboard_api_key():
+    """env API_KEY first, then OpenBao (secrets/dashboard api_key)."""
+    key = os.getenv("API_KEY")
+    if key:
+        return key
+    try:
+        from utils.secrets_manager import get_enhanced_secrets_manager
+
+        return get_enhanced_secrets_manager().get_secret(
+            "DASHBOARD_API_KEY", warn_if_missing=False
+        )
+    except Exception:
+        return None
+
+
+_API_KEY = _resolve_dashboard_api_key()
 
 
 @app.before_request

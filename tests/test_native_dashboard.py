@@ -14,7 +14,10 @@ from scripts.native_console_dashboard import NativeConsoleDashboard
 
 
 @pytest.fixture
-def dash():
+def dash(monkeypatch):
+    # Pin the env key so the OpenBao fallback isn't exercised implicitly;
+    # TestDashboardApiKey covers the fallback explicitly.
+    monkeypatch.setenv("API_KEY", "fixture-key")
     return NativeConsoleDashboard()
 
 
@@ -47,6 +50,30 @@ class TestGetApiData:
         with patch("requests.get", return_value=_resp(payload=[])) as mock_get:
             dash.get_api_data("/trades")
         assert mock_get.call_args[1]["headers"] == {"X-API-Key": "sekrit"}
+
+
+class TestDashboardApiKey:
+    def test_env_key_takes_priority(self, dash, monkeypatch):
+        monkeypatch.setenv("API_KEY", "from-env")
+        assert dash._dashboard_api_key() == "from-env"
+
+    def test_openbao_fallback_when_env_absent(self, dash, monkeypatch):
+        monkeypatch.delenv("API_KEY", raising=False)
+        sm = MagicMock()
+        sm.get_secret.return_value = "from-vault"
+        with patch(
+            "utils.secrets_manager.get_enhanced_secrets_manager", return_value=sm
+        ):
+            assert dash._dashboard_api_key() == "from-vault"
+        sm.get_secret.assert_called_once_with(
+            "DASHBOARD_API_KEY", warn_if_missing=False
+        )
+
+    def test_resolution_cached_per_process(self, dash, monkeypatch):
+        monkeypatch.setenv("API_KEY", "first")
+        assert dash._dashboard_api_key() == "first"
+        monkeypatch.setenv("API_KEY", "second")
+        assert dash._dashboard_api_key() == "first"  # cached
 
 
 class TestNetCache:
