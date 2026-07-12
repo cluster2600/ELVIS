@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 # Add project root to Python path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.llm_enhanced_trainer import LLMEnhancedTrainer, create_llm_config_from_env
 from utils.logging_utils import setup_logger

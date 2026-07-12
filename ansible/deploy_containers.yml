@@ -175,11 +175,11 @@
         - logs
         - data/processed
         - models
-        - grafana/provisioning/datasources
-        - grafana/provisioning/dashboards  
-        - grafana/dashboards
-        - loki
-        - promtail
+        - observability/grafana/provisioning/datasources
+        - observability/grafana/provisioning/dashboards  
+        - observability/grafana/dashboards
+        - observability/loki
+        - observability/promtail
         
     # Configuration Files Setup
     - name: Create Prometheus configuration
@@ -204,7 +204,7 @@
               metrics_path: '/metrics'
               scheme: 'http'
               scrape_interval: 10s
-        dest: "{{ project_dir }}/prometheus.yml"
+        dest: "{{ project_dir }}/observability/prometheus.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -264,7 +264,7 @@
           table_manager:
             retention_deletes_enabled: true
             retention_period: 168h
-        dest: "{{ project_dir }}/loki/config.yml"
+        dest: "{{ project_dir }}/observability/loki/config.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -311,7 +311,7 @@
                   labels:
                     job: system
                     __path__: /var/log/elvis/*.log
-        dest: "{{ project_dir }}/promtail/config.yml"
+        dest: "{{ project_dir }}/observability/promtail/config.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -335,7 +335,7 @@
                 httpMethod: POST
                 queryTimeout: 60s
                 timeInterval: 10s
-        dest: "{{ project_dir }}/grafana/provisioning/datasources/prometheus.yml"
+        dest: "{{ project_dir }}/observability/grafana/provisioning/datasources/observability/prometheus.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -358,7 +358,7 @@
               jsonData:
                 maxLines: 1000
                 timeout: 60
-        dest: "{{ project_dir }}/grafana/provisioning/datasources/loki.yml"
+        dest: "{{ project_dir }}/observability/grafana/provisioning/datasources/loki.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -379,8 +379,8 @@
               updateIntervalSeconds: 10
               allowUiUpdates: true
               options:
-                path: /var/lib/grafana/dashboards
-        dest: "{{ project_dir }}/grafana/provisioning/dashboards/dashboard.yml"
+                path: /var/lib/observability/grafana/dashboards
+        dest: "{{ project_dir }}/observability/grafana/provisioning/dashboards/dashboard.yml"
         owner: "{{ project_user }}"
         group: "{{ project_user }}"
         mode: '0644'
@@ -716,14 +716,14 @@
           
           📚 Documentation:
           ├── ELVIS_MONITORING_SYSTEM_COMPLETE.md  → Complete system guide
-          ├── ELVIS_SYSTEM_ARCHITECTURE.md         → Architecture diagrams
+          ├── docs/ELVIS_SYSTEM_ARCHITECTURE.md         → Architecture diagrams
           └── README.md                             → Project overview
           
           🔧 Configuration Files:
-          ├── prometheus.yml          → Metrics collection config
-          ├── loki/config.yml         → Log aggregation config
-          ├── promtail/config.yml     → Log shipping config
-          └── grafana/provisioning/   → Dashboard configs
+          ├── observability/prometheus.yml          → Metrics collection config
+          ├── observability/loki/config.yml         → Log aggregation config
+          ├── observability/promtail/config.yml     → Log shipping config
+          └── observability/grafana/provisioning/   → Dashboard configs
           
           ✅ Infrastructure Status:
           {% if prometheus_health.status == 200 %}✅{% else %}❌{% endif %} Prometheus: {{ 'Healthy' if prometheus_health.status == 200 else 'Unhealthy' }}

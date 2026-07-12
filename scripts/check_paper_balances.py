@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from utils.paper_trade_db import get_all_balances
@@ -41,7 +41,7 @@ def main():
                 print("\n📈 Paper trading is active with modified balances")
         else:
             print("❌ No balance data found")
-            print("Run: python reset_paper_trading.py to initialize")
+            print("Run: python scripts/reset_paper_trading.py to initialize")
 
     except Exception as e:
         print(f"❌ Error checking balances: {e}")

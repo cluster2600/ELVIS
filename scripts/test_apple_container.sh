@@ -46,7 +46,7 @@ test_container_commands() {
 test_dockerfile() {
     echo -n "Testing Dockerfile... "
     
-    if [[ -f "Dockerfile.simple" ]]; then
+    if [[ -f "docker/Dockerfile.simple" ]]; then
         echo -e "${GREEN}✅ FOUND${NC}"
         return 0
     else

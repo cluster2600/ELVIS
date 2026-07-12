@@ -550,7 +550,7 @@ class LLMEnhancedStrategy(BaseStrategy):
         self.logger.info("🔄 Model retraining requested but not yet implemented")
         self.logger.info("   Current models will continue to be used")
         self.logger.info(
-            "   Consider running train_with_llm.py manually for retraining"
+            "   Consider running scripts/train_with_llm.py manually for retraining"
         )
 
     def generate_signals(self, data: pd.DataFrame) -> Tuple[bool, bool]:

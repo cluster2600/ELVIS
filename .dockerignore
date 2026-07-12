@@ -46,8 +46,8 @@ test_data/
 # Large data files and logs (keep structure but exclude large files)
 logs/
 data/
-loki/
-grafana/
+observability/loki/
+observability/grafana/
 plots_and_metrics/
 
 # Large model files (keep model structure but exclude large binaries)
@@ -59,7 +59,7 @@ models/
 # Development artifacts
 ansible/
 drl_agents/
-grafana/
+observability/grafana/
 images/
 tensorflow/
 
@@ -86,7 +86,6 @@ comprehensive_*.py
 quick_*.py
 setup_*.py
 optimize_*.py
-train_*.py
 verify_*.py
 emergency_*.py
 check_*.py

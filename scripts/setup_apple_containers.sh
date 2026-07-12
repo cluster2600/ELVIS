@@ -195,7 +195,7 @@ build_containers() {
     print_header "Building ELVIS Containers..."
     
     print_status "Building ELVIS trading bot image..."
-    docker build -f Dockerfile.simple -t elvis-bot:latest .
+    docker build -f docker/Dockerfile.simple -t elvis-bot:latest .
     
     print_status "Container build complete"
 }
@@ -260,7 +260,7 @@ echo ""
 echo "🔧 Management commands:"
 echo "   • View logs: docker-compose logs -f elvis-bot"
 echo "   • Stop system: docker-compose down"
-echo "   • Reset paper trading: docker-compose exec elvis-bot python reset_paper_trading.py"
+echo "   • Reset paper trading: docker-compose exec elvis-bot python scripts/reset_paper_trading.py"
 EOL
     
     chmod +x start_elvis_apple.sh

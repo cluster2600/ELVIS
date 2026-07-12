@@ -39,7 +39,7 @@ The paper trading system uses PostgreSQL to track:
 
 ### Reset Paper Trading
 ```bash
-python reset_paper_trading.py
+python scripts/reset_paper_trading.py
 ```
 This script:
 - Clears all trade history
@@ -50,7 +50,7 @@ This script:
 
 ### Check Current Balances
 ```bash
-python check_paper_balances.py
+python scripts/check_paper_balances.py
 ```
 This script displays:
 - Current balance for each asset
@@ -103,12 +103,12 @@ Configured in `config/config.py` under `SYMBOLS_CONFIG`.
 
 1. **Initialize Paper Trading**:
    ```bash
-   python reset_paper_trading.py
+   python scripts/reset_paper_trading.py
    ```
 
 2. **Check Status**:
    ```bash
-   python check_paper_balances.py
+   python scripts/check_paper_balances.py
    ```
 
 3. **Start Trading**:
@@ -164,7 +164,7 @@ starts fresh for the next session while all historical trades stay in
 `init_db_with_balances()` (`CREATE TABLE IF NOT EXISTS`), so it exists on
 fresh databases before the first reset — no manual migration is needed.
 On a database created before this table existed, simply run either init
-function (or `python reset_paper_trading.py`, which calls
+function (or `python scripts/reset_paper_trading.py`, which calls
 `init_db_with_balances()`) once to create it. To start a fresh P&L
 session programmatically:
 
@@ -187,8 +187,8 @@ The paper trading system provides real-time monitoring of:
 To start fresh paper trading:
 
 1. Stop the trading bot if running
-2. Run the reset script: `python reset_paper_trading.py`
-3. Verify balances: `python check_paper_balances.py`
+2. Run the reset script: `python scripts/reset_paper_trading.py`
+3. Verify balances: `python scripts/check_paper_balances.py`
 4. Restart the trading bot in paper mode
 
 ## Notes

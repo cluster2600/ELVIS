@@ -281,7 +281,7 @@ Important caveat: these are **pushed** to a Prometheus **Pushgateway** at
 runs Prometheus on `9090` and **does not run a Pushgateway**, so by default the
 push fails and is swallowed (logged at debug level). To actually collect these
 metrics you must run a Pushgateway on `9091` and add it as a scrape target in
-`prometheus.yml`. The four metrics above are the only ones exported — there is no
+`observability/prometheus.yml`. The four metrics above are the only ones exported — there is no
 drift or confidence metric.
 
 ### Grafana

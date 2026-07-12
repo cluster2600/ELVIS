@@ -43,7 +43,7 @@ def setup_training_environment():
 def patch_imports():
     """Patch Python path to avoid Vault imports"""
     # Add current directory to path
-    current_dir = Path(__file__).parent.absolute()
+    current_dir = Path(__file__).resolve().parent.parent
     if str(current_dir) not in sys.path:
         sys.path.insert(0, str(current_dir))
 
