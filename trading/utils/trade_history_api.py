@@ -50,22 +50,9 @@ CORS(app)
 # ---------------------------------------------------------------------------
 
 
-def _resolve_dashboard_api_key():
-    """env API_KEY first, then OpenBao (secrets/dashboard api_key)."""
-    key = os.getenv("API_KEY")
-    if key:
-        return key
-    try:
-        from utils.secrets_manager import get_enhanced_secrets_manager
+from utils.secrets_manager import resolve_dashboard_api_key
 
-        return get_enhanced_secrets_manager().get_secret(
-            "DASHBOARD_API_KEY", warn_if_missing=False
-        )
-    except Exception:
-        return None
-
-
-_API_KEY = _resolve_dashboard_api_key()
+_API_KEY = resolve_dashboard_api_key()
 
 
 @app.before_request
@@ -374,7 +361,7 @@ def format_timestamp(ts):
 def safe_float(value):
     try:
         return float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.0
 
 

@@ -89,17 +89,12 @@ class NativeConsoleDashboard:
         then OpenBao at secrets/dashboard field api_key — same resolution the
         server itself uses, so vault-backed setups need no env plumbing."""
         if not hasattr(self, "_api_key_resolved"):
-            key = os.getenv("API_KEY")
-            if not key:
-                try:
-                    from utils.secrets_manager import get_enhanced_secrets_manager
+            try:
+                from utils.secrets_manager import resolve_dashboard_api_key
 
-                    key = get_enhanced_secrets_manager().get_secret(
-                        "DASHBOARD_API_KEY", warn_if_missing=False
-                    )
-                except Exception:
-                    key = None
-            self._api_key_resolved = key
+                self._api_key_resolved = resolve_dashboard_api_key()
+            except Exception:
+                self._api_key_resolved = os.getenv("API_KEY")
         return self._api_key_resolved
 
     def _get_json_cached(self, url, params=None, ttl=5.0):

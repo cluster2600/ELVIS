@@ -547,6 +547,26 @@ def get_enhanced_secrets_manager(
 
 
 # Backward compatibility function
+def resolve_dashboard_api_key() -> Optional[str]:
+    """X-API-Key shared by the trade-history API and its dashboards.
+
+    Resolution order: API_KEY env var first (dev/CI override), then OpenBao
+    at secrets/dashboard field api_key. Returns None when neither source has
+    it (callers fail closed). Vault failures are logged, never swallowed —
+    a silent None here means the whole dashboard 503s until restart.
+    """
+    key = os.environ.get("API_KEY")
+    if key:
+        return key
+    try:
+        return get_enhanced_secrets_manager().get_secret(
+            "DASHBOARD_API_KEY", warn_if_missing=False
+        )
+    except Exception as exc:
+        logger.warning(f"Dashboard API key: OpenBao resolution failed: {exc}")
+        return None
+
+
 def get_secrets_manager(logger: logging.Logger = None) -> EnhancedSecretsManager:
     """Backward compatibility wrapper"""
     return get_enhanced_secrets_manager(logger)

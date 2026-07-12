@@ -76,6 +76,56 @@ class TestDashboardApiKey:
         assert dash._dashboard_api_key() == "first"  # cached
 
 
+class TestSharedResolver:
+    """The env->OpenBao resolution is a single shared helper (review #46)."""
+
+    def test_vault_key_map_tuple_pinned(self):
+        # A typo in the path/field tuple would be invisible to mocked tests
+        from utils.secrets_manager import _VAULT_KEY_MAP
+
+        assert _VAULT_KEY_MAP["DASHBOARD_API_KEY"] == ("dashboard", "api_key")
+
+    def test_env_priority(self, monkeypatch):
+        from utils.secrets_manager import resolve_dashboard_api_key
+
+        monkeypatch.setenv("API_KEY", "from-env")
+        assert resolve_dashboard_api_key() == "from-env"
+
+    def test_vault_fallback(self, monkeypatch):
+        import utils.secrets_manager as smod
+
+        monkeypatch.delenv("API_KEY", raising=False)
+        sm = MagicMock()
+        sm.get_secret.return_value = "from-vault"
+        monkeypatch.setattr(smod, "get_enhanced_secrets_manager", lambda: sm)
+        assert smod.resolve_dashboard_api_key() == "from-vault"
+        sm.get_secret.assert_called_once_with(
+            "DASHBOARD_API_KEY", warn_if_missing=False
+        )
+
+    def test_failure_logged_not_swallowed(self, monkeypatch, caplog):
+        import logging as _logging
+
+        import utils.secrets_manager as smod
+
+        monkeypatch.delenv("API_KEY", raising=False)
+        monkeypatch.setattr(
+            smod,
+            "get_enhanced_secrets_manager",
+            lambda: (_ for _ in ()).throw(RuntimeError("vault down")),
+        )
+        with caplog.at_level(_logging.WARNING, logger="utils.secrets_manager"):
+            assert smod.resolve_dashboard_api_key() is None
+        assert any("OpenBao resolution failed" in r.message for r in caplog.records)
+
+    def test_server_module_uses_shared_resolver(self):
+        # Symmetry guard: the server must not re-grow its own copy
+        import trading.utils.trade_history_api as api
+        from utils.secrets_manager import resolve_dashboard_api_key
+
+        assert api.resolve_dashboard_api_key is resolve_dashboard_api_key
+
+
 class TestNetCache:
     def test_second_call_within_ttl_hits_cache(self, dash):
         with patch("requests.get", return_value=_resp(payload={"price": "1"})) as g:
