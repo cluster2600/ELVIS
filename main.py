@@ -1821,9 +1821,16 @@ def main(mode: str, log_level: str):
                                                         get_all_trades,
                                                     )
 
+                                                    # get_all_trades rows:
+                                                    # (id, timestamp, symbol,
+                                                    #  side, price, quantity,
+                                                    #  pnl, fee) -> pnl at [6].
+                                                    # Column order is pinned by
+                                                    # tests/test_roadmap_wiring.py
+                                                    _PNL_IDX = 6
                                                     _kelly_f = kelly_from_trades(
                                                         [
-                                                            {"pnl": t[6]}
+                                                            {"pnl": t[_PNL_IDX]}
                                                             for t in get_all_trades(
                                                                 limit=200
                                                             )

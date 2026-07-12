@@ -148,7 +148,11 @@ class TrailingStop:
                 Case-insensitive; unknown sides are treated as BUY with
                 a warning.
             entry_price: The position's entry price. Only used to seed
-                the extreme on the first update for this id.
+                the extreme on the first update for this id — and again
+                whenever a recycled ``position_id`` flips side (the
+                extreme re-seeds from this call's ``entry_price``), so on
+                a side flip pass the NEW position's entry price, not the
+                old side's.
             current_price: Latest observed market price.
 
         Returns:
