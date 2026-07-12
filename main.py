@@ -1467,6 +1467,14 @@ def main(mode: str, log_level: str):
                                                 historical_df
                                             )
 
+                                            # Cache regime per symbol for the
+                                            # dynamic-TP / fee-gate stages below
+                                            if not hasattr(main, "_last_regime"):
+                                                main._last_regime = {}
+                                            main._last_regime[symbol] = regime_result[
+                                                "regime"
+                                            ]["class"]
+
                                             # Apply filtering logic
                                             original_signal = signal
                                             original_confidence = confidence
@@ -1534,6 +1542,77 @@ def main(mode: str, log_level: str):
                                             )
                                             logger.info(
                                                 f"Continuing with original signal: {signal}"
+                                            )
+
+                                    # 🧰 PROFITABILITY-ROADMAP SIGNAL GATES
+                                    # (RSI/momentum/BB-squeeze/hours/MACD, order
+                                    # flow, MTF — each env-toggled)
+                                    if signal in ["BUY", "SELL"]:
+                                        try:
+                                            if (
+                                                os.getenv("ELVIS_ROADMAP_FILTERS", "1")
+                                                == "1"
+                                            ):
+                                                from trading.signals.filters import (
+                                                    apply_signal_filters,
+                                                )
+
+                                                signal, confidence, _gate_reasons = (
+                                                    apply_signal_filters(
+                                                        signal,
+                                                        confidence,
+                                                        data.tail(100),
+                                                        rsi=market_data.get("rsi"),
+                                                    )
+                                                )
+                                                for _reason in _gate_reasons:
+                                                    logger.warning(
+                                                        f"🚧 {symbol} filter: {_reason}"
+                                                    )
+                                            if (
+                                                signal in ["BUY", "SELL"]
+                                                and os.getenv("ELVIS_ORDER_FLOW", "0")
+                                                == "1"
+                                            ):
+                                                from trading.signals.order_flow import (
+                                                    confirm_signal_with_flow,
+                                                )
+
+                                                _flow_ok, _imbalance = (
+                                                    confirm_signal_with_flow(
+                                                        signal,
+                                                        executor.get_order_book(symbol),
+                                                    )
+                                                )
+                                                if not _flow_ok:
+                                                    logger.warning(
+                                                        f"🚧 {symbol} order flow contradicts {signal} "
+                                                        f"(imbalance {_imbalance:+.2f}) -> HOLD"
+                                                    )
+                                                    signal, confidence = "HOLD", 0.0
+                                            if (
+                                                signal in ["BUY", "SELL"]
+                                                and os.getenv("ELVIS_MTF", "0") == "1"
+                                            ):
+                                                from trading.signals.mtf import (
+                                                    MTFAnalyzer,
+                                                )
+
+                                                if not hasattr(main, "_mtf"):
+                                                    main._mtf = MTFAnalyzer(
+                                                        price_fetcher.get_historical_klines
+                                                    )
+                                                _mtf_result = main._mtf.get_signal(
+                                                    symbol
+                                                )
+                                                if _mtf_result["aligned"] != signal:
+                                                    logger.warning(
+                                                        f"🚧 {symbol} MTF misalignment {_mtf_result} -> HOLD"
+                                                    )
+                                                    signal, confidence = "HOLD", 0.0
+                                        except Exception as gate_error:
+                                            logger.error(
+                                                f"⚠️ Roadmap signal gates error: {gate_error}"
                                             )
 
                                     logger.info(
@@ -1711,6 +1790,106 @@ def main(mode: str, log_level: str):
                                             logger.info(
                                                 f"💰 ADAPTIVE SIZING: Base=${base_risk_per_trade:.0f} | Conf={confidence:.2%}({confidence_multiplier:.2f}x) | Regime=({regime_multiplier:.2f}x) | Final=${adjusted_risk:.0f}"
                                             )
+
+                                            # 📐 ROADMAP SIZING: volume-scaled +
+                                            # Kelly-capped (env-toggled)
+                                            try:
+                                                if (
+                                                    os.getenv(
+                                                        "ELVIS_VOLUME_SIZING", "1"
+                                                    )
+                                                    == "1"
+                                                ):
+                                                    from trading.risk.position_sizing import (
+                                                        volume_multiplier,
+                                                    )
+
+                                                    _vol_mult = volume_multiplier(data)
+                                                    if _vol_mult != 1.0:
+                                                        position_size *= _vol_mult
+                                                        logger.info(
+                                                            f"📐 Volume sizing {_vol_mult:.2f}x -> {position_size:.6f}"
+                                                        )
+                                                if (
+                                                    os.getenv("ELVIS_KELLY_SIZING", "0")
+                                                    == "1"
+                                                ):
+                                                    from trading.risk.position_sizing import (
+                                                        kelly_from_trades,
+                                                    )
+                                                    from utils.paper_trade_db import (
+                                                        get_all_trades,
+                                                    )
+
+                                                    # get_all_trades rows:
+                                                    # (id, timestamp, symbol,
+                                                    #  side, price, quantity,
+                                                    #  pnl, fee) -> pnl at [6].
+                                                    # Column order is pinned by
+                                                    # tests/test_roadmap_wiring.py
+                                                    _PNL_IDX = 6
+                                                    _kelly_f = kelly_from_trades(
+                                                        [
+                                                            {"pnl": t[_PNL_IDX]}
+                                                            for t in get_all_trades(
+                                                                limit=200
+                                                            )
+                                                        ]
+                                                    )
+                                                    _kelly_cap = (
+                                                        float(available_balance)
+                                                        * _kelly_f
+                                                        / float(current_price)
+                                                    )
+                                                    if 0 < _kelly_cap < position_size:
+                                                        position_size = _kelly_cap
+                                                        logger.info(
+                                                            f"📐 Kelly cap f*={_kelly_f:.3f} -> {position_size:.6f}"
+                                                        )
+                                            except Exception as sizing_error:
+                                                logger.error(
+                                                    f"⚠️ Roadmap sizing error: {sizing_error}"
+                                                )
+
+                                            # 💸 FEE GATE: skip trades whose
+                                            # regime-expected move can't beat
+                                            # all-in costs (env-toggled)
+                                            if os.getenv("ELVIS_FEE_GATE", "1") == "1":
+                                                try:
+                                                    from trading.execution.exits import (
+                                                        dynamic_take_profit,
+                                                    )
+                                                    from trading.fees.fee_gate import (
+                                                        is_trade_viable,
+                                                    )
+
+                                                    _fee_regime = getattr(
+                                                        main, "_last_regime", {}
+                                                    ).get(symbol, "RANGING")
+                                                    _tp_price = dynamic_take_profit(
+                                                        _fee_regime,
+                                                        current_price,
+                                                        side=signal,
+                                                    )
+                                                    _viable, _net, _costs = (
+                                                        is_trade_viable(
+                                                            current_price,
+                                                            _tp_price,
+                                                            position_size,
+                                                            side=signal,
+                                                        )
+                                                    )
+                                                    if not _viable:
+                                                        logger.warning(
+                                                            f"💸 {symbol} {signal} skipped by fee gate: "
+                                                            f"net ${_net:.4f} after ${_costs['total']:.4f} fees "
+                                                            f"({_fee_regime} TP target)"
+                                                        )
+                                                        signal = "HOLD"
+                                                except Exception as fee_error:
+                                                    logger.error(
+                                                        f"⚠️ Fee gate error: {fee_error}"
+                                                    )
 
                                             if signal == "BUY":
                                                 logger.info(
@@ -1895,6 +2074,60 @@ def main(mode: str, log_level: str):
                                                     f"❌ Stop loss execution error: {e}"
                                                 )
 
+                                        # 📉 TRAILING STOP (env-toggled): ratchets
+                                        # with the trend, closes on 2% giveback
+                                        if os.getenv("ELVIS_TRAILING_STOP", "1") == "1":
+                                            try:
+                                                from trading.execution.exits import (
+                                                    TrailingStop,
+                                                )
+
+                                                if not hasattr(main, "_trailing"):
+                                                    main._trailing = TrailingStop(
+                                                        trail_pct=float(
+                                                            os.getenv(
+                                                                "ELVIS_TRAIL_PCT",
+                                                                "0.02",
+                                                            )
+                                                        )
+                                                    )
+                                                _trail_close, _trail_stop = (
+                                                    main._trailing.update(
+                                                        str(position[0]),
+                                                        side.upper(),
+                                                        entry_price,
+                                                        position_current_price,
+                                                    )
+                                                )
+                                                if _trail_close:
+                                                    logger.warning(
+                                                        f"📉 TRAILING STOP hit for {pos_symbol} @ ${_trail_stop:.2f} "
+                                                        f"(price ${position_current_price:.2f})"
+                                                    )
+                                                    close_signal = (
+                                                        "SELL"
+                                                        if side.upper() == "BUY"
+                                                        else "BUY"
+                                                    )
+                                                    if executor.place_order(
+                                                        pos_symbol,
+                                                        close_signal,
+                                                        abs(quantity),
+                                                        position_current_price,
+                                                    ):
+                                                        logger.info(
+                                                            f"📉 Trailing stop executed: {close_signal} "
+                                                            f"{abs(quantity):.6f} {pos_symbol}"
+                                                        )
+                                                        main._trailing.clear(
+                                                            str(position[0])
+                                                        )
+                                                        continue  # position closed
+                                            except Exception as trail_error:
+                                                logger.error(
+                                                    f"⚠️ Trailing stop error: {trail_error}"
+                                                )
+
                                         # MICRO-SCALPING TAKE PROFIT: 10 cents profit target
                                         # Calculate absolute profit in USD
                                         if side.upper() == "BUY":  # LONG position
@@ -1908,6 +2141,42 @@ def main(mode: str, log_level: str):
 
                                         # 🎯 HIGH WIN RATE OPTIMIZED PROFIT TARGETS
                                         take_profit_threshold_usd = 8.0  # $8.00 profit target (better win rate ratio)
+
+                                        # 🎯 DYNAMIC TP (env-toggled): regime-aware
+                                        # target replaces the fixed $8 when the
+                                        # symbol's regime is known
+                                        if os.getenv("ELVIS_DYNAMIC_TP", "1") == "1":
+                                            try:
+                                                from trading.execution.exits import (
+                                                    dynamic_take_profit,
+                                                )
+
+                                                _tp_regime = getattr(
+                                                    main, "_last_regime", {}
+                                                ).get(pos_symbol)
+                                                if _tp_regime:
+                                                    _tp_target_price = (
+                                                        dynamic_take_profit(
+                                                            _tp_regime,
+                                                            entry_price,
+                                                            side=side.upper(),
+                                                        )
+                                                    )
+                                                    take_profit_threshold_usd = (
+                                                        abs(
+                                                            _tp_target_price
+                                                            - entry_price
+                                                        )
+                                                        * quantity
+                                                    )
+                                                    logger.debug(
+                                                        f"🎯 Dynamic TP {pos_symbol}: {_tp_regime} -> "
+                                                        f"${take_profit_threshold_usd:.2f}"
+                                                    )
+                                            except Exception as tp_error:
+                                                logger.error(
+                                                    f"⚠️ Dynamic TP error: {tp_error}"
+                                                )
 
                                         if absolute_profit >= take_profit_threshold_usd:
                                             logger.info(
