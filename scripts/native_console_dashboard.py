@@ -52,10 +52,28 @@ class NativeConsoleDashboard:
             pass
 
     def get_api_data(self, endpoint):
-        """Fetch data from ELVIS API"""
+        """Fetch data from ELVIS API.
+
+        Sends the X-API-Key header (env API_KEY) required since the API
+        hardening, and returns None for any non-OK/error payload so callers'
+        ``or []`` / ``or {}`` fallbacks kick in. Previously an error dict
+        leaked through and panes iterated its keys, crashing with
+        "'str' object has no attribute 'get'".
+        """
         try:
-            response = requests.get(f"http://localhost:5050{endpoint}", timeout=2)
-            return response.json()
+            headers = {}
+            api_key = os.getenv("API_KEY")
+            if api_key:
+                headers["X-API-Key"] = api_key
+            response = requests.get(
+                f"http://localhost:5050{endpoint}", timeout=2, headers=headers
+            )
+            if not response.ok:
+                return None
+            data = response.json()
+            if isinstance(data, dict) and "error" in data:
+                return None
+            return data
         except Exception:
             return None
 
@@ -75,8 +93,45 @@ class NativeConsoleDashboard:
         except curses.error:
             pass
 
+    # Four dance frames for the King: hip-swing legs, waving arms, orbiting
+    # notes. Cycled once per refresh tick (1s) via self.animation_frame.
+    ELVIS_FRAMES = [
+        [
+            "  .-~~~-.   ",
+            " (⌐■_■)♪   ",
+            "   \\|/_    ",
+            "    |       ",
+            "   /|       ",
+            "  / |       ",
+        ],
+        [
+            "  .-~~~-.   ",
+            " ♪(⌐■_■)   ",
+            "   _\\|/    ",
+            "    |       ",
+            "    |\\      ",
+            "    | \\     ",
+        ],
+        [
+            "  .-~~~-.   ",
+            " (⌐■_■)♫   ",
+            "   <|>_     ",
+            "    |       ",
+            "   / \\      ",
+            "  /   \\     ",
+        ],
+        [
+            "  .-~~~-.   ",
+            " ♫(⌐■_■)   ",
+            "   _<|>     ",
+            "    |       ",
+            "   < >      ",
+            "  ~   ~     ",
+        ],
+    ]
+
     def _draw_header(self):
-        """Draw the ELVIS header logo"""
+        """Draw the kawaii ELVIS header: logo, dancing King, twinkling stars"""
         try:
             max_y, max_x = self.stdscr.getmaxyx()
             logo = [
@@ -88,9 +143,33 @@ class NativeConsoleDashboard:
                 "╚══════╝╚══════╝ ╚═════╝ ╚═╝╚══════╝",
             ]
             start_y = 1
+            # Logo: alternating magenta/cyan rows, kawaii candy-stripe
             for i, line in enumerate(logo):
                 x = (max_x - len(line)) // 2
-                self.safe_addstr(start_y + i, x, line, curses.A_BOLD)
+                color = curses.color_pair(5 if i % 2 == 0 else 4)
+                self.safe_addstr(start_y + i, x, line, color | curses.A_BOLD)
+
+            # Dancing Elvis on the left, one dance step per second
+            frame = self.ELVIS_FRAMES[self.animation_frame % len(self.ELVIS_FRAMES)]
+            for i, line in enumerate(frame):
+                self.safe_addstr(
+                    start_y + i, 6, line, curses.color_pair(3) | curses.A_BOLD
+                )
+
+            # Twinkling stars on the right, phase-shifted by frame
+            twinkle = ["✧ ･ﾟ", "･ﾟ ✧", "ﾟ✧ ･", " ✧･ﾟ"]
+            for i in range(6):
+                spark = twinkle[(self.animation_frame + i) % len(twinkle)]
+                self.safe_addstr(start_y + i, max_x - 14, spark, curses.color_pair(5))
+
+            # Ribbon under the logo
+            ribbon = "･ﾟ✧ jailhouse kawaii mode ✧ﾟ･"
+            self.safe_addstr(
+                start_y + 6,
+                (max_x - len(ribbon)) // 2,
+                ribbon,
+                curses.color_pair(5) | curses.A_BOLD,
+            )
         except curses.error:
             pass
 
@@ -348,6 +427,16 @@ class NativeConsoleDashboard:
             )
             win_rate = (winning_trades / trade_count) * 100
         self.safe_addstr(y, start_x, f"Win Rate: {win_rate:.1f}%", curses.color_pair(3))
+
+        # Mood kaomoji: the account's feelings about its own P&L
+        y += 1
+        if realized_pnl > 0:
+            mood, mood_color = "mood: \\(^o^)/ yatta!", curses.color_pair(1)
+        elif realized_pnl < 0:
+            mood, mood_color = "mood: (T_T) ganbatte...", curses.color_pair(2)
+        else:
+            mood, mood_color = "mood: (-_-)zzz flat", curses.color_pair(6)
+        self.safe_addstr(y, start_x, mood, mood_color | curses.A_BOLD)
 
         # Open Positions section
         y += 2
@@ -929,11 +1018,26 @@ class NativeConsoleDashboard:
             finally:
                 self.running = False
 
+        # Redirect fd 2 (stderr) to a log file while curses owns the screen:
+        # Vault/DB warnings from imported modules otherwise print straight
+        # into the frame and corrupt the layout. fd 1 stays untouched —
+        # curses renders through stdout.
+        os.makedirs("logs", exist_ok=True)
+        stderr_log = open("logs/dashboard_stderr.log", "a", buffering=1)
+        saved_stderr_fd = os.dup(2)
         try:
+            os.dup2(stderr_log.fileno(), 2)
+            sys.stderr = stderr_log
             curses.wrapper(main)
         except KeyboardInterrupt:
-            print("\n👋 Console Dashboard stopped by user")
-            print("Web dashboard still available at: http://localhost:5050")
+            pass
+        finally:
+            os.dup2(saved_stderr_fd, 2)
+            os.close(saved_stderr_fd)
+            sys.stderr = sys.__stderr__
+            stderr_log.close()
+        print("\n👋 Console Dashboard stopped — sayonara ･ﾟ✧")
+        print("Trade API still available at: http://localhost:5050/health")
 
 
 def main():
