@@ -1,9 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-
-# Your rule content
-
-For historical purposes, always check the CHANGELOG.md beforehand, and it must be updated with each iteration. When it’s successful, immediately document it in the CHANGELOG.md with an "eureka" tag beforehand. Also, there will be times when you decide to ask for help with the "need help" tag; then you’ll write questions for the user, who will seek assistance from other expert AIs. And so on. These steps are MANDATORY; you must take the time to document to avoid unnecessary troubleshooting loops.
