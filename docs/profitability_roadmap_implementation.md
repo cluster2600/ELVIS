@@ -12,23 +12,45 @@ the live loop) is wired into `main.py` behind an environment flag.
 
 ## Status by item
 
-| # | Idea | Module / API | Wired | Flag (default) |
-|---|------|--------------|-------|----------------|
-| 1 | Market regime detector | `trading/analysis/market_regime_detector.MarketRegimeDetector` | signal loop (pre-existing) + regime cache feeds #5/#10 | always on with winrate filter |
-| 2 | RSI overbought/oversold filter | `trading.signals.filters.rsi_gate` | signal gates | `ELVIS_ROADMAP_FILTERS` (on) |
-| 3 | Volume-based trade sizing | `trading.risk.position_sizing.volume_multiplier` | sizing block | `ELVIS_VOLUME_SIZING` (on) |
-| 4 | Trailing stop loss | `trading.execution.exits.TrailingStop` | position loop | `ELVIS_TRAILING_STOP` (on), `ELVIS_TRAIL_PCT` (0.02) |
-| 5 | Fee optimization (all-in cost gate) | `trading.fees.fee_gate.is_trade_viable` | pre-execution | `ELVIS_FEE_GATE` (on) |
-| 6 | Momentum confirmation | `trading.signals.filters.has_momentum` | signal gates | `ELVIS_ROADMAP_FILTERS` (on) |
-| 7 | Bollinger Band squeeze | `trading.signals.filters.detect_bb_squeeze` | signal gates | `ELVIS_ROADMAP_FILTERS` (on) |
-| 8 | Time-of-day filter | `trading.signals.filters.is_optimal_trading_hour` | signal gates | `ELVIS_ROADMAP_FILTERS` (on) |
-| 9 | MACD histogram divergence | `trading.signals.filters.detect_macd_divergence` | signal gates (veto; override opt-in) | `ELVIS_ROADMAP_FILTERS` (on) |
-| 10 | Dynamic take profit by regime | `trading.execution.exits.dynamic_take_profit` | position loop (replaces fixed $8) | `ELVIS_DYNAMIC_TP` (on) |
-| 11 | Adaptive ML ensemble weights | `trading.signals.adaptive_ensemble.AdaptiveEnsembleWeights` | **module only** (see below) | — |
-| 12 | Order flow analysis | `trading.signals.order_flow.confirm_signal_with_flow` | signal gates | `ELVIS_ORDER_FLOW` (**off**) |
-| 13 | Kelly criterion sizing | `trading.risk.position_sizing.kelly_fraction` / `kelly_from_trades` | sizing block (caps size) | `ELVIS_KELLY_SIZING` (**off**) |
-| 14 | Multi-timeframe analysis | `trading.signals.mtf.MTFAnalyzer` | signal gates | `ELVIS_MTF` (**off**) |
-| 15 | Walk-forward optimization | `trading.optimization.walk_forward.WalkForwardOptimizer` | **offline tool** (by design) | — |
+### 🟢 Wired into the live loop, on by default
+
+- **#1 Market regime detector** — `trading/analysis/market_regime_detector.py`
+  Runs in the signal loop with the winrate filter (pre-existing wiring); its
+  per-symbol regime cache also feeds #5 and #10. Always on.
+- **#2 RSI overbought/oversold filter** — `trading.signals.filters.rsi_gate`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+- **#3 Volume-based trade sizing** — `trading.risk.position_sizing.volume_multiplier`
+  Sizing block · `ELVIS_VOLUME_SIZING=1`
+- **#4 Trailing stop loss** — `trading.execution.exits.TrailingStop`
+  Position loop · `ELVIS_TRAILING_STOP=1`, trail via `ELVIS_TRAIL_PCT` (0.02)
+- **#5 Fee optimization (all-in cost gate)** — `trading.fees.fee_gate.is_trade_viable`
+  Pre-execution · `ELVIS_FEE_GATE=1`
+- **#6 Momentum confirmation** — `trading.signals.filters.has_momentum`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+- **#7 Bollinger Band squeeze** — `trading.signals.filters.detect_bb_squeeze`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+- **#8 Time-of-day filter** — `trading.signals.filters.is_optimal_trading_hour`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+- **#9 MACD histogram divergence** — `trading.signals.filters.detect_macd_divergence`
+  Signal gates (veto; BUY/SELL override is opt-in) · `ELVIS_ROADMAP_FILTERS=1`
+- **#10 Dynamic take profit by regime** — `trading.execution.exits.dynamic_take_profit`
+  Position loop, replaces the fixed $8 target · `ELVIS_DYNAMIC_TP=1`
+
+### 🔴 Wired, off by default ([reasons below](#why-three-flags-default-off))
+
+- **#12 Order flow analysis** — `trading.signals.order_flow.confirm_signal_with_flow`
+  Signal gates · `ELVIS_ORDER_FLOW=0`
+- **#13 Kelly criterion sizing** — `trading.risk.position_sizing.kelly_fraction` / `kelly_from_trades`
+  Sizing block (caps size, never raises it) · `ELVIS_KELLY_SIZING=0`
+- **#14 Multi-timeframe analysis** — `trading.signals.mtf.MTFAnalyzer`
+  Signal gates · `ELVIS_MTF=0`
+
+### 📦 Not in the live loop (by design)
+
+- **#11 Adaptive ML ensemble weights** — `trading.signals.adaptive_ensemble.AdaptiveEnsembleWeights`
+  Module + tests only — [why](#item-11-adaptive-ensemble--module-only-and-why)
+- **#15 Walk-forward optimization** — `trading.optimization.walk_forward.WalkForwardOptimizer`
+  Offline/cron tool — [how to run](#item-15-walk-forward--how-to-run)
 
 ## How the live wiring works
 
