@@ -133,14 +133,21 @@ Key behavior:
   for the PyTorch loop come from `ModelTrainer.prepare_data(self.data)`.
 - **Data loaders:** `ModelTrainer.create_data_loaders(X, y, batch_size)` using
   `config["batch_size"]`.
-- **Resume:** if `--resume <path>` is passed, loads the checkpoint and sets the
-  start epoch.
+- **Resume:** `--resume` accepts a checkpoint path, or `latest` / `best` to
+  auto-resume from the newest or best-scoring checkpoint recorded in the
+  metadata. It restores the model weights and sets the start epoch, and carries
+  the prior best val loss forward so a worse post-resume epoch cannot overwrite
+  the genuine best checkpoint.
 
 `train()` runs a plain PyTorch loop for `config["transformer"]["epochs"]`
 iterations. Each epoch calls `ModelTrainer.train_epoch`, then `validate`, pushes
-metrics to `TrainingMonitor` and TensorBoard, checkpoints every
-`config["checkpoint_frequency"]` epochs (default 5), and breaks early when
-`monitor.should_stop()` is true.
+metrics to `TrainingMonitor` and TensorBoard, and checkpoints every
+`config["checkpoint_frequency"]` epochs (default 5) plus whenever the val loss
+improves (marked `is_best`). After each save it prunes to
+`config["keep_last_checkpoints"]` (default 5), always keeping the best, and
+writes a final checkpoint when the run ends. Checkpoint writes are restricted to
+rank 0 under `--distributed`. Training breaks early when `monitor.should_stop()`
+is true.
 
 `train_rl_agents()` builds a `MultiAgentTradingSystem` from `config["rl"]` and
 calls `.train(...)`. `evaluate_models()` loads any saved ensemble models and

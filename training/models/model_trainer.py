@@ -82,6 +82,10 @@ class ModelTrainer:
         # Add model attribute to hold main model instance
         self.model = None
 
+        # Weights loaded before the (lazily built) model exists are stashed here
+        # and applied right after construction in train_epoch.
+        self._pending_state = None
+
     def prepare_data(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract features and target arrays from DataFrame for training.
@@ -125,6 +129,12 @@ class ModelTrainer:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
             self.criterion = torch.nn.MSELoss()
 
+            # Apply weights that were loaded (resume) before the model existed.
+            if self._pending_state is not None:
+                self.model.load_state_dict(self._pending_state)
+                self._pending_state = None
+                self.logger.info("Restored resumed model weights")
+
         self.model.train()
         total_loss = 0.0
         for batch_X, batch_y in train_loader:
@@ -166,6 +176,29 @@ class ModelTrainer:
             dict: Model state.
         """
         return self.model_state
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore model weights from a checkpoint's ``model_state``.
+
+        The underlying ``nn.Module`` is built lazily on the first
+        ``train_epoch`` (it needs the input dim from the data), so if it does
+        not exist yet the weights are stashed and applied right after the model
+        is constructed. Called by the training pipeline's resume path.
+
+        Args:
+            state: A ``model_state`` dict of the shape produced by
+                ``state_dict()`` (``{"epoch", "model_state_dict"}``).
+        """
+        self.model_state = state
+        inner = state.get("model_state_dict") if isinstance(state, dict) else None
+        if inner is None:
+            self.logger.warning("Checkpoint has no model_state_dict; nothing to load")
+            return
+        if self.model is not None:
+            self.model.load_state_dict(inner)
+            self._pending_state = None
+        else:
+            self._pending_state = inner
 
     def create_data_loaders(
         self, X: np.ndarray, y: np.ndarray, batch_size: int = 32

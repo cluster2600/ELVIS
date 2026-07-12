@@ -87,6 +87,36 @@ def test_reconcile_dedupes_duplicate_paths(tmp_path):
     assert m2.get_latest_checkpoint() == p
 
 
+def test_modeltrainer_load_state_dict_stashes_then_applies():
+    # Regression: the resume path calls model_trainer.load_state_dict(), which
+    # previously did not exist (AttributeError). The nn.Module is built lazily,
+    # so weights loaded before it exists must be stashed and applied later.
+    import logging
+
+    try:
+        from training.models.model_trainer import ModelTrainer
+    except Exception as exc:  # heavy optional deps (lightgbm, etc.) may be absent
+        pytest.skip(f"ModelTrainer deps unavailable: {exc}")
+
+    mt = ModelTrainer.__new__(ModelTrainer)  # skip the heavy __init__
+    mt.model = None
+    mt.model_state = None
+    mt._pending_state = None
+    mt.logger = logging.getLogger("test")
+
+    saved = {"epoch": 3, "model_state_dict": {"w": torch.zeros(2)}}
+    mt.load_state_dict(saved)  # model is None -> stash, must not raise
+    assert mt.model_state == saved
+    assert mt._pending_state == saved["model_state_dict"]
+
+    # Once a real module exists, load applies directly and clears the stash.
+    mt.model = torch.nn.Linear(2, 1)
+    weights = {"weight": torch.ones(1, 2), "bias": torch.zeros(1)}
+    mt.load_state_dict({"model_state_dict": weights})
+    assert torch.equal(mt.model.weight.data, torch.ones(1, 2))
+    assert mt._pending_state is None
+
+
 if __name__ == "__main__":
     import sys
 

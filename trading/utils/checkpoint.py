@@ -47,9 +47,15 @@ class CheckpointManager:
         self._save_metadata(metadata)
 
     def _save_metadata(self, metadata: Dict):
-        """Save checkpoint metadata to file."""
-        with open(self.metadata_file, "w") as f:
+        """Save checkpoint metadata atomically.
+
+        Writes to a temp file then os.replace()s it into place so a concurrent
+        reader (or another rank) never observes a half-written JSON file.
+        """
+        tmp = self.metadata_file.with_name(self.metadata_file.name + ".tmp")
+        with open(tmp, "w") as f:
             json.dump(metadata, f, indent=2)
+        os.replace(tmp, self.metadata_file)
 
     def _load_metadata(self) -> Dict:
         """Load checkpoint metadata from file."""
@@ -180,7 +186,12 @@ class CheckpointManager:
                 self.logger.warning(f"Checkpoint not found: {checkpoint_path}")
                 return None
 
-            state_dict = torch.load(checkpoint_path)
+            try:
+                state_dict = torch.load(checkpoint_path, weights_only=True)
+            except Exception:
+                # Older/richer checkpoints (metrics dicts etc.) need the full
+                # loader; fall back so existing files keep loading.
+                state_dict = torch.load(checkpoint_path, weights_only=False)
             self.logger.info(f"Loaded checkpoint from {checkpoint_path}")
             return state_dict
 
