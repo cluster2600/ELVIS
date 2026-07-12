@@ -29,9 +29,16 @@ class NativeConsoleDashboard:
         self.running = False
         self.animation_frame = 0
 
-    def safe_addstr(self, y, x, text, attr=0):
-        """Safely add string to screen with bounds checking"""
+    def safe_addstr(self, y, x, text, attr=0, max_w=None):
+        """Safely add string to screen with bounds checking.
+
+        ``max_w`` clips to a pane-relative width so long content can never
+        punch through a pane border (the screen-edge clip alone can't know
+        where the pane ends).
+        """
         try:
+            if max_w is not None and len(text) > max_w:
+                text = text[: max(0, max_w)]
             max_y, max_x = self.stdscr.getmaxyx()
             if 0 <= y < max_y and 0 <= x < max_x:
                 # Truncate text if it would exceed screen width
@@ -189,9 +196,14 @@ class NativeConsoleDashboard:
         except curses.error:
             pass
 
-    def _draw_info_pane(self, start_y: int, start_x: int):
-        """Draw the left pane with general info, PnL, and system status"""
+    def _draw_info_pane(self, start_y: int, start_x: int, limit_y: int = None):
+        """Draw the left pane with general info, PnL, and system status.
+
+        ``limit_y`` is the pane's bottom border row; content never crosses it.
+        """
         y = start_y
+        if limit_y is None:
+            limit_y = self.stdscr.getmaxyx()[0] - 2
 
         # Time and Status
         current_time = datetime.now()
@@ -360,13 +372,16 @@ class NativeConsoleDashboard:
                 continue
 
         y += 1
-        # Portfolio breakdown with clear USD conversion
+        # Portfolio breakdown; values compact enough to stay inside the
+        # 38-col pane (per-asset USD detail lives in Total Value)
+        pane_val_w = 24  # cols available from start_x+10 to the pane border
         self.safe_addstr(y, start_x, "💰 USDT:", curses.color_pair(6))
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{usdt_balance:,.2f} (≈${usdt_balance:,.2f} USD)",
+            f"${usdt_balance:,.2f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -374,8 +389,9 @@ class NativeConsoleDashboard:
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{bnb_balance:.4f} @ ${bnb_price_usdt:.2f} = ${bnb_usd_value:,.2f}",
+            f"{bnb_balance:.4f} @ ${bnb_price_usdt:,.2f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -383,8 +399,9 @@ class NativeConsoleDashboard:
         self.safe_addstr(
             y,
             start_x + 10,
-            f"{btc_balance:.6f} @ ${btc_price_usdt:,.0f} = ${btc_usd_value:,.2f}",
+            f"{btc_balance:.6f} @ ${btc_price_usdt:,.0f}",
             curses.color_pair(2),
+            max_w=pane_val_w,
         )
         y += 1
 
@@ -517,16 +534,15 @@ class NativeConsoleDashboard:
             y += 1
 
         # Recent Trades section
-        y += 1
         self.safe_addstr(
             y, start_x, "--- Recent Trades ---", curses.color_pair(3) | curses.A_BOLD
         )
 
-        recent_trades = trades[:6]  # Show fewer trades to make room for positions
+        recent_trades = trades[:4]  # Show fewer trades to make room for positions
         y += 1
 
         for i, trade in enumerate(recent_trades):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
 
             try:
@@ -543,8 +559,10 @@ class NativeConsoleDashboard:
             except:
                 continue
 
-        # System Info section
-        y += len(recent_trades) + 2
+        # System Info section (compact, two lines)
+        y += len(recent_trades) + 1
+        if y + 2 >= limit_y:
+            return
         self.safe_addstr(
             y, start_x, "--- System Info ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -559,17 +577,11 @@ class NativeConsoleDashboard:
             curses.color_pair(1) if api_status == "HEALTHY" else curses.color_pair(2)
         )
         self.safe_addstr(
-            y, start_x, f"API Status: {api_status}", api_color | curses.A_BOLD
+            y, start_x, f"API: {api_status} · Ensemble", api_color | curses.A_BOLD
         )
 
         y += 1
-        self.safe_addstr(y, start_x, "Strategy: Ensemble", curses.color_pair(6))
-
-        y += 1
-        self.safe_addstr(y, start_x, "Mode: Paper Trading", curses.color_pair(4))
-
-        y += 1
-        self.safe_addstr(y, start_x, "Frequency: 5min HFT", curses.color_pair(6))
+        self.safe_addstr(y, start_x, "Mode: Paper · 5min HFT", curses.color_pair(4))
 
     def get_ohlc_data(self):
         """Generate OHLC candlestick data like the original console dashboard"""
@@ -649,9 +661,11 @@ class NativeConsoleDashboard:
             )
             return
 
-        # Chart dimensions
+        # Chart dimensions: reserve 12 cols on the right for the in-pane
+        # price scale (it used to be drawn PAST the pane border, bleeding
+        # into the market-depth pane)
         chart_height = height - 5
-        chart_width = min(width - 2, len(ohlc_data))
+        chart_width = min(max(10, width - 14), len(ohlc_data))
 
         # Use the most recent candles that fit
         candles = (
@@ -725,8 +739,8 @@ class NativeConsoleDashboard:
                 close_y, candle_x, "●", candle_color | curses.A_BOLD
             )  # Close
 
-        # Draw price scale on the right exactly like original
-        scale_x = start_x + chart_width + 4
+        # Draw price scale inside the pane's right edge
+        scale_x = start_x + width - 10
         num_levels = min(8, chart_height // 2)
         for i in range(num_levels):
             if num_levels > 1:
@@ -736,7 +750,7 @@ class NativeConsoleDashboard:
             scale_y = start_y + 2 + int(i * (chart_height - 1) / max(1, num_levels - 1))
             scale_y = max(start_y + 2, min(scale_y, start_y + chart_height - 1))
             self.safe_addstr(
-                scale_y, scale_x, f"${scale_price:.0f}", curses.color_pair(6)
+                scale_y, scale_x, f"${scale_price:.0f}", curses.color_pair(6), max_w=9
             )
 
         # Draw volume bars at the bottom exactly like original
@@ -816,58 +830,57 @@ class NativeConsoleDashboard:
     def _draw_market_depth_pane(
         self, start_y: int, start_x: int, height: int, width: int
     ):
-        """Draw the right pane with market depth (columns 94-120)"""
+        """Draw the right pane: live market depth + system status"""
         y = start_y
+        limit_y = start_y + height
 
-        # Right pane marker (as per original)
-        max_y, max_x = self.stdscr.getmaxyx()
-        self.safe_addstr(
-            y, start_x, f"RIGHT PANE (cols {start_x}-{max_x-2})", curses.color_pair(4)
-        )
-
-        y += 2
         self.safe_addstr(
             y, start_x, "--- Market Depth ---", curses.color_pair(3) | curses.A_BOLD
         )
 
-        y += 2
+        # Real public order book (same source paper trading uses); falls
+        # back to placeholders if the fetch fails
+        asks = [("--", "--")] * 4
+        bids = [("--", "--")] * 4
+        try:
+            book = requests.get(
+                "https://api.binance.com/api/v3/depth",
+                params={"symbol": "BTCUSDT", "limit": 5},
+                timeout=2,
+            ).json()
+            asks = [
+                (f"{float(p):,.2f}", f"{float(q):.3f}")
+                for p, q in reversed(book.get("asks", [])[:4])
+            ] or asks
+            bids = [
+                (f"{float(p):,.2f}", f"{float(q):.3f}")
+                for p, q in book.get("bids", [])[:4]
+            ] or bids
+        except Exception:
+            pass
+
+        y += 1
         self.safe_addstr(y, start_x, "      ASKS", curses.color_pair(2) | curses.A_BOLD)
-
-        # Mock ask orders
-        asks = [
-            ("67245.50", "0.245"),
-            ("67244.25", "0.156"),
-            ("67243.00", "0.342"),
-            ("67242.15", "0.089"),
-            ("67241.50", "0.278"),
-        ]
-
         y += 1
         for i, (price, size) in enumerate(asks):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
-            self.safe_addstr(y + i, start_x, f"{price} {size}", curses.color_pair(2))
+            self.safe_addstr(
+                y + i, start_x, f"{price:>12} {size}", curses.color_pair(2)
+            )
 
-        y += len(asks) + 1
+        y += len(asks)
         self.safe_addstr(y, start_x, "      BIDS", curses.color_pair(1) | curses.A_BOLD)
-
-        # Mock bid orders
-        bids = [
-            ("67234.75", "0.198"),
-            ("67233.50", "0.267"),
-            ("67232.25", "0.145"),
-            ("67231.00", "0.356"),
-            ("67230.50", "0.123"),
-        ]
-
         y += 1
         for i, (price, size) in enumerate(bids):
-            if y + i >= self.stdscr.getmaxyx()[0] - 2:
+            if y + i >= limit_y:
                 break
-            self.safe_addstr(y + i, start_x, f"{price} {size}", curses.color_pair(1))
+            self.safe_addstr(
+                y + i, start_x, f"{price:>12} {size}", curses.color_pair(1)
+            )
 
         # API Status
-        y += len(bids) + 2
+        y += len(bids) + 1
         self.safe_addstr(
             y, start_x, "--- API Status ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -888,7 +901,7 @@ class NativeConsoleDashboard:
         self.safe_addstr(y, start_x, "PostgreSQL: ✓ Connected", curses.color_pair(1))
 
         # Position Sizing
-        y += 3
+        y += 2
         self.safe_addstr(
             y, start_x, "--- Position Sizing ---", curses.color_pair(3) | curses.A_BOLD
         )
@@ -956,26 +969,34 @@ class NativeConsoleDashboard:
             chart_pane_x = left_pane_width + 1
             right_pane_x = chart_pane_x + chart_pane_width + 1
 
+            # Three panes on top, a full-width console strip in its own box
+            # below (it used to be painted straight across all three panes)
+            bottom_split = max_y - 8
+
             # Draw panes
-            self._draw_box(8, 1, max_y - 2, left_pane_width)  # Left pane
+            self._draw_box(8, 1, bottom_split, left_pane_width)  # Left pane
             self._draw_box(
-                8, chart_pane_x, max_y - 2, chart_pane_x + chart_pane_width
+                8, chart_pane_x, bottom_split, chart_pane_x + chart_pane_width
             )  # Chart pane
-            self._draw_box(8, right_pane_x, max_y - 2, max_x - 2)  # Right pane
+            self._draw_box(8, right_pane_x, bottom_split, max_x - 2)  # Right pane
 
             # Draw content in panes
-            self._draw_info_pane(9, 3)
-            self._draw_chart_pane(9, chart_pane_x + 1, max_y - 15, chart_pane_width - 1)
+            self._draw_info_pane(9, 3, limit_y=bottom_split)
+            self._draw_chart_pane(
+                9, chart_pane_x + 1, bottom_split - 11, chart_pane_width - 1
+            )
 
-            # Market depth in right pane (columns 94-120 as noted in original)
-            market_depth_height = min(18, max_y - 25)
+            market_depth_height = bottom_split - 10
             if market_depth_height > 10:
                 self._draw_market_depth_pane(
                     9, right_pane_x + 2, market_depth_height, right_pane_width - 2
                 )
 
-            # Console messages at the bottom
-            self._draw_console_messages(max_y - 10, 3, 8, max_x - 6)
+            # Console messages strip
+            self._draw_box(bottom_split + 1, 1, max_y - 2, max_x - 2)
+            self._draw_console_messages(
+                bottom_split + 2, 3, max_y - 2 - (bottom_split + 2), max_x - 8
+            )
 
             self.animation_frame = (self.animation_frame + 1) % 10
             self.stdscr.refresh()
