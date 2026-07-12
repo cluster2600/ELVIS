@@ -93,41 +93,51 @@ class NativeConsoleDashboard:
         except curses.error:
             pass
 
-    # Four dance frames for the King: hip-swing legs, waving arms, orbiting
-    # notes. Cycled once per refresh tick (1s) via self.animation_frame.
+    # Four dance frames for the King. The signatures that make him Elvis:
+    # d8P...Y8b pompadour swoosh, [8] sideburns, `3' curled-lip snarl,
+    # \===/ jumpsuit collar over the guitar, and the knee-shake legs.
+    # Cycled once per refresh tick (1s) via self.animation_frame.
     ELVIS_FRAMES = [
         [
-            "  .-~~~-.   ",
-            " (⌐■_■)♪   ",
-            "   \\|/_    ",
-            "    |       ",
-            "   /|       ",
-            "  / |       ",
+            "    ,d8888b.      ",
+            "   d8P'--'Y8b     ",
+            "  [8](⌐■_■)[8]    ",
+            "     \\ `3' /   ♪  ",
+            "   ,__\\===/__,    ",
+            "      /   \\       ",
         ],
         [
-            "  .-~~~-.   ",
-            " ♪(⌐■_■)   ",
-            "   _\\|/    ",
-            "    |       ",
-            "    |\\      ",
-            "    | \\     ",
+            "    ,d8888b.      ",
+            "   d8P'--'Y8b     ",
+            "  [8](⌐■_■)[8]    ",
+            "  ♪  \\ `3' /      ",
+            "   ,__\\===/__,    ",
+            "      \\   /       ",
         ],
         [
-            "  .-~~~-.   ",
-            " (⌐■_■)♫   ",
-            "   <|>_     ",
-            "    |       ",
-            "   / \\      ",
-            "  /   \\     ",
+            "    ,d8888b.      ",
+            "   d8P'--'Y8b     ",
+            "  [8](⌐■_■)[8]    ",
+            "     \\ `3' /   ♫  ",
+            "   ,--\\===/--,    ",
+            "      /|  ~       ",
         ],
         [
-            "  .-~~~-.   ",
-            " ♫(⌐■_■)   ",
-            "   _<|>     ",
-            "    |       ",
-            "   < >      ",
-            "  ~   ~     ",
+            "    ,d8888b.      ",
+            "   d8P'--'Y8b     ",
+            "  [8](⌐■_■)[8]    ",
+            "  ♫  \\ `3' /      ",
+            "   ,--\\===/--,    ",
+            "      ~  |\\       ",
         ],
+    ]
+
+    # Captions cycle with the dance — the King has things to say.
+    ELVIS_CAPTIONS = [
+        "uh-huh-huh!      ",
+        "* hip swing *    ",
+        "~ jailhouse rock ~",
+        "thank ya v. much ",
     ]
 
     def _draw_header(self):
@@ -150,11 +160,17 @@ class NativeConsoleDashboard:
                 self.safe_addstr(start_y + i, x, line, color | curses.A_BOLD)
 
             # Dancing Elvis on the left, one dance step per second
-            frame = self.ELVIS_FRAMES[self.animation_frame % len(self.ELVIS_FRAMES)]
-            for i, line in enumerate(frame):
+            step = self.animation_frame % len(self.ELVIS_FRAMES)
+            for i, line in enumerate(self.ELVIS_FRAMES[step]):
                 self.safe_addstr(
                     start_y + i, 6, line, curses.color_pair(3) | curses.A_BOLD
                 )
+            self.safe_addstr(
+                start_y + 6,
+                7,
+                self.ELVIS_CAPTIONS[step],
+                curses.color_pair(4) | curses.A_BOLD,
+            )
 
             # Twinkling stars on the right, phase-shifted by frame
             twinkle = ["✧ ･ﾟ", "･ﾟ ✧", "ﾟ✧ ･", " ✧･ﾟ"]
