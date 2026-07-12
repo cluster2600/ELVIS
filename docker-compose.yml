@@ -24,7 +24,7 @@ services:
   elvis-bot:
     build:
       context: .
-      dockerfile: Dockerfile.minimal  # Use minimal build for core functionality
+      dockerfile: docker/Dockerfile.minimal  # Use minimal build for core functionality
     container_name: elvis-trading-bot
     depends_on:
       postgres:
@@ -101,7 +101,7 @@ services:
     image: prom/prometheus:latest
     container_name: elvis-prometheus
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"
@@ -121,8 +121,8 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
     ports:
       - "3001:3000"
     restart: unless-stopped
@@ -136,7 +136,7 @@ services:
     image: grafana/loki:2.9.0
     container_name: elvis-loki
     volumes:
-      - ./loki/config.yml:/etc/loki/local-config.yaml
+      - ./observability/loki/config.yml:/etc/loki/local-config.yaml
       - loki-data:/loki
     ports:
       - "3100:3100"
@@ -150,13 +150,38 @@ services:
     image: grafana/promtail:2.9.0
     container_name: elvis-promtail
     volumes:
-      - ./promtail/config.yml:/etc/promtail/config.yml
+      - ./observability/promtail/config.yml:/etc/promtail/config.yml
       - ./logs:/var/log/elvis
       - ./elvis_enhanced_metrics.log:/var/log/elvis/elvis.log:ro
     command: -config.file=/etc/promtail/config.yml
     restart: unless-stopped
     depends_on:
       - loki
+    networks:
+      - elvis-network
+
+  # ML-legacy trainer — Python 3.10 (tensorflow/ydf/coremltools have no 3.14
+  # wheels). Shares ONLY the models/ volume with the 3.14 bot: coupling is
+  # saved model files, never imports. Run on demand:
+  #   docker compose --profile ml run --rm elvis-ml-trainer
+  elvis-ml-trainer:
+    profiles: ["ml"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ml310
+    container_name: elvis-ml-trainer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=elvis_user
+      - POSTGRES_PASSWORD=elvis_password
+      - POSTGRES_DBNAME=elvis_trading
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
     networks:
       - elvis-network
 
