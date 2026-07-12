@@ -1948,6 +1948,12 @@ def main(mode: str, log_level: str):
                                                         "BUY",
                                                         logger,
                                                     )
+                                                    trading_loop.cooldown_manager.record_trade(
+                                                        symbol,
+                                                        "BUY",
+                                                        position_size,
+                                                        confidence,
+                                                    )
                                                 else:
                                                     logger.error(
                                                         f"❌ [FAIL] Failed to execute {symbol} BUY order"
@@ -1970,6 +1976,12 @@ def main(mode: str, log_level: str):
                                                         symbol,
                                                         "SELL",
                                                         logger,
+                                                    )
+                                                    trading_loop.cooldown_manager.record_trade(
+                                                        symbol,
+                                                        "SELL",
+                                                        position_size,
+                                                        confidence,
                                                     )
                                                 else:
                                                     logger.error(
@@ -2083,10 +2095,17 @@ def main(mode: str, log_level: str):
                                                 / entry_price
                                             ) * 100
 
-                                        # 🎯 HIGH WIN RATE STOP LOSS: Tighter stops for better win rate
-                                        stop_loss_threshold_usd = (
-                                            -15.0
-                                        )  # Max loss per position: $15.00
+                                        # 🎯 STOP LOSS as % of position notional
+                                        # (was a hardcoded -$15 from the $1000
+                                        # era: at micro-notional positions it
+                                        # could never trigger, so losers sat
+                                        # open forever and the feedback loop
+                                        # starved of closed trades)
+                                        stop_loss_threshold_usd = -abs(
+                                            entry_price
+                                            * quantity
+                                            * float(os.getenv("ELVIS_SL_PCT", "0.005"))
+                                        )
 
                                         # Calculate absolute dollar loss
                                         if side.upper() == "BUY":  # LONG position
