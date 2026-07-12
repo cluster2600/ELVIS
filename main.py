@@ -1170,9 +1170,24 @@ def main(mode: str, log_level: str):
                         # EMERGENCY PORTFOLIO PROTECTION - Check balance before trading
                         try:
                             current_balance = executor.get_account_balance()
-                            if current_balance < 700:  # If lost more than 30% of $1000
+                            # Floor is relative to the CONFIGURED deposit (a
+                            # hardcoded $700 floor from the old $1000 world
+                            # emergency-stopped every run once the honest $100
+                            # deposit landed: 100 < 700 on the first cycle).
+                            from config.config import PAPER_TRADING_CONFIG
+
+                            _start_balance = float(
+                                PAPER_TRADING_CONFIG.get("INITIAL_USDT_BALANCE", 100.0)
+                            )
+                            _protect_floor = _start_balance * float(
+                                os.getenv("ELVIS_PROTECT_FLOOR_PCT", "0.7")
+                            )
+                            if current_balance < _protect_floor:
                                 logger.error(
                                     f"🚨 PORTFOLIO PROTECTION: Balance dropped to ${current_balance:.2f}"
+                                    f" (floor ${_protect_floor:.2f} = "
+                                    f"{float(os.getenv('ELVIS_PROTECT_FLOOR_PCT', '0.7')):.0%}"
+                                    f" of ${_start_balance:.2f} deposit)"
                                 )
                                 logger.error(
                                     "🚨 EMERGENCY SHUTDOWN - Portfolio protection activated"
