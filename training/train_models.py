@@ -81,7 +81,12 @@ def parse_args():
         help="Path to training data",
     )
     parser.add_argument("--output", type=str, default="models", help="Output directory")
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Checkpoint path, or 'latest'/'best' to auto-resume from metadata",
+    )
     parser.add_argument(
         "--distributed", action="store_true", help="Enable distributed training"
     )
@@ -266,17 +271,37 @@ class TrainingPipeline:
         )
 
     def _resume_training_if_needed(self):
-        if self.args.resume:
-            checkpoint = self.checkpoint_manager.load_checkpoint(self.args.resume)
-            if checkpoint:
-                self.start_epoch = checkpoint["epoch"]
-                self.model_trainer.load_state_dict(checkpoint["model_state"])
-                self.logger.info(f"Resuming from epoch {self.start_epoch}")
+        if not self.args.resume:
+            return
+        target = self.args.resume
+        if target in ("latest", "auto"):
+            path = self.checkpoint_manager.get_latest_checkpoint()
+        elif target == "best":
+            path = self.checkpoint_manager.get_best_checkpoint()
+        else:
+            path = target
+        if not path:
+            self.logger.warning(
+                f"No checkpoint available to resume ('{target}'); starting fresh"
+            )
+            return
+        checkpoint = self.checkpoint_manager.load_checkpoint(path)
+        if checkpoint:
+            self.start_epoch = checkpoint["epoch"]
+            self.model_trainer.load_state_dict(checkpoint["model_state"])
+            self.logger.info(f"Resuming from epoch {self.start_epoch} ({path})")
+        else:
+            self.logger.warning(f"Could not load checkpoint '{path}'; starting fresh")
 
     def train(self):
+        best_epoch_seen = -1
+        last_completed_epoch = None
+        keep_last = self.config.get("keep_last_checkpoints", 5)
+        freq = self.config.get("checkpoint_frequency", 5)
         for epoch in range(
             self.start_epoch, int(self.config["transformer"].get("epochs", 0))
         ):
+            last_completed_epoch = epoch
             self.logger.info(f"Epoch {epoch+1}/{self.config['transformer']['epochs']}")
             train_metrics = self.model_trainer.train_epoch(self.train_loader, epoch)
             self.monitor.update_metrics("train", train_metrics)
@@ -284,17 +309,39 @@ class TrainingPipeline:
             self.monitor.update_metrics("val", val_metrics)
             for metric, value in {**train_metrics, **val_metrics}.items():
                 self.writer.add_scalar(metric, value, epoch)
-            if (epoch + 1) % self.config.get("checkpoint_frequency", 5) == 0:
+
+            # The monitor advances best_epoch whenever its early-stopping metric
+            # improves; a jump means this epoch is a new best.
+            is_best = self.monitor.get_best_epoch() > best_epoch_seen
+            if is_best:
+                best_epoch_seen = self.monitor.get_best_epoch()
+
+            if is_best or (epoch + 1) % freq == 0:
                 self.checkpoint_manager.save_checkpoint(
                     {
                         "epoch": epoch + 1,
                         "model_state": self.model_trainer.state_dict(),
                         "metrics": self.monitor.get_metrics(),
-                    }
+                    },
+                    is_best=is_best,
                 )
+                # Cap the on-disk history (the best checkpoint is always kept).
+                self.checkpoint_manager.cleanup_old_checkpoints(keep_last_n=keep_last)
             if self.monitor.should_stop():
                 break
             self.monitor.display_progress(epoch)
+
+        # Always leave a recoverable final checkpoint for a run that trained.
+        if last_completed_epoch is not None:
+            self.checkpoint_manager.save_checkpoint(
+                {
+                    "epoch": last_completed_epoch + 1,
+                    "model_state": self.model_trainer.state_dict(),
+                    "metrics": self.monitor.get_metrics(),
+                },
+                is_final=True,
+            )
+            self.checkpoint_manager.cleanup_old_checkpoints(keep_last_n=keep_last)
 
     def train_rl_agents(self):
         from training.models.rl_agents import MultiAgentTradingSystem

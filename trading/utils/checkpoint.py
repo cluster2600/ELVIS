@@ -32,6 +32,10 @@ class CheckpointManager:
         self.metadata_file = self.checkpoint_dir / "checkpoints.json"
         if not self.metadata_file.exists():
             self._init_metadata()
+        else:
+            # Heal any drift between the metadata and what is actually on disk
+            # (checkpoints rotated/deleted out-of-band, stale latest/best).
+            self._reconcile_with_disk()
 
     def _init_metadata(self):
         """Initialize checkpoint metadata file."""
@@ -52,6 +56,56 @@ class CheckpointManager:
         with open(self.metadata_file, "r") as f:
             return json.load(f)
 
+    def _reconcile_with_disk(self):
+        """Drop metadata entries whose checkpoint file no longer exists and
+        recompute latest/best so neither ever points at a missing file.
+
+        Self-heals a stale ``checkpoints.json`` (e.g. after checkpoints were
+        rotated, deleted, or partially restored out-of-band). Idempotent and a
+        no-op when metadata already matches disk.
+        """
+        try:
+            metadata = self._load_metadata()
+        except (json.JSONDecodeError, OSError):
+            # Corrupt/unreadable metadata: start clean rather than crash.
+            self._init_metadata()
+            return
+
+        checkpoints = metadata.get("checkpoints") or []
+        present = [c for c in checkpoints if os.path.exists(c["path"])]
+        # Collapse duplicate-path entries left by legacy second-resolution
+        # timestamps (several saves in one second reused a single filename).
+        by_path = {}
+        for c in present:
+            if c["path"] not in by_path or c.get("is_best"):
+                by_path[c["path"]] = c
+        surviving = list(by_path.values())
+
+        def _points_at_missing(entry):
+            return bool(entry) and not os.path.exists(entry["path"])
+
+        if (
+            len(surviving) == len(checkpoints)
+            and not _points_at_missing(metadata.get("latest_checkpoint"))
+            and not _points_at_missing(metadata.get("best_checkpoint"))
+        ):
+            return  # already consistent
+
+        surviving.sort(key=lambda c: c["timestamp"])
+        best = [c for c in surviving if c.get("is_best")]
+        metadata["checkpoints"] = surviving
+        metadata["latest_checkpoint"] = surviving[-1] if surviving else None
+        metadata["best_checkpoint"] = best[-1] if best else None
+        self._save_metadata(metadata)
+
+        dropped = len(checkpoints) - len(surviving)
+        if dropped:
+            self.logger.info(
+                f"Reconciled checkpoint metadata: dropped {dropped} stale/"
+                f"duplicate entr{'y' if dropped == 1 else 'ies'}, "
+                f"{len(surviving)} remain"
+            )
+
     def save_checkpoint(
         self, state_dict: Dict, is_final: bool = False, is_best: bool = False
     ) -> str:
@@ -67,8 +121,8 @@ class CheckpointManager:
             Path to saved checkpoint
         """
         try:
-            # Generate checkpoint filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Generate checkpoint filename (microseconds keep rapid saves unique)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             if is_final:
                 filename = f"final_checkpoint_{timestamp}.pt"
             elif is_best:
