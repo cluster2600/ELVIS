@@ -16,8 +16,10 @@ imported on demand.
 > wheels** and are absent in CI / minimal environments — `optuna`, `shap`,
 > `lime`, `plotly`, `tensorflow`/`keras`. Every import of these is wrapped in a
 > `try/except ImportError` guard, and the code degrades gracefully when they are
-> missing. Do not assume they are installed. `xgboost` and `lightgbm` are used
-> by the ensembles and are expected to be present.
+> missing. Do not assume they are installed. `xgboost` and `lightgbm` are
+> likewise import-guarded: when present they are added as ensemble base models,
+> and when absent the ensembles simply drop those members. Install the full set
+> with the `ml` extra (`pip install -e '.[ml]'`).
 
 ---
 

@@ -6,14 +6,47 @@ Implements various ensemble methods including stacking, bagging, and boosting.
 import logging
 from typing import Dict, List, Optional, Tuple, Union
 
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import xgboost as xgb
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+
+# xgboost and lightgbm are optional gradient boosters. Guard the imports so this
+# module (and the whole training pipeline that imports it) stays importable
+# without them; the ensembles just drop those base members when absent.
+try:
+    import lightgbm as lgb
+except ImportError:  # pragma: no cover - exercised in deps-absent envs
+    lgb = None
+try:
+    import xgboost as xgb
+except ImportError:  # pragma: no cover - exercised in deps-absent envs
+    xgb = None
+
+
+def _base_regressors(config: Dict) -> list:
+    """Sklearn base regressors, plus xgboost/lightgbm when installed.
+
+    The optional boosters are skipped (with a warning) when their package is
+    missing, so the ensemble degrades to the always-present sklearn models
+    instead of failing to construct.
+    """
+    models = [
+        RandomForestRegressor(**config.get("rf_params", {})),
+        GradientBoostingRegressor(**config.get("gb_params", {})),
+    ]
+    log = logging.getLogger(__name__)
+    if xgb is not None:
+        models.append(xgb.XGBRegressor(**config.get("xgb_params", {})))
+    else:
+        log.warning("xgboost not installed; skipping it as an ensemble base model")
+    if lgb is not None:
+        models.append(lgb.LGBMRegressor(**config.get("lgb_params", {})))
+    else:
+        log.warning("lightgbm not installed; skipping it as an ensemble base model")
+    return models
 
 
 class EnsembleModel:
@@ -44,15 +77,7 @@ class StackingEnsemble(EnsembleModel):
 
     def _initialize_models(self):
         """Initialize base models and meta-learner."""
-        # Base models
-        self.models = [
-            RandomForestRegressor(**self.config.get("rf_params", {})),
-            GradientBoostingRegressor(**self.config.get("gb_params", {})),
-            xgb.XGBRegressor(**self.config.get("xgb_params", {})),
-            lgb.LGBMRegressor(**self.config.get("lgb_params", {})),
-        ]
-
-        # Meta-learner
+        self.models = _base_regressors(self.config)
         self.meta_learner = LinearRegression()
 
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -83,12 +108,7 @@ class WeightedEnsemble(EnsembleModel):
 
     def _initialize_models(self):
         """Initialize base models."""
-        self.models = [
-            RandomForestRegressor(**self.config.get("rf_params", {})),
-            GradientBoostingRegressor(**self.config.get("gb_params", {})),
-            xgb.XGBRegressor(**self.config.get("xgb_params", {})),
-            lgb.LGBMRegressor(**self.config.get("lgb_params", {})),
-        ]
+        self.models = _base_regressors(self.config)
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """Fit the weighted ensemble."""
