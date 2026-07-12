@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     Main["main.py"]
     BinanceExecutor["BinanceExecutor"]
