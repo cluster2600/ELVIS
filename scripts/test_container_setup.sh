@@ -137,7 +137,7 @@ main() {
         echo -e "${GREEN}🎉 All tests passed! ELVIS is ready for containers.${NC}"
         echo ""
         echo "Next steps:"
-        echo "1. Run: ./setup_apple_containers.sh"
+        echo "1. Run: scripts/setup_apple_containers.sh"
         echo "2. Start: ./start_elvis_apple.sh"
         echo "3. Open: http://localhost:5050"
         return 0

@@ -1,9 +1,9 @@
 # 🚀 ELVIS Unified Training System - Guide
 
-`run_training.sh` is a single entry point that dispatches to the various
+`scripts/run_training.sh` is a single entry point that dispatches to the various
 training scripts in the repo root, with method auto-detection, dependency
 checks, optional Vault setup, and runtime fallback. This guide describes what
-the script actually does; `./run_training.sh --help` is the authoritative
+the script actually does; `./scripts/run_training.sh --help` is the authoritative
 reference for the full flag list.
 
 ## 🎯 **Single Command Training**
@@ -11,33 +11,33 @@ reference for the full flag list.
 ### **Quick Start (Recommended)**
 ```bash
 # Auto-detect best method and run training
-./run_training.sh
+./scripts/run_training.sh
 
 # Quick test run (100 trades, 5 epochs with debug)
-./run_training.sh --quick
+./scripts/run_training.sh --quick
 
 # Production training (5000 trades, 50 epochs)
-./run_training.sh --production
+./scripts/run_training.sh --production
 ```
 
 ### **Method-Specific Training**
 ```bash
 # PostgreSQL method (best for real data)
-./run_training.sh --method postgres --limit 2000 --epochs 30
+./scripts/run_training.sh --method postgres --limit 2000 --epochs 30
 
 # Enhanced method with Vault support
-./run_training.sh --method enhanced --debug
+./scripts/run_training.sh --method enhanced --debug
 
 # No-Vault method (testing/development)
-./run_training.sh --method no-vault --limit 500
+./scripts/run_training.sh --method no-vault --limit 500
 
 # Research-strategy method (Bonenkamp 2021 methodology)
-./run_training.sh --method research --social
+./scripts/run_training.sh --method research --social
 ```
 
 ## 📊 **Available Options**
 
-These are the flags accepted by `run_training.sh` (see `--help` for the full,
+These are the flags accepted by `scripts/run_training.sh` (see `--help` for the full,
 authoritative list — the script's `print_usage` is the source of truth).
 
 ### **Training Methods**
@@ -132,7 +132,7 @@ need them, so the training modules are designed to import and run without them.
 - Directly instantiating `SHAPExplainer` / `LIMEExplainer`, calling their plotly
   visualizer, or calling `HyperparameterOptimizer.optimize_model()` without the
   matching library raises a clear `ImportError` telling you what to `pip install`.
-- `run_training.sh`'s dependency check treats **TensorFlow as optional**: it is a
+- `scripts/run_training.sh`'s dependency check treats **TensorFlow as optional**: it is a
   soft warning (`⚠️  TensorFlow not installed (optional)`), not a hard failure.
   Only `pandas`, `numpy`, `torch`, and `psycopg2` are mandatory.
 
@@ -165,7 +165,7 @@ trade_data_metadata.json`) describes a full extraction of:
 
 ## 🛠️ **What Actually Runs Under Each Method**
 
-`run_training.sh` builds a command by probing which training scripts exist. The
+`scripts/run_training.sh` builds a command by probing which training scripts exist. The
 selection precedence (see `run_training_postgres` / `run_training_no_vault` /
 `run_training_research` in the script) is important because it determines which
 model type you get:
@@ -218,41 +218,41 @@ model type you get:
 ### **Development Workflow**
 ```bash
 # 1. Quick test to verify everything works
-./run_training.sh --quick
+./scripts/run_training.sh --quick
 
 # 2. Development training with debug
-./run_training.sh --debug --limit 1000
+./scripts/run_training.sh --debug --limit 1000
 
 # 3. Validation with more data  
-./run_training.sh --limit 3000 --epochs 25
+./scripts/run_training.sh --limit 3000 --epochs 25
 
 # 4. Production deployment
-./run_training.sh --production
+./scripts/run_training.sh --production
 ```
 
 ### **Troubleshooting**
 ```bash
 # System diagnostics
-./run_training.sh --check
+./scripts/run_training.sh --check
 
 # Force specific method
-./run_training.sh --method no-vault --debug
+./scripts/run_training.sh --method no-vault --debug
 
 # Test with minimal data
-./run_training.sh --limit 50 --epochs 3 --debug
+./scripts/run_training.sh --limit 50 --epochs 3 --debug
 ```
 
 ### **Batch Operations**
 ```bash
 # Test all methods
-./run_training.sh --method postgres --quick
-./run_training.sh --method enhanced --quick  
-./run_training.sh --method no-vault --quick
+./scripts/run_training.sh --method postgres --quick
+./scripts/run_training.sh --method enhanced --quick  
+./scripts/run_training.sh --method no-vault --quick
 
 # Performance comparison
-./run_training.sh --limit 1000 --epochs 10
-./run_training.sh --limit 2000 --epochs 10
-./run_training.sh --limit 5000 --epochs 10
+./scripts/run_training.sh --limit 1000 --epochs 10
+./scripts/run_training.sh --limit 2000 --epochs 10
+./scripts/run_training.sh --limit 5000 --epochs 10
 ```
 
 ## 📊 **Output Structure**
@@ -302,7 +302,7 @@ data/processed/
 
 ## 🏆 **Key Points**
 
-1. ✅ **Unified Interface**: single `run_training.sh` entry point for all methods
+1. ✅ **Unified Interface**: single `scripts/run_training.sh` entry point for all methods
 2. ✅ **Auto-Detection**: research → postgres → no-vault selection
 3. ✅ **Runtime Fallback**: postgres → no-vault if the DB is unreachable
 4. ✅ **PostgreSQL Integration**: trains against the local `trades` table
@@ -318,22 +318,22 @@ data/processed/
 
 ### **For Development**
 ```bash
-./run_training.sh --quick --debug
+./scripts/run_training.sh --quick --debug
 ```
 
 ### **For Testing New Features**
 ```bash
-./run_training.sh --method no-vault --limit 500
+./scripts/run_training.sh --method no-vault --limit 500
 ```
 
 ### **For Production Models**
 ```bash
-./run_training.sh --production
+./scripts/run_training.sh --production
 ```
 
 ### **For Continuous Integration**
 ```bash
-./run_training.sh --method auto --limit 1000 --epochs 15
+./scripts/run_training.sh --method auto --limit 1000 --epochs 15
 ```
 
 ## 🎉 **Conclusion**
@@ -349,5 +349,5 @@ The unified training system provides a **single, reliable command** for all ELVI
   path, saved as joblib) or a PyTorch Transformer + RL agents (via
   `train_with_postgres.py` → `training/train_models.py`)
 
-Use `./run_training.sh --help` for the complete, authoritative option list, or
-`./run_training.sh --quick` to get started immediately.
+Use `./scripts/run_training.sh --help` for the complete, authoritative option list, or
+`./scripts/run_training.sh --quick` to get started immediately.

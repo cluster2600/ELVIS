@@ -199,7 +199,7 @@ After running the Ansible playbook:
    sudo systemctl enable elvis-bot
    
    # Or run manually
-   ./run_elvis.sh
+   ./scripts/run_elvis.sh
    ```
 
 4. **Access Web Interfaces**:

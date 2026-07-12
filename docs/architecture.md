@@ -7,17 +7,17 @@ module, class, and path shown exists and is import-verified.
 
 ```mermaid
 flowchart TD
-    A[main.py --mode paper|live] --> B[core.bootstrap.bootstrap_application]
-    B --> C[core.di container]
-    C --> S[trading.strategies.EnsembleStrategy]
-    C --> X[trading.execution.BinanceExecutor]
-    C --> P[utils.price_fetcher.PriceFetcher]
-    C --> R[trading.risk.AdvancedRiskManager]
+    A["main.py (paper or live mode)"] --> B["core.bootstrap.bootstrap_application"]
+    B --> C["core.di container"]
+    C --> S["trading.strategies.EnsembleStrategy"]
+    C --> X["trading.execution.BinanceExecutor"]
+    C --> P["utils.price_fetcher.PriceFetcher"]
+    C --> R["trading.risk.AdvancedRiskManager"]
     P -->|real Binance klines| S
-    S -->|BUY/SELL/HOLD| X
-    X -->|paper fills + P&L| DB[(Postgres np.trades / np.open_positions)]
-    DB --> API[trading.utils.trade_history_api Flask :5050]
-    X -.->|balance = $deposit + Σ realized P&L| DB
+    S -->|BUY / SELL / HOLD| X
+    X -->|paper fills + PnL| DB[("Postgres: np.trades / np.open_positions")]
+    DB --> API["trading.utils.trade_history_api Flask :5050"]
+    X -.->|balance = deposit + realized PnL| DB
 ```
 
 ## Configuration & secrets

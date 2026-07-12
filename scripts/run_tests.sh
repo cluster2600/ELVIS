@@ -5,6 +5,9 @@
 
 set -e  # Exit on error
 
+
+# Resolve repo root so this script works from any cwd (moved into scripts/).
+cd "$(dirname "$0")/.." || exit 1
 echo "🧪 Running ELVIS Trading Bot Test Suite..."
 echo "========================================="
 
