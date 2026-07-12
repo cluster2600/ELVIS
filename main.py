@@ -235,6 +235,26 @@ def _retrain_strategy_if_due(active_strategy, price_fetcher, logger: logging.Log
         return False
 
 
+def _protection_floor(mode: str, current_balance: float, baseline_state: dict):
+    """Emergency-stop floor for the portfolio-protection check.
+
+    Returns ``(floor, baseline, pct)``. Paper mode measures against the
+    configured ``INITIAL_USDT_BALANCE`` deposit; live mode measures against
+    the FIRST balance observed this session (persisted in
+    ``baseline_state``) — real money must never be judged against the
+    fictional paper deposit. ``ELVIS_PROTECT_FLOOR_PCT`` (default 0.7 = the
+    original lose-more-than-30% rule) scales the floor in both modes.
+    """
+    from config.config import PAPER_TRADING_CONFIG
+
+    pct = float(os.getenv("ELVIS_PROTECT_FLOOR_PCT", "0.7"))
+    if mode == "paper":
+        baseline = float(PAPER_TRADING_CONFIG.get("INITIAL_USDT_BALANCE", 100.0))
+    else:
+        baseline = baseline_state.setdefault("baseline", float(current_balance))
+    return baseline * pct, baseline, pct
+
+
 def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
     """Adaptive-ensemble feedback (#11): store each member's vote at entry.
 
@@ -1204,9 +1224,22 @@ def main(mode: str, log_level: str):
                         # EMERGENCY PORTFOLIO PROTECTION - Check balance before trading
                         try:
                             current_balance = executor.get_account_balance()
-                            if current_balance < 700:  # If lost more than 30% of $1000
+                            # Mode-aware floor (see _protection_floor): paper
+                            # measures against the configured deposit — the old
+                            # hardcoded $700 floor from the $1000 world
+                            # emergency-stopped every run once the honest $100
+                            # deposit landed — while live measures against the
+                            # session's first observed real balance.
+                            if not hasattr(trading_loop, "_protection_state"):
+                                trading_loop._protection_state = {}
+                            _protect_floor, _baseline, _pct = _protection_floor(
+                                mode, current_balance, trading_loop._protection_state
+                            )
+                            if current_balance < _protect_floor:
                                 logger.error(
                                     f"🚨 PORTFOLIO PROTECTION: Balance dropped to ${current_balance:.2f}"
+                                    f" (floor ${_protect_floor:.2f} = {_pct:.0%}"
+                                    f" of ${_baseline:.2f} {mode} baseline)"
                                 )
                                 logger.error(
                                     "🚨 EMERGENCY SHUTDOWN - Portfolio protection activated"
