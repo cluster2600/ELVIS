@@ -80,9 +80,10 @@ the loop.
 
 ## Why three flags default off
 
-- **`ELVIS_ORDER_FLOW`** — paper-mode order books are empty (`get_order_book`
-  returns empty bids/asks), so the imbalance is always neutral; enable against
-  a live/testnet book.
+- **`ELVIS_ORDER_FLOW`** — paper mode now fetches the REAL public depth book
+  (no API key; `ELVIS_PAPER_PUBLIC_BOOK=0` restores the offline empty book),
+  so this works in paper mode too. Still off by default because it adds one
+  HTTP call per actionable signal; enable deliberately.
 - **`ELVIS_KELLY_SIZING`** — Kelly needs a meaningful trade history
   (`kelly_from_trades` returns the 1% floor below 20 trades); enable once the
   paper DB has enough closed trades.

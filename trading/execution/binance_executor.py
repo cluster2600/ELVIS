@@ -255,11 +255,37 @@ class BinanceExecutor(BaseExecutor):
         """Return the current order book (bids/asks) for ``symbol``.
 
         Live futures mode queries the UMFutures ``depth`` endpoint; live spot
-        mode uses the spot client's ``get_order_book``.  In paper mode (no
-        client) an empty book ``{'symbol', 'bids', 'asks', 'timestamp'}`` is
-        returned so callers never hit the network.
+        mode uses the spot client's ``get_order_book``. In paper mode (no
+        client) the REAL public spot depth is fetched (no API key required —
+        consistent with paper mode trading on real klines) so order-flow
+        analysis works without exchange credentials. Set
+        ``ELVIS_PAPER_PUBLIC_BOOK=0`` to force the offline empty book
+        (CI / air-gapped runs); any fetch failure also degrades to the empty
+        ``{'symbol', 'bids', 'asks', 'timestamp'}`` shape.
         """
         if self.client is None:
+            if os.getenv("ELVIS_PAPER_PUBLIC_BOOK", "1") == "1":
+                try:
+                    import requests
+
+                    resp = requests.get(
+                        "https://api.binance.com/api/v3/depth",
+                        params={"symbol": symbol, "limit": min(int(limit), 100)},
+                        timeout=5,
+                    )
+                    resp.raise_for_status()
+                    book = resp.json()
+                    return {
+                        "symbol": symbol,
+                        "bids": book.get("bids", []),
+                        "asks": book.get("asks", []),
+                        "timestamp": int(time.time() * 1000),
+                    }
+                except Exception as exc:
+                    self.logger.debug(
+                        f"Public depth fetch failed for {symbol} ({exc}); "
+                        "returning empty paper book"
+                    )
             return {
                 "symbol": symbol,
                 "bids": [],
