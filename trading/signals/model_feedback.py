@@ -68,6 +68,13 @@ def score_closed_trades() -> int:
     Batches (same symbol + created_at) whose position has not closed yet are
     left unscored for a later cycle. pnl == 0 closes are marked scored without
     updating accuracies (no information).
+
+    INVARIANT: entry/exit matching is by symbol + time ordering only
+    (``get_first_closing_trade_after``), which is correct because the bot
+    holds at most ONE position per symbol at a time (entry fill -> votes ->
+    close). If concurrent same-symbol positions (pyramiding) are ever added,
+    votes must carry a position id or this scorer will attribute exits to
+    the wrong batch.
     """
     rows = _db.get_unscored_predictions()
     if not rows:

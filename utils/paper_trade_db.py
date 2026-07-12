@@ -122,6 +122,14 @@ def init_db():
                 scored BOOLEAN DEFAULT FALSE
             )
         """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_model_predictions_scored
+            ON np.model_predictions (scored, created_at)
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts
+            ON np.trades (symbol, timestamp)
+        """)
         conn.commit()
         print("[INFO] Database tables initialized successfully")
     except Exception as e:
@@ -371,9 +379,17 @@ def mark_predictions_scored(ids):
 
 
 def get_first_closing_trade_after(symbol, ts):
-    """First trade for `symbol` after `ts` carrying realized pnl (the close).
+    """First trade for `symbol` after `ts` (the close of that position).
 
     Returns (timestamp, pnl) or None if the position hasn't closed yet.
+
+    Relies on the bot's single-position-per-symbol invariant: the row
+    sequence per symbol is entry-fill (pnl 0) -> votes recorded -> close
+    (realized pnl), so the first trade AFTER the votes' timestamp is that
+    position's close. A breakeven close (pnl == 0) is deliberately
+    returned — the scorer marks it "no information" — rather than filtered
+    out, because skipping it would misattribute the NEXT position's exit
+    to this vote batch.
     """
     conn = get_conn()
     if conn is None:
@@ -384,7 +400,7 @@ def get_first_closing_trade_after(symbol, ts):
             """
             SELECT timestamp, pnl FROM np.trades
             WHERE symbol = %s AND timestamp > %s
-              AND pnl IS NOT NULL AND pnl <> 0
+              AND pnl IS NOT NULL
             ORDER BY timestamp ASC
             LIMIT 1
         """,
@@ -785,6 +801,14 @@ def init_db_with_balances():
                 vote TEXT,
                 scored BOOLEAN DEFAULT FALSE
             )
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_model_predictions_scored
+            ON np.model_predictions (scored, created_at)
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_trades_symbol_ts
+            ON np.trades (symbol, timestamp)
         """)
 
         conn.commit()

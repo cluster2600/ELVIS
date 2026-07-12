@@ -154,6 +154,67 @@ def test_scoring_persists_state(fresh_weights, monkeypatch, tmp_path):
     assert reloaded.accuracies.get("Technical") == pytest.approx(1.0)
 
 
+def test_sql_zero_pnl_close_is_returned_not_skipped():
+    """SQL-semantics regression (review finding on #41): a breakeven close
+    (pnl == 0) must be RETURNED by get_first_closing_trade_after — filtering
+    it out would misattribute the NEXT position's exit to this vote batch.
+    Runs against the real local Postgres; skips where none is available (CI).
+    """
+    import datetime as _dt
+    import uuid
+
+    from utils import paper_trade_db as db
+
+    conn = db.get_conn()
+    if conn is None:
+        pytest.skip("Postgres unavailable")
+    conn.close()
+
+    symbol = f"TEST{uuid.uuid4().hex[:8].upper()}"
+    t0 = _dt.datetime.now()
+    try:
+        # entry fill BEFORE the votes (pnl 0) must not match
+        db.record_trade(
+            symbol,
+            "BUY",
+            100.0,
+            1.0,
+            pnl=0.0,
+            timestamp=t0 - _dt.timedelta(seconds=5),
+        )
+        # breakeven close AFTER the votes
+        db.record_trade(
+            symbol,
+            "SELL",
+            100.0,
+            1.0,
+            pnl=0.0,
+            timestamp=t0 + _dt.timedelta(seconds=5),
+        )
+        # a LATER, unrelated profitable close that a pnl<>0 filter would
+        # have wrongly attributed to this batch
+        db.record_trade(
+            symbol,
+            "SELL",
+            105.0,
+            1.0,
+            pnl=5.0,
+            timestamp=t0 + _dt.timedelta(seconds=60),
+        )
+
+        closing = db.get_first_closing_trade_after(symbol, t0)
+        assert closing is not None, "breakeven close was skipped"
+        _, pnl = closing
+        assert pnl == 0.0, f"expected the breakeven close, got pnl={pnl}"
+    finally:
+        cleanup = db.get_conn()
+        if cleanup is not None:
+            cur = cleanup.cursor()
+            cur.execute("DELETE FROM np.trades WHERE symbol = %s", (symbol,))
+            cleanup.commit()
+            cleanup.close()
+
+
 def test_record_entry_filters_and_delegates(monkeypatch):
     captured = {}
     monkeypatch.setattr(
