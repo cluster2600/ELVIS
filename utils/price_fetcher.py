@@ -86,7 +86,9 @@ class PriceFetcher:
                     # Try to use futures connector first, fallback to spot
                     if FUTURES_AVAILABLE:
                         try:
-                            self.client = UMFutures(key=api_key, secret=api_secret)
+                            self.client = UMFutures(
+                                key=api_key, secret=api_secret, timeout=10
+                            )
                             self.logger.info(
                                 "Using authenticated Binance Futures client"
                             )
@@ -94,14 +96,18 @@ class PriceFetcher:
                             self.logger.warning(
                                 f"Futures client failed, using spot client: {e}"
                             )
-                            self.client = Client(api_key, api_secret)
+                            self.client = Client(
+                                api_key, api_secret, requests_params={"timeout": 10}
+                            )
                             self.logger.info("Using authenticated Binance spot client")
                     else:
-                        self.client = Client(api_key, api_secret)
+                        self.client = Client(
+                            api_key, api_secret, requests_params={"timeout": 10}
+                        )
                         self.logger.info("Using authenticated Binance spot client")
                 else:
                     # Use public client for price data (no trading)
-                    self.client = Client()
+                    self.client = Client(requests_params={"timeout": 10})
                     self.logger.info(
                         "Using public Binance client for price data (no API keys)"
                     )
@@ -150,7 +156,7 @@ class PriceFetcher:
                             spot_client = self._spot_client
                         else:
                             # Create a temporary spot client
-                            spot_client = Client()
+                            spot_client = Client(requests_params={"timeout": 10})
                             self._spot_client = spot_client
                         klines = spot_client.get_historical_klines(
                             symbol=symbol,
@@ -376,7 +382,7 @@ class PriceFetcher:
                     if hasattr(self, "_spot_client"):
                         spot_client = self._spot_client
                     else:
-                        spot_client = Client()
+                        spot_client = Client(requests_params={"timeout": 10})
                         self._spot_client = spot_client
                     ticker = spot_client.get_symbol_ticker(symbol=symbol)
                     price = float(ticker["price"])
@@ -477,7 +483,7 @@ class PriceFetcher:
                     if hasattr(self, "_spot_client"):
                         spot_client = self._spot_client
                     else:
-                        spot_client = Client()
+                        spot_client = Client(requests_params={"timeout": 10})
                         self._spot_client = spot_client
                     klines = spot_client.get_historical_klines(
                         symbol=symbol, interval=interval, limit=limit
