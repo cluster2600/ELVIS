@@ -966,6 +966,34 @@ class EnsembleStrategy(BaseStrategy):
 
             # Combine all predictions with weights
             if all_predictions:
+                # Stash each member's own vote so main.py can record it at
+                # execution time (adaptive-ensemble feedback, roadmap #11)
+                if not hasattr(self, "last_model_votes"):
+                    self.last_model_votes = {}
+                self.last_model_votes[symbol] = {
+                    source: self.CLASSES[int(np.argmax(pred))]
+                    for source, pred in zip(prediction_sources, all_predictions)
+                }
+
+                # Modulate the static source weights by learned per-model
+                # accuracy (uniform start = identical to static behavior)
+                if os.getenv("ELVIS_ADAPTIVE_ENSEMBLE", "1") == "1":
+                    try:
+                        from trading.signals.adaptive_ensemble import combine_weights
+                        from trading.signals.model_feedback import get_shared_weights
+
+                        combined = combine_weights(
+                            dict(zip(prediction_sources, prediction_weights)),
+                            get_shared_weights().weights,
+                        )
+                        prediction_weights = [
+                            combined[source] for source in prediction_sources
+                        ]
+                    except Exception as adaptive_err:
+                        self.logger.warning(
+                            f"🧠 Adaptive weights unavailable, using static: {adaptive_err}"
+                        )
+
                 # Normalize weights
                 total_weight = sum(prediction_weights)
                 normalized_weights = [w / total_weight for w in prediction_weights]
