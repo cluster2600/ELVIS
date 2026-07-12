@@ -1470,7 +1470,12 @@ def main(mode: str, log_level: str):
                                     )
 
                                     # 🎯 HIGH WIN RATE FILTERING SYSTEM
-                                    if signal in ["BUY", "SELL"] and confidence >= 0.6:
+                                    if (
+                                        signal in ["BUY", "SELL"]
+                                        and confidence >= 0.6
+                                        and os.getenv("ELVIS_WINRATE_FILTER", "1")
+                                        == "1"
+                                    ):
                                         try:
                                             from trading.analysis.high_winrate_filter import (
                                                 HighWinRateFilter,
@@ -1978,7 +1983,7 @@ def main(mode: str, log_level: str):
 
                                     else:
                                         logger.info(
-                                            f"📊 {symbol} Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)"
+                                            f"📊 {symbol} Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 0.60 execution threshold)"
                                         )
 
                                 except Exception as e:
