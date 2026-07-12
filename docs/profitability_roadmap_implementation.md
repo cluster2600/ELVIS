@@ -24,7 +24,7 @@ the live loop) is wired into `main.py` behind an environment flag.
 | 8 | Time-of-day filter | `trading.signals.filters.is_optimal_trading_hour` | signal gates | `ELVIS_ROADMAP_FILTERS` (on) |
 | 9 | MACD histogram divergence | `trading.signals.filters.detect_macd_divergence` | signal gates (veto; override opt-in) | `ELVIS_ROADMAP_FILTERS` (on) |
 | 10 | Dynamic take profit by regime | `trading.execution.exits.dynamic_take_profit` | position loop (replaces fixed $8) | `ELVIS_DYNAMIC_TP` (on) |
-| 11 | Adaptive ML ensemble weights | `trading.signals.adaptive_ensemble.AdaptiveEnsembleWeights` | **module only** (see below) | — |
+| 11 | Adaptive ML ensemble weights | `trading.signals.adaptive_ensemble` + `trading.signals.model_feedback` | ensemble voting + feedback loop (see below) | `ELVIS_ADAPTIVE_ENSEMBLE` (on) |
 | 12 | Order flow analysis | `trading.signals.order_flow.confirm_signal_with_flow` | signal gates | `ELVIS_ORDER_FLOW` (**off**) |
 | 13 | Kelly criterion sizing | `trading.risk.position_sizing.kelly_fraction` / `kelly_from_trades` | sizing block (caps size) | `ELVIS_KELLY_SIZING` (**off**) |
 | 14 | Multi-timeframe analysis | `trading.signals.mtf.MTFAnalyzer` | signal gates | `ELVIS_MTF` (**off**) |
@@ -67,15 +67,30 @@ the loop.
 - **`ELVIS_MTF`** — multiplies kline API calls per signal (3 timeframes);
   enable deliberately.
 
-## Item 11 (adaptive ensemble) — module only, and why
+## Item 11 (adaptive ensemble) — wired via a real feedback pipeline
 
-`AdaptiveEnsembleWeights` (EMA-updated per-model accuracies → normalized
-weights → `weighted_signal`) is implemented, tested, and persistence-capable.
-It is **not** wired into the live ensemble because the trading loop does not
-yet produce per-model accuracy feedback (which model was right per closed
-trade). Wiring it honestly requires recording each model's prediction at entry
-and scoring it at exit — that feedback pipeline is the follow-up; plugging in
-made-up accuracies would be theater.
+The honest wiring this section previously called "the follow-up" now exists.
+No assumed accuracies anywhere — the loop *earns* its weights:
+
+1. **Entry** — when a trade executes, every ensemble member's own vote
+   (Technical / Research / RL / Bonenkamp / Models) is recorded to the
+   `np.model_predictions` table (`EnsembleStrategy.last_model_votes` →
+   `model_feedback.record_entry`).
+2. **Exit** — once per cycle, `model_feedback.score_closed_trades` matches
+   each vote batch to the first subsequent trade of that symbol carrying
+   realized PnL. A model that voted the executed direction was right iff
+   `pnl > 0`; an opposite vote was right iff `pnl < 0`; HOLD votes and
+   `pnl == 0` closes are not scored. Open positions stay queued.
+3. **Learning** — each outcome EMA-updates `AdaptiveEnsembleWeights`
+   (`ELVIS_ADAPTIVE_ALPHA`, default 0.1), persisted atomically to
+   `models/adaptive_ensemble_weights.json` across restarts.
+4. **Voting** — `EnsembleStrategy` modulates its hand-tuned static source
+   weights by the learned weights (`combine_weights`). Weights start uniform,
+   so behavior is identical to the static ensemble until real scored trades
+   accumulate, and multipliers are clamped to [0.25x, 4x] so no model is
+   silenced or dominates off a handful of trades.
+
+Kill switch: `ELVIS_ADAPTIVE_ENSEMBLE=0` restores pure static weighting.
 
 ## Item 15 (walk-forward) — how to run
 
@@ -101,7 +116,8 @@ manually or from your own automation. It is deliberately not in the live loop.
 
 `tests/test_signal_filters.py`, `test_position_sizing.py`, `test_exits.py`,
 `test_fee_gate.py`, `test_order_flow.py`, `test_mtf.py`,
-`test_adaptive_ensemble.py`, `test_walk_forward.py` — 317 tests covering the
+`test_adaptive_ensemble.py`, `test_model_feedback.py`,
+`test_walk_forward.py` — 328 tests covering the
 happy paths, edge cases (empty/short/NaN data, empty order books, degenerate
 Kelly inputs), and pinned math (Kelly formula, EMA weight updates, fee
 arithmetic). All modules import without torch/talib/network, so they run in CI.
