@@ -16,12 +16,15 @@ import torch
 class CheckpointManager:
     """Manages model checkpoints and state saving/loading."""
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, reconcile_on_init: bool = True):
         """
         Initialize the checkpoint manager.
 
         Args:
             config: Configuration dictionary
+            reconcile_on_init: Whether to self-heal the metadata against disk on
+                construction. Pass False on non-primary ranks under distributed
+                training so only rank 0 writes the shared metadata file.
         """
         self.config = config
         self.checkpoint_dir = Path(config["checkpoint_dir"])
@@ -32,7 +35,7 @@ class CheckpointManager:
         self.metadata_file = self.checkpoint_dir / "checkpoints.json"
         if not self.metadata_file.exists():
             self._init_metadata()
-        else:
+        elif reconcile_on_init:
             # Heal any drift between the metadata and what is actually on disk
             # (checkpoints rotated/deleted out-of-band, stale latest/best).
             self._reconcile_with_disk()
@@ -188,9 +191,15 @@ class CheckpointManager:
 
             try:
                 state_dict = torch.load(checkpoint_path, weights_only=True)
-            except Exception:
-                # Older/richer checkpoints (metrics dicts etc.) need the full
-                # loader; fall back so existing files keep loading.
+            except Exception as exc:
+                # Richer checkpoints (metrics dicts etc.) can't load under
+                # weights_only; fall back to the full loader. Log the first
+                # error so a genuine I/O/corruption failure isn't masked — if it
+                # really is corrupt, the fallback below re-raises anyway.
+                self.logger.warning(
+                    f"weights_only load failed for {checkpoint_path} ({exc}); "
+                    "retrying with full loader"
+                )
                 state_dict = torch.load(checkpoint_path, weights_only=False)
             self.logger.info(f"Loaded checkpoint from {checkpoint_path}")
             return state_dict

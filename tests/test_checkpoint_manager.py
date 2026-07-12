@@ -117,6 +117,51 @@ def test_modeltrainer_load_state_dict_stashes_then_applies():
     assert mt._pending_state is None
 
 
+def test_resume_pipeline_seeds_epoch_and_best(tmp_path):
+    # End-to-end resume: real CheckpointManager + mocked ModelTrainer, asserting
+    # start_epoch AND monitor.best_val_loss are both seeded (the class of bug
+    # that shipped last time — start_epoch worked but best was ignored).
+    import logging
+    from types import SimpleNamespace
+
+    try:
+        from training.train_models import TrainingPipeline
+    except Exception as exc:  # heavy optional deps may be absent
+        pytest.skip(f"train_models deps unavailable: {exc}")
+
+    cm = CheckpointManager({"checkpoint_dir": str(tmp_path)})
+    cm.save_checkpoint(
+        {
+            "epoch": 7,
+            "model_state": {"model_state_dict": {"w": torch.zeros(1)}},
+            "best_val_loss": 0.123,
+        },
+        is_best=True,
+    )
+
+    loaded = {}
+
+    class FakeTrainer:
+        def load_state_dict(self, state):
+            loaded["state"] = state
+
+    monitor = SimpleNamespace(best_val_loss=float("inf"))
+
+    p = TrainingPipeline.__new__(TrainingPipeline)  # skip heavy __init__
+    p.args = SimpleNamespace(resume="best")
+    p.checkpoint_manager = cm
+    p.model_trainer = FakeTrainer()
+    p.monitor = monitor
+    p.logger = logging.getLogger("test")
+    p.start_epoch = 0
+
+    p._resume_training_if_needed()
+
+    assert p.start_epoch == 7  # epoch restored
+    assert loaded["state"]["model_state_dict"]  # weights handed to the trainer
+    assert monitor.best_val_loss == 0.123  # prior best seeded, not left at inf
+
+
 if __name__ == "__main__":
     import sys
 

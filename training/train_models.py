@@ -177,7 +177,12 @@ class TrainingPipeline:
         )
         self.model_trainer = ModelTrainer(self.config)
         self.monitor = TrainingMonitor(self.config)
-        self.checkpoint_manager = CheckpointManager(self.config)
+        # Only rank 0 self-heals the shared metadata (matches the rank-0 gating
+        # of save/cleanup in _persist_checkpoint).
+        self.checkpoint_manager = CheckpointManager(
+            self.config,
+            reconcile_on_init=(not self.is_distributed or self.args.local_rank == 0),
+        )
         self.writer = SummaryWriter(
             log_dir=str(Path(self.config["log_dir"]) / "tensorboard")
         )
