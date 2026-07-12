@@ -1,3 +1,37 @@
+## [v0.3.0] - 2026-07-12 - Root reorganization, profitability roadmap, py3.10/3.14 container split
+
+### Repository layout
+- Root reduced from ~30 files to 15 standard ones. Moved: 9 root docs →
+  `docs/` (root `VAULT_SETUP.md` renamed `docs/VAULT_INTEGRATION.md` to avoid
+  colliding with the existing setup guide); 13 entry-point scripts
+  (`train_*.py`, `debug_training.py`, `analyze_trades.py`,
+  `check_paper_balances.py`, `reset_paper_trading.py`,
+  `native_console_dashboard.py`) → `scripts/` (each given a repo-root
+  `sys.path` bootstrap); `Dockerfile.minimal`/`Dockerfile.simple` → `docker/`;
+  `prometheus.yml` + `grafana/` + `loki/` + `promtail/` → `observability/`;
+  `requirements_coreml.txt`/`requirements_ydf.txt` → `requirements/`.
+  All references updated (docker-compose mounts, ansible playbooks,
+  `scripts/run_training.sh`, Apple-container scripts, docs, README links).
+
+### Containers
+- New `docker/Dockerfile.ml310` + `elvis-ml-trainer` compose service
+  (profile `ml`): isolates the Python 3.10-only ML stack
+  (tensorflow/ydf/coremltools — no 3.14 wheels) in its own container, sharing
+  only the `models/` volume with the Python 3.14 bot. Run:
+  `docker compose --profile ml run --rm elvis-ml-trainer`.
+
+### Since v0.2.0 (merged PRs)
+- Profitability roadmap: all 15 mechanisms implemented + wired behind env
+  flags, 323 new tests (#36).
+- Checkpoint lifecycle: best/latest tracking, bounded cleanup, self-healing
+  metadata, `--resume latest|best` (#34).
+- Guarded optional xgboost/lightgbm imports; training pipeline imports
+  without them (#35).
+- Tracked load-bearing WIP modules `main.py` already imported (fresh clones
+  of main could not start the bot before this).
+- Docs/cleanup: mermaid rendering fix, dead `.cursor/rules` and stray
+  `plugin.json` removed (#31, #32, #33).
+
 ## [v0.1.0] - 2026-07-02 - First tagged release
 
 First versioned release. Docker image published to
