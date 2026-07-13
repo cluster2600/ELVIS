@@ -351,10 +351,11 @@ class BinanceExecutor(BaseExecutor):
         self, symbol: str, side: str, quantity: float, price: float = None
     ) -> Dict[str, Any]:
         try:
-            if not price:
-                # No caller-supplied price: refuse rather than fill at the
-                # hardcoded mock (mock fills once booked entries at $116,500
-                # while BTC traded at $64k, fabricating +$816 "profits").
+            if price is None or price <= 0:
+                # No valid caller-supplied price: refuse rather than fill at
+                # the hardcoded mock (mock fills once booked entries at
+                # $116,500 while BTC traded at $64k, fabricating +$816
+                # "profits").
                 self.logger.error(
                     f"[PAPER TRADE] REFUSED {side} {symbol}: no live price supplied"
                 )
@@ -391,15 +392,19 @@ class BinanceExecutor(BaseExecutor):
                 # notional (were hardcoded -$50/+$25 from the $1000 era —
                 # relics #6 and #7 — which shadow-closed positions in
                 # conflict with the main loop's exits)
+                # NOTE: these NETTING thresholds apply to the OPPOSITE
+                # position when an incoming order would offset it — distinct
+                # semantics (and env vars) from main._stop_loss_threshold,
+                # which stops out the position itself via ELVIS_SL_PCT.
                 _opp_notional = float(opposite_position[3]) * float(
                     opposite_position[4]
                 )
                 try:
-                    _sl_pct = float(os.getenv("ELVIS_SL_PCT", "0.005"))
+                    _sl_pct = float(os.getenv("ELVIS_NET_SL_PCT", "0.005"))
                 except ValueError:
                     _sl_pct = 0.005
                 try:
-                    _tp_pct = float(os.getenv("ELVIS_TP_PCT", "0.0025"))
+                    _tp_pct = float(os.getenv("ELVIS_NET_TP_PCT", "0.0025"))
                 except ValueError:
                     _tp_pct = 0.0025
                 stop_loss_threshold = -abs(_opp_notional * _sl_pct)
