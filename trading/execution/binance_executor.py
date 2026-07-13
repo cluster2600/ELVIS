@@ -351,7 +351,16 @@ class BinanceExecutor(BaseExecutor):
         self, symbol: str, side: str, quantity: float, price: float = None
     ) -> Dict[str, Any]:
         try:
-            current_price = price if price else self._get_mock_price(symbol)
+            if price is None or price <= 0:
+                # No valid caller-supplied price: refuse rather than fill at
+                # the hardcoded mock (mock fills once booked entries at
+                # $116,500 while BTC traded at $64k, fabricating +$816
+                # "profits").
+                self.logger.error(
+                    f"[PAPER TRADE] REFUSED {side} {symbol}: no live price supplied"
+                )
+                return {}
+            current_price = price
             fee = self.fee_calculator.calculate_trading_fee(
                 current_price, quantity, is_maker=False, is_futures=True
             )
@@ -379,11 +388,27 @@ class BinanceExecutor(BaseExecutor):
                 # Only close opposite position if stop loss or profit taking conditions are met
                 close_opposite = False
 
-                # 🎯 BIGGER TRADES OPTIMIZED RISK MANAGEMENT
-                stop_loss_threshold = (
-                    -50.0
-                )  # Larger stop for bigger positions: $50.00 loss per position
-                profit_target = 25.0  # Bigger target for larger positions: $25.00 profit per position
+                # Netting thresholds as % of the OPPOSITE position's
+                # notional (were hardcoded -$50/+$25 from the $1000 era —
+                # relics #6 and #7 — which shadow-closed positions in
+                # conflict with the main loop's exits)
+                # NOTE: these NETTING thresholds apply to the OPPOSITE
+                # position when an incoming order would offset it — distinct
+                # semantics (and env vars) from main._stop_loss_threshold,
+                # which stops out the position itself via ELVIS_SL_PCT.
+                _opp_notional = float(opposite_position[3]) * float(
+                    opposite_position[4]
+                )
+                try:
+                    _sl_pct = float(os.getenv("ELVIS_NET_SL_PCT", "0.005"))
+                except ValueError:
+                    _sl_pct = 0.005
+                try:
+                    _tp_pct = float(os.getenv("ELVIS_NET_TP_PCT", "0.0025"))
+                except ValueError:
+                    _tp_pct = 0.0025
+                stop_loss_threshold = -abs(_opp_notional * _sl_pct)
+                profit_target = abs(_opp_notional * _tp_pct)
 
                 if potential_pnl < stop_loss_threshold:
                     self.logger.warning(
@@ -413,10 +438,10 @@ class BinanceExecutor(BaseExecutor):
                         existing_quantity = float(opposite_position[4])
                         new_quantity = existing_quantity - quantity
 
-                        if new_quantity <= 0.000001:
-                            close_open_position(symbol, opposite_side)
-                        else:
-                            close_open_position(symbol, opposite_side)
+                        # Fully close the opposite position; if this order only
+                        # partially offset it, re-open the remainder.
+                        close_open_position(symbol, opposite_side)
+                        if new_quantity > 0.000001:
                             add_open_position(
                                 symbol,
                                 opposite_side,

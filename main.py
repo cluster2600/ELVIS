@@ -1212,8 +1212,15 @@ def main(mode: str, log_level: str):
                             except Exception as e:
                                 logger.debug(f"LLM sentiment analysis failed: {e}")
 
-                        # BALANCED STARTER STRATEGY - Only execute if not main strategy
-                        if strategy_mode != "balanced":
+                        # BALANCED STARTER STRATEGY - Only execute if not main strategy.
+                        # Gated OFF by default: it trades independently with a
+                        # hardcoded $1000 notional and its own bookkeeping,
+                        # bypassing the winrate filter, roadmap gates, Kelly
+                        # cap and cooldowns entirely.
+                        if (
+                            strategy_mode != "balanced"
+                            and os.getenv("ELVIS_BALANCED_STARTER", "0") == "1"
+                        ):
                             try:
                                 from trading.strategies.balanced_starter import (
                                     BalancedStarterStrategy,
@@ -1971,12 +1978,15 @@ def main(mode: str, log_level: str):
                                                     # Column order is pinned by
                                                     # tests/test_roadmap_wiring.py
                                                     _PNL_IDX = 6
+                                                    _SIDE_IDX = 3
                                                     _kelly_f = kelly_from_trades(
                                                         [
                                                             {"pnl": t[_PNL_IDX]}
                                                             for t in get_all_trades(
                                                                 limit=200
                                                             )
+                                                            if t[_SIDE_IDX]
+                                                            in ("BUY", "SELL")
                                                         ]
                                                     )
                                                     _kelly_cap = (
@@ -2159,33 +2169,26 @@ def main(mode: str, log_level: str):
                                         if quantity == 0 or entry_price <= 0:
                                             continue
 
-                                        # Get current price for this position
-                                        if pos_symbol == symbol:
-                                            position_current_price = current_price
-                                        else:
-                                            # Try to get current price from price_fetcher
-                                            position_current_price = (
-                                                price_fetcher.get_current_price(
-                                                    pos_symbol
-                                                )
+                                        # Get current price for this position.
+                                        # ALWAYS fetch per pos_symbol: the old
+                                        # `pos_symbol == symbol` shortcut paired
+                                        # the leftover loop symbol with a price
+                                        # computed from the BTC dataframe, so
+                                        # BNB positions were closed against BTC
+                                        # prices (fake -$553 "losses"). And a
+                                        # mock-price fallback here once booked a
+                                        # fictional +$816 close at $116,500 —
+                                        # if no live price exists, SKIP the
+                                        # position this cycle; fiction never
+                                        # enters the books.
+                                        position_current_price = (
+                                            price_fetcher.get_current_price(pos_symbol)
+                                        )
+                                        if not position_current_price:
+                                            logger.warning(
+                                                f"No live price for {pos_symbol}; skipping exit checks this cycle"
                                             )
-                                            if position_current_price is None:
-                                                # Fallback to executor's mock price for proper P&L calculation
-                                                try:
-                                                    position_current_price = (
-                                                        executor._get_mock_price(
-                                                            pos_symbol
-                                                        )
-                                                    )
-                                                    logger.debug(
-                                                        f"Using fallback mock price for {pos_symbol}: ${position_current_price:.2f}"
-                                                    )
-                                                except:
-                                                    # Final fallback - use entry price (no P&L change)
-                                                    position_current_price = entry_price
-                                                    logger.warning(
-                                                        f"Could not get price for {pos_symbol}, using entry price"
-                                                    )
+                                            continue
 
                                         # Calculate P&L percentage
                                         if side.upper() == "BUY":  # LONG position
