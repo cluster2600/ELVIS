@@ -38,7 +38,7 @@ def test_database_integration():
     logger.info("2. Testing BUY trade recording...")
     try:
         record_trade("BTCUSDT", "BUY", 105000.0, 0.001, 0.0, 0.42)
-        add_open_position("BTCUSDT", 105000.0, 0.001, 1.0)
+        add_open_position("BTCUSDT", "BUY", 105000.0, 0.001, 1.0)
         logger.info("✅ BUY trade recorded successfully")
     except Exception as e:
         logger.error(f"❌ BUY trade recording failed: {e}")
