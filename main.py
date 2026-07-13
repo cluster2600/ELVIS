@@ -255,6 +255,22 @@ def _protection_floor(mode: str, current_balance: float, baseline_state: dict):
     return baseline * pct, baseline, pct
 
 
+def _stop_loss_threshold(entry_price: float, quantity: float) -> float:
+    """Negative USD stop-loss threshold as a percent of position notional.
+
+    ELVIS_SL_PCT (default 0.005 = 0.5%) of entry*quantity. Replaces the
+    FOURTH $1000-era absolute (a hardcoded -$15 that micro-notional
+    positions could mathematically never hit, so losers sat open forever
+    and the feedback loop starved of closed trades). A malformed env value
+    falls back to the default instead of skipping the stop-loss check.
+    """
+    try:
+        pct = float(os.getenv("ELVIS_SL_PCT", "0.005"))
+    except ValueError:
+        pct = 0.005
+    return -abs(entry_price * quantity * pct)
+
+
 def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
     """Adaptive-ensemble feedback (#11): store each member's vote at entry.
 
@@ -2128,16 +2144,10 @@ def main(mode: str, log_level: str):
                                                 / entry_price
                                             ) * 100
 
-                                        # 🎯 STOP LOSS as % of position notional
-                                        # (was a hardcoded -$15 from the $1000
-                                        # era: at micro-notional positions it
-                                        # could never trigger, so losers sat
-                                        # open forever and the feedback loop
-                                        # starved of closed trades)
-                                        stop_loss_threshold_usd = -abs(
-                                            entry_price
-                                            * quantity
-                                            * float(os.getenv("ELVIS_SL_PCT", "0.005"))
+                                        # 🎯 STOP LOSS as % of position
+                                        # notional (see _stop_loss_threshold)
+                                        stop_loss_threshold_usd = _stop_loss_threshold(
+                                            entry_price, quantity
                                         )
 
                                         # Calculate absolute dollar loss
@@ -2337,6 +2347,15 @@ def main(mode: str, log_level: str):
                             logger.info(
                                 "✅ Multi-symbol trading handled by main loop - BNBUSDT included"
                             )
+
+                            # The LEGACY single-symbol execution below reuses
+                            # whatever signal/confidence the LAST loop symbol
+                            # left behind — executing it again double-places
+                            # orders and double-records cooldown for that
+                            # symbol every cycle. Neutralize unless explicitly
+                            # re-enabled.
+                            if os.getenv("ELVIS_LEGACY_EXECUTION", "0") != "1":
+                                signal = "HOLD"
 
                             # Continue with execution logic
                             current_price = data.iloc[-1]["close"]
