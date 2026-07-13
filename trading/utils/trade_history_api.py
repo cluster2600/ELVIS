@@ -3,7 +3,7 @@ import threading
 import time
 
 import psutil
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify
 from flask_cors import CORS
 
 try:
@@ -583,21 +583,20 @@ def market_depth():
 
 @app.route("/", methods=["GET"])
 def root():
-    """Redirect to dashboard"""
-    return dashboard()
+    """API root: point humans at the real dashboards.
 
-
-@app.route("/dashboard", methods=["GET"])
-def dashboard():
-    """Serve the trading dashboard HTML"""
-    try:
-        # Get the absolute path to the static directory
-        static_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static"
-        )
-        return send_from_directory(static_dir, "index.html")
-    except Exception as e:
-        return jsonify({"error": f"Dashboard not found: {str(e)}"}), 404
+    The static HTML dashboard was removed: it had been unreachable since
+    the X-API-Key hardening (the page 401'd and its JS sent no key), and
+    the console TUI (scripts/native_console_dashboard.py) is the
+    maintained dashboard.
+    """
+    return jsonify(
+        {
+            "service": "trade_history_api",
+            "dashboard": "run scripts/native_console_dashboard.py",
+            "health": "/health",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
