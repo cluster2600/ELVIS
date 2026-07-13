@@ -69,7 +69,7 @@ class NativeConsoleDashboard:
         """
         try:
             headers = {}
-            api_key = os.getenv("API_KEY")
+            api_key = self._dashboard_api_key()
             if api_key:
                 headers["X-API-Key"] = api_key
             response = requests.get(
@@ -83,6 +83,23 @@ class NativeConsoleDashboard:
             return data
         except Exception:
             return None
+
+    def _dashboard_api_key(self):
+        """X-API-Key for the trade-history API: env API_KEY first (dev/CI),
+        then OpenBao at secrets/dashboard field api_key — same resolution the
+        server itself uses, so vault-backed setups need no env plumbing."""
+        if not hasattr(self, "_api_key_resolved"):
+            try:
+                from utils.secrets_manager import resolve_dashboard_api_key
+
+                self._api_key_resolved = resolve_dashboard_api_key()
+            except Exception:
+                # NOT leftover duplication: this outer guard covers the case
+                # where utils.secrets_manager itself can't import (stripped
+                # TUI-only env without the full secrets stack) — the env var
+                # is then the only possible source.
+                self._api_key_resolved = os.getenv("API_KEY")
+        return self._api_key_resolved
 
     def _get_json_cached(self, url, params=None, ttl=5.0):
         """GET a JSON endpoint through a small TTL cache.
