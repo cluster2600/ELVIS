@@ -237,7 +237,6 @@ Prometheus server can reach them without the header.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/` | Redirects to the dashboard HTML |
 | GET | `/` | JSON pointer to the console TUI (the static HTML dashboard was removed — unreachable since the X-API-Key hardening) |
 | GET | `/trades` | Recent trades since the last session reset (capped) |
 | GET | `/trades/count` | Total trade count |

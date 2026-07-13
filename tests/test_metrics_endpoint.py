@@ -75,3 +75,16 @@ def test_metrics_exempt_from_api_key(client, monkeypatch):
     assert client.get("/metrics").status_code == 200
     # A normal data route is still protected.
     assert client.get("/trades/count").status_code == 401
+
+
+def test_root_returns_tui_pointer(client):
+    """/ replaced the removed static dashboard with a JSON pointer."""
+    import trading.utils.trade_history_api as api
+
+    with patch.object(api, "_API_KEY", "test-key"):
+        resp = client.get("/", headers={"X-API-Key": "test-key"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["service"] == "trade_history_api"
+    assert "native_console_dashboard" in body["dashboard"]
+    assert body["health"] == "/health"

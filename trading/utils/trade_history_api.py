@@ -583,7 +583,7 @@ def market_depth():
 
 @app.route("/", methods=["GET"])
 def root():
-    """API root: point humans at the real dashboards.
+    """API root: point humans at the real dashboard.
 
     The static HTML dashboard was removed: it had been unreachable since
     the X-API-Key hardening (the page 401'd and its JS sent no key), and
