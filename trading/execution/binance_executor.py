@@ -438,10 +438,10 @@ class BinanceExecutor(BaseExecutor):
                         existing_quantity = float(opposite_position[4])
                         new_quantity = existing_quantity - quantity
 
-                        if new_quantity <= 0.000001:
-                            close_open_position(symbol, opposite_side)
-                        else:
-                            close_open_position(symbol, opposite_side)
+                        # Fully close the opposite position; if this order only
+                        # partially offset it, re-open the remainder.
+                        close_open_position(symbol, opposite_side)
+                        if new_quantity > 0.000001:
                             add_open_position(
                                 symbol,
                                 opposite_side,
