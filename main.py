@@ -1703,6 +1703,37 @@ def main(mode: str, log_level: str):
                                                 f"⚠️ Roadmap signal gates error: {gate_error}"
                                             )
 
+                                    # 📉 DIRECTIONAL PERFORMANCE GUARD — raise
+                                    # the confidence bar for a side that's been
+                                    # losing (learned from realized PnL; the
+                                    # honest book showed SELL winning 3% of its
+                                    # last 95 trades). Self-relaxing.
+                                    if (
+                                        signal in ["BUY", "SELL"]
+                                        and os.getenv("ELVIS_DIRECTIONAL_GUARD", "1")
+                                        == "1"
+                                    ):
+                                        try:
+                                            from trading.signals.directional_guard import (
+                                                required_confidence,
+                                            )
+
+                                            _floor = required_confidence(
+                                                signal, symbol=symbol
+                                            )
+                                            if confidence < _floor:
+                                                logger.warning(
+                                                    f"📉 {symbol} {signal} throttled: "
+                                                    f"confidence {confidence:.2f} < "
+                                                    f"{_floor:.2f} bar (this side has "
+                                                    f"been losing) -> HOLD"
+                                                )
+                                                signal, confidence = "HOLD", 0.0
+                                        except Exception as dg_error:
+                                            logger.error(
+                                                f"⚠️ Directional guard error: {dg_error}"
+                                            )
+
                                     logger.info(
                                         f"🎯 {symbol} FINAL SIGNAL: {signal} with confidence {confidence:.3f}"
                                     )

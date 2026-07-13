@@ -1086,16 +1086,17 @@ class EnsembleStrategy(BaseStrategy):
             # Remove the HOLD elimination that was forcing BUY signals
             # This was the core bug - bot never generated SELL signals!
 
-            # CRITICAL FIX: Higher confidence thresholds to stop overtrading
-            # Low win rate (9.48%) means signals are terrible quality
-            if signal in ["BUY", "SELL"]:
-                confidence = max(
-                    confidence, 0.85
-                )  # Much higher threshold for quality trades
-            else:
-                confidence = max(
-                    confidence, 0.70
-                )  # Higher for HOLD to reduce frequency
+            # Confidence flattening was INVERTED: max(confidence, 0.85) forced
+            # every BUY/SELL to look near-certain, blinding the win-rate filter
+            # (which then approved everything), maxing confidence-scaled
+            # position size, and erasing the gradient the adaptive ensemble and
+            # directional guard rely on. Let the real ensemble confidence flow.
+            # ELVIS_CONFIDENCE_FLATTEN=1 restores the old behavior.
+            if os.getenv("ELVIS_CONFIDENCE_FLATTEN", "0") == "1":
+                if signal in ["BUY", "SELL"]:
+                    confidence = max(confidence, 0.85)
+                else:
+                    confidence = max(confidence, 0.70)
 
             self.logger.info(
                 f"🎯 FINAL ENSEMBLE SIGNAL: {signal} with {confidence:.3f} confidence"
