@@ -255,6 +255,22 @@ def _protection_floor(mode: str, current_balance: float, baseline_state: dict):
     return baseline * pct, baseline, pct
 
 
+def _stop_loss_threshold(entry_price: float, quantity: float) -> float:
+    """Negative USD stop-loss threshold as a percent of position notional.
+
+    ELVIS_SL_PCT (default 0.005 = 0.5%) of entry*quantity. Replaces the
+    FOURTH $1000-era absolute (a hardcoded -$15 that micro-notional
+    positions could mathematically never hit, so losers sat open forever
+    and the feedback loop starved of closed trades). A malformed env value
+    falls back to the default instead of skipping the stop-loss check.
+    """
+    try:
+        pct = float(os.getenv("ELVIS_SL_PCT", "0.005"))
+    except ValueError:
+        pct = 0.005
+    return -abs(entry_price * quantity * pct)
+
+
 def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
     """Adaptive-ensemble feedback (#11): store each member's vote at entry.
 
@@ -1503,7 +1519,12 @@ def main(mode: str, log_level: str):
                                     )
 
                                     # 🎯 HIGH WIN RATE FILTERING SYSTEM
-                                    if signal in ["BUY", "SELL"] and confidence >= 0.6:
+                                    if (
+                                        signal in ["BUY", "SELL"]
+                                        and confidence >= 0.6
+                                        and os.getenv("ELVIS_WINRATE_FILTER", "1")
+                                        == "1"
+                                    ):
                                         try:
                                             from trading.analysis.high_winrate_filter import (
                                                 HighWinRateFilter,
@@ -1976,6 +1997,12 @@ def main(mode: str, log_level: str):
                                                         "BUY",
                                                         logger,
                                                     )
+                                                    trading_loop.cooldown_manager.record_trade(
+                                                        symbol,
+                                                        "BUY",
+                                                        position_size,
+                                                        confidence,
+                                                    )
                                                 else:
                                                     logger.error(
                                                         f"❌ [FAIL] Failed to execute {symbol} BUY order"
@@ -1999,6 +2026,12 @@ def main(mode: str, log_level: str):
                                                         "SELL",
                                                         logger,
                                                     )
+                                                    trading_loop.cooldown_manager.record_trade(
+                                                        symbol,
+                                                        "SELL",
+                                                        position_size,
+                                                        confidence,
+                                                    )
                                                 else:
                                                     logger.error(
                                                         f"❌ [FAIL] Failed to execute {symbol} SELL order"
@@ -2011,7 +2044,7 @@ def main(mode: str, log_level: str):
 
                                     else:
                                         logger.info(
-                                            f"📊 {symbol} Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 90% threshold)"
+                                            f"📊 {symbol} Signal: {signal} | Confidence: {confidence:.3f} | Action: HOLD (below 0.60 execution threshold)"
                                         )
 
                                 except Exception as e:
@@ -2111,10 +2144,11 @@ def main(mode: str, log_level: str):
                                                 / entry_price
                                             ) * 100
 
-                                        # 🎯 HIGH WIN RATE STOP LOSS: Tighter stops for better win rate
-                                        stop_loss_threshold_usd = (
-                                            -15.0
-                                        )  # Max loss per position: $15.00
+                                        # 🎯 STOP LOSS as % of position
+                                        # notional (see _stop_loss_threshold)
+                                        stop_loss_threshold_usd = _stop_loss_threshold(
+                                            entry_price, quantity
+                                        )
 
                                         # Calculate absolute dollar loss
                                         if side.upper() == "BUY":  # LONG position
@@ -2313,6 +2347,15 @@ def main(mode: str, log_level: str):
                             logger.info(
                                 "✅ Multi-symbol trading handled by main loop - BNBUSDT included"
                             )
+
+                            # The LEGACY single-symbol execution below reuses
+                            # whatever signal/confidence the LAST loop symbol
+                            # left behind — executing it again double-places
+                            # orders and double-records cooldown for that
+                            # symbol every cycle. Neutralize unless explicitly
+                            # re-enabled.
+                            if os.getenv("ELVIS_LEGACY_EXECUTION", "0") != "1":
+                                signal = "HOLD"
 
                             # Continue with execution logic
                             current_price = data.iloc[-1]["close"]

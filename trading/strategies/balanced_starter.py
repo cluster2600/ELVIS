@@ -4,6 +4,7 @@ then adapts based on market conditions and performance.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 
@@ -17,6 +18,24 @@ from utils.paper_trade_db import (
     get_open_positions,
     record_trade,
 )
+
+
+def emergency_close_floor() -> float:
+    """Capital level below which losing positions are force-closed.
+
+    Relative to the CONFIGURED deposit: INITIAL_USDT_BALANCE times
+    ELVIS_EMERGENCY_CLOSE_PCT (default 0.2 — the original 20%-of-deposit
+    rule from the $1000 era, where it was hardcoded as $200). A malformed
+    env value falls back to the default instead of crashing the strategy
+    loop.
+    """
+    from config.config import PAPER_TRADING_CONFIG
+
+    try:
+        pct = float(os.getenv("ELVIS_EMERGENCY_CLOSE_PCT", "0.2"))
+    except ValueError:
+        pct = 0.2
+    return float(PAPER_TRADING_CONFIG.get("INITIAL_USDT_BALANCE", 100.0)) * pct
 
 
 class BalancedStarterStrategy:
@@ -712,9 +731,13 @@ class BalancedStarterStrategy:
                 return {"action": "HOLD", "reason": "No price data"}
 
             # EMERGENCY PORTFOLIO PROTECTION - Check for major losses FIRST
-            if available_capital < 200.0:  # If portfolio dropped below $200
+            # (floor relative to the configured deposit; see
+            # emergency_close_floor for the $200-hardcode history)
+            _emergency_floor = emergency_close_floor()
+            if available_capital < _emergency_floor:
                 self.logger.error(
-                    f"🚨 EMERGENCY: Portfolio at ${available_capital:.2f} - CLOSING ALL LOSING POSITIONS"
+                    f"🚨 EMERGENCY: Portfolio at ${available_capital:.2f} "
+                    f"(< ${_emergency_floor:.2f}) - CLOSING ALL LOSING POSITIONS"
                 )
                 self.emergency_close_losing_positions(current_price)
                 return {

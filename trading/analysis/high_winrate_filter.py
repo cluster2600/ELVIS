@@ -4,6 +4,7 @@ Advanced filtering system for trade quality improvement
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -22,7 +23,9 @@ class HighWinRateFilter:
         self.logger = logger or logging.getLogger(__name__)
 
         # Fewer, bigger trades parameters
-        self.min_confidence_threshold = 0.85  # Minimum 85% confidence for trades
+        self.min_confidence_threshold = float(
+            os.getenv("ELVIS_WINRATE_MIN_CONF", "0.85")
+        )  # min confidence for trades (env-tunable)
         self.confluence_required = 4  # Minimum 4 out of 5 indicators must agree
         self.volatility_threshold = 0.015  # 1.5% volatility threshold (stricter)
 
@@ -201,9 +204,12 @@ class HighWinRateFilter:
             x = np.arange(len(closes))
             slope, intercept = np.polyfit(x, closes, 1)
 
-            # Normalize slope
+            # Normalize slope to PERCENT MOVE OVER THE WHOLE WINDOW.
+            # (Was per-bar percent: on 1m data that demanded >1%/minute
+            # sustained for 20 minutes — mathematically unreachable, so the
+            # filter vetoed 100% of signals forever.)
             avg_price = closes.mean()
-            trend_strength = abs(slope) / avg_price * 100
+            trend_strength = abs(slope) * len(closes) / avg_price * 100
 
             # Determine regime
             if trend_strength > 2:  # Strong trend
