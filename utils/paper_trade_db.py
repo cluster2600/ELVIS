@@ -139,7 +139,17 @@ def init_db():
         conn.close()
 
 
+VALID_SIDES = ("BUY", "SELL", "TEST")
+
+
 def record_trade(symbol, side, price, quantity, pnl=0.0, fee=0.0, timestamp=None):
+    # Reject corrupt rows at the door: a positional-args mistake once wrote
+    # side='105000.0' and poisoned every win-rate/Kelly statistic with a
+    # fake -$63k loss.
+    if str(side).upper() not in VALID_SIDES:
+        print(f"[ERROR] record_trade rejected invalid side {side!r} for {symbol}")
+        return
+    side = str(side).upper()
     if timestamp is None:
         timestamp = datetime.now()
     conn = get_conn()
@@ -180,6 +190,10 @@ def record_trade(symbol, side, price, quantity, pnl=0.0, fee=0.0, timestamp=None
 
 
 def add_open_position(symbol, side, entry_price, quantity, leverage=1.0):
+    if str(side).upper() not in ("BUY", "SELL"):
+        print(f"[ERROR] add_open_position rejected invalid side {side!r} for {symbol}")
+        return
+    side = str(side).upper()
     conn = get_conn()
     if conn is None:
         print(f"[WARNING] Cannot add open position - database not available")
