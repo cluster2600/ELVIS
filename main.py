@@ -235,6 +235,30 @@ def _retrain_strategy_if_due(active_strategy, price_fetcher, logger: logging.Log
         return False
 
 
+def _close_position_by_id(position, exit_price, realized_pnl, logger):
+    """Close ONE open position by its id and book the realized PnL.
+
+    Exits (stop-loss / take-profit / trailing) must NOT route through
+    executor.place_order: that re-runs the open/netting logic, which — when
+    it can't net cleanly — leaves the position open OR spawns a new opposite
+    one. The position then re-triggers its exit every cycle (the take-profit
+    that fired identically every 2s while 20 duplicate positions piled up).
+    close_position deletes the exact row and records the realized trade, so
+    the exit is deterministic and idempotent.
+    """
+    from utils.paper_trade_db import close_position
+
+    try:
+        pos_id = position[0]
+        qty = abs(float(position[4]))
+        fee = abs(float(exit_price)) * qty * 0.0004
+        close_position(pos_id, float(exit_price), float(realized_pnl), fee)
+        return True
+    except Exception as exc:
+        logger.error(f"Close-by-id failed for position {position[0]}: {exc}")
+        return False
+
+
 def _protection_floor(mode: str, current_balance: float, baseline_state: dict):
     """Emergency-stop floor for the portfolio-protection check.
 
@@ -2196,21 +2220,15 @@ def main(mode: str, log_level: str):
                                                 f"🛑 STOP LOSS triggered for {pos_symbol}: ${abs(absolute_loss):.2f} loss (limit: ${abs(stop_loss_threshold_usd):.2f})"
                                             )
                                             try:
-                                                close_signal = (
-                                                    "SELL"
-                                                    if side.upper() == "BUY"
-                                                    else "BUY"
-                                                )
-                                                close_size = abs(quantity)
-                                                success = executor.place_order(
-                                                    pos_symbol,
-                                                    close_signal,
-                                                    close_size,
+                                                success = _close_position_by_id(
+                                                    position,
                                                     position_current_price,
+                                                    absolute_loss,
+                                                    logger,
                                                 )
                                                 if success:
                                                     logger.info(
-                                                        f"🛑 Stop loss executed: {close_signal.upper()} {close_size:.6f} {pos_symbol}"
+                                                        f"🛑 Stop loss closed {pos_symbol} (pnl ${absolute_loss:.2f})"
                                                     )
                                                 else:
                                                     logger.error(
@@ -2251,16 +2269,16 @@ def main(mode: str, log_level: str):
                                                         f"📉 TRAILING STOP hit for {pos_symbol} @ ${_trail_stop:.2f} "
                                                         f"(price ${position_current_price:.2f})"
                                                     )
-                                                    close_signal = (
-                                                        "SELL"
+                                                    _trail_pnl = (
+                                                        (position_current_price - entry_price)
                                                         if side.upper() == "BUY"
-                                                        else "BUY"
-                                                    )
-                                                    if executor.place_order(
-                                                        pos_symbol,
-                                                        close_signal,
-                                                        abs(quantity),
+                                                        else (entry_price - position_current_price)
+                                                    ) * abs(quantity)
+                                                    if _close_position_by_id(
+                                                        position,
                                                         position_current_price,
+                                                        _trail_pnl,
+                                                        logger,
                                                     ):
                                                         logger.info(
                                                             f"📉 Trailing stop executed: {close_signal} "
@@ -2330,17 +2348,11 @@ def main(mode: str, log_level: str):
                                                 f"💰 TAKE PROFIT triggered for {pos_symbol}: ${absolute_profit:.4f} profit (${take_profit_threshold_usd} target)"
                                             )
                                             try:
-                                                close_signal = (
-                                                    "SELL"
-                                                    if side.upper() == "BUY"
-                                                    else "BUY"
-                                                )
-                                                close_size = abs(quantity)
-                                                success = executor.place_order(
-                                                    pos_symbol,
-                                                    close_signal,
-                                                    close_size,
+                                                success = _close_position_by_id(
+                                                    position,
                                                     position_current_price,
+                                                    absolute_profit,
+                                                    logger,
                                                 )
                                                 if success:
                                                     logger.info(
