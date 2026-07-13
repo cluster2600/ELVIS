@@ -94,6 +94,10 @@ class NativeConsoleDashboard:
 
                 self._api_key_resolved = resolve_dashboard_api_key()
             except Exception:
+                # NOT leftover duplication: this outer guard covers the case
+                # where utils.secrets_manager itself can't import (stripped
+                # TUI-only env without the full secrets stack) — the env var
+                # is then the only possible source.
                 self._api_key_resolved = os.getenv("API_KEY")
         return self._api_key_resolved
 
