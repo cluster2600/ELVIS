@@ -24,7 +24,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | Planned |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5a) |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -169,6 +169,36 @@ passed 133 tests; and the selected regression suite passed 25. The full result
 was 796 passed, 9 skipped, 3 deselected, and the same one
 baseline failure: the locally reachable PostgreSQL instance lacks
 `np.trades`. No new failure was introduced.
+
+### M5a implementation record
+
+The first model slice defines immutable, Python 3.10-compatible feature schemas
+without changing runtime model selection. Research and Bonenkamp each receive
+distinct 9- and 11-feature identities because their indicator implementations
+and social inputs are not interchangeable. The tracked YDF artefact and the
+CoreML path also receive distinct 20-feature contracts: the YDF `data_spec.pb`
+order differs from the legacy CoreML order, and their preprocessing and dtypes
+differ.
+
+Each schema owns its ordered names, logical dtypes, and preprocessing version.
+Vectorization rejects missing, boolean, non-numeric, NaN, or infinite values;
+unrelated context keys are allowed. Fitted sklearn-like components must declare
+the exact input dimension and, when available, exact ordered feature names.
+There is no padding, truncation, or implicit default in the contract.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/models/feature_schema.py trading/models/feature_schemas.py
+.venv/bin/python -m pytest tests/test_feature_schema_contracts.py -q
+.venv/bin/python -m black --target-version py310 --check trading/models/feature_schema.py trading/models/feature_schemas.py trading/models/__init__.py tests/test_feature_schema_contracts.py
+.venv/bin/python -m isort --check-only trading/models/feature_schema.py trading/models/feature_schemas.py trading/models/__init__.py tests/test_feature_schema_contracts.py
+.venv/bin/python -m flake8 trading/models/feature_schema.py trading/models/feature_schemas.py trading/models/__init__.py tests/test_feature_schema_contracts.py --max-line-length=88
+```
+
+All 21 M5a contract tests passed. M5 remains in progress until manifests are
+validated before deserialization and the active producers/consumers use these
+schemas.
 
 ## Cut-over policy
 
