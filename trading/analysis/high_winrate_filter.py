@@ -6,11 +6,35 @@ Advanced filtering system for trade quality improvement
 import logging
 import os
 from datetime import datetime, timedelta
+from numbers import Real
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import ta
+
+
+def classify_take_profit_regime(regime: object, volatility: object) -> Optional[str]:
+    """Translate a validated topology observation into a take-profit profile."""
+    if (
+        not isinstance(regime, str)
+        or not isinstance(volatility, Real)
+        or isinstance(volatility, (bool, np.bool_))
+    ):
+        return None
+    try:
+        volatility_value = float(volatility)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not np.isfinite(volatility_value) or volatility_value < 0.0:
+        return None
+    if volatility_value >= 0.05:
+        return "CHOPPY"
+    if regime in {"trending_strong", "trending_moderate"}:
+        return "TRENDING"
+    if regime in {"trending_weak", "ranging"}:
+        return "RANGING"
+    return None
 
 
 class HighWinRateFilter:
@@ -197,7 +221,12 @@ class HighWinRateFilter:
         """Detect current market regime for optimal trading conditions"""
         try:
             if len(historical_data) < 20:
-                return {"regime": "unknown", "strength": 0, "favorable": False}
+                return {
+                    "regime": "unknown",
+                    "strength": 0,
+                    "favorable": False,
+                    "take_profit_regime": None,
+                }
 
             # Calculate trend using linear regression
             closes = historical_data["close"].tail(20)
@@ -227,7 +256,7 @@ class HighWinRateFilter:
 
             # Calculate volatility
             returns = closes.pct_change().dropna()
-            volatility = returns.std() * np.sqrt(1440)  # Annualized for 1-min data
+            volatility = returns.std() * np.sqrt(1440)  # Dailyized from 1-min data
 
             return {
                 "regime": regime,
@@ -235,11 +264,17 @@ class HighWinRateFilter:
                 "strength": trend_strength,
                 "volatility": volatility,
                 "favorable": favorable and volatility < 0.05,  # Not too volatile
+                "take_profit_regime": classify_take_profit_regime(regime, volatility),
             }
 
         except Exception as e:
             self.logger.error(f"Market regime detection error: {e}")
-            return {"regime": "unknown", "strength": 0, "favorable": False}
+            return {
+                "regime": "unknown",
+                "strength": 0,
+                "favorable": False,
+                "take_profit_regime": None,
+            }
 
     def _analyze_volatility(self, historical_data: pd.DataFrame) -> Dict:
         """Analyze volatility for trade timing"""

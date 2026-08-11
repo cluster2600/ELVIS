@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7e MACD contract) |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7f TP-regime contract) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -726,6 +726,49 @@ the numerical identity `macd_histogram == macd - signal_line`, alongside the
 existing divergence matrix, two-candle input boundary, and per-symbol wiring
 gates. The full suite passes 1,054 tests, skips 9, deselects 3, and keeps only
 the unchanged local PostgreSQL baseline failure because `np.trades` is absent.
+
+### M7f take-profit regime producer-contract implementation record
+
+The live cache currently stores `MarketRegimeDetector.regime.class`, whose
+values (`optimal`, `favorable`, `neutral`, and `unfavorable`) combine trend,
+volatility, momentum, liquidity, and trading-session quality. They cannot be
+mapped honestly to the topological labels expected by `dynamic_take_profit`;
+all four therefore fell through to its `RANGING` fallback. The detector's own
+trend calculation also has a separate unit inconsistency and is not activated
+as a take-profit source in this slice.
+
+`HighWinRateFilter` already calculates a per-symbol topology on the same
+`symbol_history` using the corrected whole-window trend strength. Its result
+now includes a dedicated `take_profit_regime`, produced by a small pure
+classifier: dailyized one-minute volatility at or above 5% yields `CHOPPY`;
+strong or moderate trends yield `TRENDING`; known weak or ranging observations
+yield `RANGING`;
+unknown, malformed, boolean, non-finite, or negative observations yield
+`None`. `REVERSAL` remains supported by the exit function but is deliberately
+not produced until ELVIS has an explicit reversal detector.
+
+This commit adds only the producer contract. `main.py` still uses its legacy
+cache, so no fee-gate or exit target changes authority yet. The next slice can
+observe the new field in shadow mode, clear stale values on missing analysis,
+and make the fee gate fail closed before a separately reviewed cut-over.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_winrate_regime_units.py tests/test_roadmap_wiring.py tests/test_exits.py
+.venv/bin/black --target-version py310 --check trading/analysis/high_winrate_filter.py tests/test_winrate_regime_units.py
+.venv/bin/isort --check-only trading/analysis/high_winrate_filter.py tests/test_winrate_regime_units.py
+.venv/bin/flake8 tests/test_winrate_regime_units.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/analysis/high_winrate_filter.py tests/test_winrate_regime_units.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 69 tests. It covers the complete profile matrix,
+strict volatility boundary, malformed and non-finite inputs, the producer
+field, short-history failure, and the invariant that the classifier never
+emits `REVERSAL` or a quality label. The full suite passes 1,072 tests, skips 9,
+deselects 3, and keeps only the unchanged local PostgreSQL baseline failure
+because `np.trades` is absent.
 
 ## Cut-over policy
 

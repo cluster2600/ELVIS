@@ -42,7 +42,10 @@ the live loop) is wired into `main.py` behind an environment flag.
   The active market-frame producer emits `macd_histogram` from the same MACD
   calculation as `macd` and `signal_line`.
 - **#10 Dynamic take profit by regime** — `trading.execution.exits.dynamic_take_profit`
-  Position loop, replaces the fixed $8 target · `ELVIS_DYNAMIC_TP=1`
+  Position loop · `ELVIS_DYNAMIC_TP=1`. The per-symbol analysis now exposes a
+  distinct `take_profit_regime`; the legacy cache still holds a quality label
+  and therefore uses the conservative `RANGING` fallback until the M7 shadow
+  and cut-over slices. `REVERSAL` is supported but not currently produced.
 - **#11 Adaptive ML ensemble weights** — `trading.signals.adaptive_ensemble` + `trading.signals.model_feedback`
   Ensemble voting modulated by a per-model feedback loop · `ELVIS_ADAPTIVE_ENSEMBLE=1` —
   [how it works](#item-11-adaptive-ensemble--wired-via-a-real-feedback-pipeline)
@@ -75,8 +78,10 @@ signal gates or sizing.
    trading hours, MACD divergence — each toggleable via its config key), then
    optional order-flow confirmation and MTF alignment. Any veto downgrades the
    signal to HOLD and logs the reason.
-2. **Regime cache** — the regime detected for each symbol is cached on
-   `main._last_regime` and reused by the dynamic-TP and fee-gate stages.
+2. **Regime cache** — `main._last_regime` still caches the detector's quality
+   label. M7f adds the separate, purpose-specific `take_profit_regime` producer,
+   but does not switch the fee gate or open-position exits before shadow
+   comparison and stale-cache handling are in place.
 3. **Sizing** — `volume_multiplier(symbol_history)` scales the adaptive position
    size (0.5x–2.0x by that symbol's volume vs its 20-bar mean); the optional
    Kelly stage derives f* from the last 200 paper trades' PnL and *caps* (never
@@ -86,10 +91,12 @@ signal gates or sizing.
    taker fees + funding); non-viable trades and calculation failures are skipped
    with a logged breakdown.
 5. **Exits** — the position loop updates a per-position `TrailingStop`
-   (2% giveback from the high-water mark, both sides) and, when the symbol's
-   regime is known, replaces the fixed $8 take-profit with the regime target
-   (TRENDING 5%, REVERSAL 1%, RANGING 0.25%, CHOPPY 0.1% — percentage-based;
-   the roadmap's absolute dollar offsets don't transfer across price levels).
+   (2% giveback from the high-water mark, both sides). The dynamic target
+   function supports TRENDING 5%, REVERSAL 1%, RANGING 0.25%, and CHOPPY 0.1%,
+   but the legacy cache currently reaches its RANGING fallback; M7f defines the
+   correct producer contract before a later cut-over. Percentages are used
+   because the roadmap's absolute dollar offsets do not transfer across price
+   levels.
 
 ## Why three flags default off
 
