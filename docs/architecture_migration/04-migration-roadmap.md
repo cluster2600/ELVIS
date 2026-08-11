@@ -24,7 +24,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5c Research) |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5c strategies) |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -263,8 +263,47 @@ Verification at implementation time:
 The Research-focused suite passed 22 tests and the cumulative M5 contract suite
 passed 52. The full non-performance suite reached 839 passed, 9 skipped, 3
 deselected, and the same baseline PostgreSQL failure (`np.trades` is absent).
-M5 remains in progress for Bonenkamp and the active Ensemble model adapters.
-Signal-policy fallbacks are intentionally left to M6.
+At this Research checkpoint, M5 remained in progress for Bonenkamp and the
+active Ensemble model adapters. Signal-policy fallbacks are intentionally left
+to M6.
+
+### M5c Bonenkamp implementation record
+
+`BonenkampHFTStrategy` now applies its own 9- or 11-feature schema at both
+training and inference. It no longer returns an all-zero vector, predicts on
+unscaled data, or prepares a model vector while operating its untrained RSI
+fallback. A trained instance requires the declared fitted scaler and returns
+`HOLD` without invoking the classifier when the contract fails.
+
+Construction now attempts to load the model through the strict sibling
+manifest. Schema, exact scikit-learn version, component hashes, concrete
+Random-Forest/StandardScaler types, fitted dimensions, and binary class order
+must all pass before the pair is assigned. Consequently, the ignored local
+pickles left by the baseline are not activated without a compatible manifest.
+
+Retraining uses cloned candidates and a `TimeSeriesSplit`; it persists the
+validated pair before changing any active model, scaler, timestamp, or score
+history. Cross-validation, mono-class, and persistence failures therefore
+preserve the prior in-memory state. The former procedural test file was reduced
+to isolated pytest assertions under `tmp_path`, so it no longer rewrites the
+working-copy artefacts or reports return-value tests as passing.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/strategies/bonenkamp_hft_strategy.py
+.venv/bin/python -m pytest tests/test_bonenkamp_feature_schema.py tests/test_bonenkamp_strategy.py -q
+.venv/bin/python -m pytest tests/test_feature_schema_contracts.py tests/test_feature_artifact_manifest.py tests/test_research_feature_schema.py tests/test_research_strategy_features.py tests/test_feature_fix.py tests/test_bonenkamp_feature_schema.py tests/test_bonenkamp_strategy.py -q
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The Bonenkamp-focused suite passed 24 tests and the cumulative M5 contract
+suite passed 76. The full non-performance suite reached 856 passed, 9 skipped,
+3 deselected, and the same baseline PostgreSQL failure (`np.trades` is absent).
+M5 remains in progress for the active Ensemble model adapters. Transactional
+multi-file artefact publication remains a later persistence hardening slice;
+the current manifest is atomic and written last, so interrupted bundles reject
+closed on the next load.
 
 ## Cut-over policy
 

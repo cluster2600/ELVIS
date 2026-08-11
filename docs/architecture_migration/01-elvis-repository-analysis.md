@@ -147,12 +147,13 @@ branches for all of these shapes.
 Feature ownership is similarly scattered:
 
 - `EnsembleStrategy.REQUIRED_FEATURES` contains 20 CoreML inputs;
-- research and Bonenkamp strategies construct either 9 or 11 inputs;
-- the locally present research model and scaler report 11 inputs, but both are
-  ignored by Git (`*.pkl`), can be rewritten by procedural tests, and are not
-  versioned deployable artefacts;
-- `tests/test_feature_fix.py` still claims that 9 is the only correct shape and
-  returns booleans instead of asserting, so pytest does not enforce the claim;
+- research and Bonenkamp strategies historically constructed either 9 or 11
+  inputs without declaring which variant an artefact used;
+- the locally present research and Bonenkamp model/scaler pairs report 11
+  inputs, but all are ignored by Git (`*.pkl`) and are not versioned deployable
+  artefacts; at the audited baseline, procedural tests also rewrote them;
+- the migration now tests the distinct 9- and 11-feature contracts with
+  isolated pytest assertions instead of relying on those local files;
 - the trade-learned model stores `feature_names` when produced by its current
   trainer, but old direct-model artefacts are accepted without a schema; and
 - multiple feature pipelines and configuration files declare other dimensions

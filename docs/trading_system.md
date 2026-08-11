@@ -165,6 +165,11 @@ How it actually works:
   skipped — `ydf`, `tensorflow`, and `coremltools` have no Python 3.14 wheels and
   are guarded behind `try/except`, so on 3.14 the strategy runs on technical
   analysis plus whichever pure-Python sources are present.
+- **Research and Bonenkamp artefacts are contract-gated.** Their separate 9- and
+  11-feature schemas define order and preprocessing. A model/scaler pair is
+  activated only when its sibling manifest, hashes, runtime version, concrete
+  types, dimensions, and binary classes all match; otherwise the strategy keeps
+  its documented untrained fallback and never calls the incompatible model.
 - **`generate_signal(symbol, market_data)`** is the entry point the main loop
   calls. It builds a feature dict, gathers weighted predictions from each
   available source (technical, research, RL, Bonenkamp-HFT, model ensemble),
