@@ -83,6 +83,7 @@ tests/             # pytest suite (CI: python 3.14, heavy deps absent)
 | Topic | Where |
 |---|---|
 | Architecture & diagrams | [docs/architecture.md](docs/architecture.md) · [docs/ELVIS_SYSTEM_ARCHITECTURE.md](docs/ELVIS_SYSTEM_ARCHITECTURE.md) |
+| Architecture migration | [audit, reference comparison, target and roadmap](docs/architecture_migration/README.md) |
 | Components reference | [docs/COMPONENTS.md](docs/COMPONENTS.md) |
 | Deployment (Ansible + Docker) | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 | Security | [SECURITY.md](SECURITY.md) · [docs/SECURITY_GUIDE.md](docs/SECURITY_GUIDE.md) |

@@ -11,6 +11,7 @@
 - **[2026-02-10 ELVIS No Data Debug](ops/2026-02-10_elvis_no_data_debug.md)** - Prior investigation notes for dashboard data issues
 
 ### 📊 System Architecture
+- **[Architecture migration](architecture_migration/README.md)** - Measured repository audit, reference comparison, target architecture, and incremental migration ledger
 - **[API Monitoring](../utils/api_connection_tester.py)** - Connectivity/health checks for Binance, Postgres, Redis, Vault, Telegram and the Prometheus Pushgateway
 - **[Console Dashboard](../utils/console_dashboard.py)** - Live curses trading dashboard with API status widget
 - **[Secrets Management](../utils/secrets_manager.py)** - Vault-backed secrets with environment and encrypted-file fallback
