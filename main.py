@@ -484,6 +484,17 @@ def _observe_take_profit_regime_shadow(
         pass
 
 
+def _validated_active_fee_profile(candidate_regime: object) -> str | None:
+    """Return a current produced TP profile or fail closed with ``None``."""
+    if type(candidate_regime) is str and candidate_regime in {
+        "TRENDING",
+        "RANGING",
+        "CHOPPY",
+    }:
+        return candidate_regime
+    return None
+
+
 def _legacy_order_intent(
     *,
     symbol: str,
@@ -1851,11 +1862,12 @@ def main(mode: str, log_level: str):
                                             filter_result = main._winrate_filter.analyze_signal_quality(
                                                 symbol, market_data, symbol_history
                                             )
+                                            candidate_take_profit_regime = None
                                             market_regime_result = filter_result.get(
                                                 "market_regime"
                                             )
                                             if isinstance(market_regime_result, dict):
-                                                take_profit_regime = (
+                                                candidate_take_profit_regime = (
                                                     market_regime_result.get(
                                                         "take_profit_regime"
                                                     )
@@ -1873,21 +1885,6 @@ def main(mode: str, log_level: str):
                                             main._last_regime[symbol] = regime_result[
                                                 "regime"
                                             ]["class"]
-
-                                            if (
-                                                os.getenv(
-                                                    "ELVIS_TP_REGIME_MODE", "legacy"
-                                                )
-                                                == "shadow"
-                                            ):
-                                                _observe_take_profit_regime_shadow(
-                                                    signal_symbol=symbol,
-                                                    quality_regime=regime_result[
-                                                        "regime"
-                                                    ]["class"],
-                                                    candidate_regime=take_profit_regime,
-                                                    logger=logger,
-                                                )
 
                                             # Apply filtering logic
                                             original_signal = signal
@@ -1948,6 +1945,27 @@ def main(mode: str, log_level: str):
                                                 )
                                                 logger.warning(
                                                     f"   📉 Quality: {filter_result['confidence']:.2%} | Regime: {regime_result['regime']['class']}"
+                                                )
+
+                                            # Publish the candidate only after
+                                            # the complete analysis/filtering
+                                            # block succeeds.
+                                            take_profit_regime = (
+                                                candidate_take_profit_regime
+                                            )
+                                            if (
+                                                os.getenv(
+                                                    "ELVIS_TP_REGIME_MODE", "legacy"
+                                                )
+                                                == "shadow"
+                                            ):
+                                                _observe_take_profit_regime_shadow(
+                                                    signal_symbol=symbol,
+                                                    quality_regime=regime_result[
+                                                        "regime"
+                                                    ]["class"],
+                                                    candidate_regime=take_profit_regime,
+                                                    logger=logger,
                                                 )
 
                                         except Exception as filter_error:
@@ -2344,29 +2362,49 @@ def main(mode: str, log_level: str):
                                                         is_trade_viable,
                                                     )
 
-                                                    _fee_regime = getattr(
-                                                        main, "_last_regime", {}
-                                                    ).get(symbol, "RANGING")
-                                                    _tp_price = dynamic_take_profit(
-                                                        _fee_regime,
-                                                        current_price,
-                                                        side=signal,
+                                                    _fee_regime_mode = os.getenv(
+                                                        "ELVIS_TP_REGIME_MODE",
+                                                        "legacy",
                                                     )
-                                                    _viable, _net, _costs = (
-                                                        is_trade_viable(
-                                                            current_price,
-                                                            _tp_price,
-                                                            position_size,
-                                                            side=signal,
+                                                    if _fee_regime_mode == "active":
+                                                        _fee_regime = _validated_active_fee_profile(
+                                                            take_profit_regime
                                                         )
-                                                    )
-                                                    if not _viable:
+                                                    else:
+                                                        _fee_regime = getattr(
+                                                            main,
+                                                            "_last_regime",
+                                                            {},
+                                                        ).get(symbol, "RANGING")
+                                                        if _fee_regime is None:
+                                                            _fee_regime = "RANGING"
+                                                    if _fee_regime is None:
                                                         logger.warning(
-                                                            f"💸 {symbol} {signal} skipped by fee gate: "
-                                                            f"net ${_net:.4f} after ${_costs['total']:.4f} fees "
-                                                            f"({_fee_regime} TP target)"
+                                                            f"💸 {symbol} {signal} skipped: "
+                                                            "current take-profit regime unavailable"
                                                         )
                                                         signal = "HOLD"
+                                                    else:
+                                                        _tp_price = dynamic_take_profit(
+                                                            _fee_regime,
+                                                            current_price,
+                                                            side=signal,
+                                                        )
+                                                        _viable, _net, _costs = (
+                                                            is_trade_viable(
+                                                                current_price,
+                                                                _tp_price,
+                                                                position_size,
+                                                                side=signal,
+                                                            )
+                                                        )
+                                                        if not _viable:
+                                                            logger.warning(
+                                                                f"💸 {symbol} {signal} skipped by fee gate: "
+                                                                f"net ${_net:.4f} after ${_costs['total']:.4f} fees "
+                                                                f"({_fee_regime} TP target)"
+                                                            )
+                                                            signal = "HOLD"
                                                 except Exception as fee_error:
                                                     logger.error(
                                                         f"⚠️ Fee gate error: {fee_error}"

@@ -229,7 +229,7 @@ def test_main_wires_one_non_authoritative_shadow_call() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name) and target.id == "take_profit_regime"
+            isinstance(target, ast.Name) and target.id == "candidate_take_profit_regime"
             for target in node.targets
         )
         and isinstance(node.value, ast.Call)
@@ -239,12 +239,30 @@ def test_main_wires_one_non_authoritative_shadow_call() -> None:
         and isinstance(node.value.args[0], ast.Constant)
         and node.value.args[0].value == "take_profit_regime"
     ]
+    publications = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "take_profit_regime"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "candidate_take_profit_regime"
+    ]
     analysis_calls = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "analyze_signal_quality"
+    ]
+    regime_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "detect_current_regime"
     ]
     cached_candidate_targets = [
         node
@@ -256,10 +274,14 @@ def test_main_wires_one_non_authoritative_shadow_call() -> None:
 
     assert len(resets) == 1
     assert len(candidate_assignments) == 1
+    assert len(publications) == 1
     assert len(analysis_calls) == 1
+    assert len(regime_calls) == 1
     assert resets[0].lineno < analysis_calls[0].lineno
     assert analysis_calls[0].lineno < candidate_assignments[0].lineno
-    assert candidate_assignments[0].lineno < shadow_call.lineno
+    assert candidate_assignments[0].lineno < regime_calls[0].lineno
+    assert regime_calls[0].lineno < publications[0].lineno
+    assert publications[0].lineno < shadow_call.lineno
     assert cached_candidate_targets == []
 
     def enclosing_symbol_loops(node: ast.AST) -> set[ast.For]:
@@ -280,6 +302,7 @@ def test_main_wires_one_non_authoritative_shadow_call() -> None:
     common_symbol_loops = (
         enclosing_symbol_loops(resets[0])
         & enclosing_symbol_loops(candidate_assignments[0])
+        & enclosing_symbol_loops(publications[0])
         & enclosing_symbol_loops(shadow_call)
     )
     assert len(common_symbol_loops) == 1
