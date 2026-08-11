@@ -570,6 +570,42 @@ passed 107. The full suite passed 998 tests, skipped 9, deselected 3, and kept
 only the unchanged local PostgreSQL baseline failure because `np.trades` is
 absent. The existing domain import-purity gate covers the new module.
 
+### M7b canonical bootstrap leverage implementation record
+
+The pre-trade audit found two different `TRADING_CONFIG` dictionaries. The
+bootstrap imported the package-level legacy mapping, which has no
+`DEFAULT_LEVERAGE`, and silently supplied `50` to the executor while the
+documented canonical value in `config.config` is `3`. This made startup depend
+on an unsafe fallback and on `OVERRIDE_HIGH_LEVERAGE` rather than the declared
+configuration.
+
+Bootstrap now aliases `config.config.TRADING_CONFIG` explicitly for the
+leverage field, reads `DEFAULT_LEVERAGE` with a required-key lookup, and passes
+that one value to both the first executor and its paper fallback. A missing key
+aborts construction before either executor exists. Its existing package-level
+mapping still governs mode and other legacy settings, so paper does not become
+Futures testnet as a side effect. Merging those consumers remains M10. This
+slice also does not enable live trading, which remains rejected before
+bootstrap.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_bootstrap_leverage_config.py
+.venv/bin/python -m pytest -q tests/test_bootstrap_leverage_config.py tests/test_bootstrap_exchange_config.py tests/test_binance_executor.py tests/test_legacy_paper_adapter.py tests/test_main_order_submission.py
+.venv/bin/black --target-version py310 --check core/bootstrap.py tests/test_bootstrap_leverage_config.py
+.venv/bin/isort --check-only core/bootstrap.py tests/test_bootstrap_leverage_config.py
+.venv/bin/flake8 tests/test_bootstrap_leverage_config.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q core/bootstrap.py tests/test_bootstrap_leverage_config.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The three leverage-source tests pass, including primary/fallback parity and a
+missing-key fail-closed case. The focused bootstrap/execution regression suite
+passes 51 tests. The full suite passes 1,001 tests, skips 9, deselects 3, and
+keeps only the unchanged local PostgreSQL baseline failure because `np.trades`
+is absent.
+
 ## Cut-over policy
 
 Each later behavioural migration has three modes:

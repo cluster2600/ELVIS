@@ -343,7 +343,11 @@ Key behaviours:
 - **Leverage safety (Issue #14).** The default leverage is `3` (from
   `config.config.TRADING_CONFIG["DEFAULT_LEVERAGE"]`, overridable by the
   `DEFAULT_LEVERAGE` env var). `validate_leverage_config` rejects leverage above
-  10x unless `OVERRIDE_HIGH_LEVERAGE=true` is set.
+  10x unless `OVERRIDE_HIGH_LEVERAGE=true` is set. Bootstrap sources this field
+  explicitly from the canonical mapping, requires the key, and passes the same
+  configured value to its primary and paper-fallback executors; there is no
+  hidden 50x fallback. Other legacy bootstrap settings are unchanged in this
+  slice.
 - **Rate limiting (Issue #12).** Live API calls are wrapped with `binance_retry`
   (exponential back-off) from `utils.binance_rate_limiter`.
 - **Paper balance.** `_calculate_paper_balance()` computes equity as a single
