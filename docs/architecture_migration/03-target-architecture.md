@@ -157,7 +157,7 @@ transitions.
 
 ## Domain contracts
 
-The first migration slice introduces small immutable values:
+Successive migration slices introduce small immutable values:
 
 - `SignalAction`: `BUY`, `SELL`, or `HOLD`;
 - `OrderSide`: `BUY` or `SELL`, so `HOLD` is unrepresentable in an order;
@@ -172,6 +172,11 @@ The first migration slice introduces small immutable values:
 - `OrderState`: pending/open/partial/filled/cancel-pending/cancelled/failed,
   changed only through validated transitions; and
 - `CycleOutcome`: terminal result and per-stage timings.
+
+M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
+`OrderIntent`, and `SubmissionReport`. `RiskDecision`, the order state machine,
+and `CycleOutcome` remain later slices; they are not placeholder classes in the
+current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-

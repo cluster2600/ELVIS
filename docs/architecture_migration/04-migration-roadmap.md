@@ -21,7 +21,7 @@ deletes a legacy path before its replacement has passed parity checks.
 |---|---|---|---|---|
 | M0 | Pin source revisions; measure source, test, CI, model, and Docker baseline | method and measured results recorded; reproducible test command recorded | documentation-only | Implemented |
 | M1 | Publish current map, reference comparison, target architecture, and this ledger | Markdown links and Mermaid blocks checked; docs review | revert docs commit | Implemented |
-| M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Planned |
+| M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Planned |
 | M4 | Add adapters for the current executor and success recorder; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | one call-site revert restores legacy branch | Planned |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | Planned |
@@ -61,6 +61,27 @@ algorithms. It is deliberately narrower than a new engine.
 - the domain package has no environment, pandas, database, or Binance
   dependency.
 
+### M2 implementation record
+
+The new `trading.domain` package is unused by the legacy runtime and therefore
+changes no order behaviour. It contains only standard-library and internal
+imports, keeps `HOLD` out of `OrderSide`, limits the initial order type to
+`MARKET`, and treats `SUBMITTED` as an acknowledgment rather than a fill.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/domain
+.venv/bin/python -m pytest tests/test_domain_contracts.py -q
+.venv/bin/python -m black --target-version py310 --check trading/domain tests/test_domain_contracts.py
+.venv/bin/python -m isort --check-only trading/domain tests/test_domain_contracts.py
+.venv/bin/python -m flake8 trading/domain tests/test_domain_contracts.py --max-line-length=88
+```
+
+The focused suite passed 85 tests. The tests include an import-purity gate and
+explicitly reject the pre-existing `trading.orders.OrderSide` at the new domain
+boundary; the later legacy adapter must map between the two enums deliberately.
+
 ### M3 acceptance criteria
 
 - executor exceptions and malformed results become `AMBIGUOUS`;
@@ -76,7 +97,7 @@ algorithms. It is deliberately narrower than a new engine.
   contract;
 - the adapter declares the current executor as paper-only and a `live` runtime
   cannot accidentally activate venue submission;
-- existing cooldown and model-vote recording happens once after accepted
+- existing cooldown and model-vote recording happens once after acknowledged
   execution;
 - no recording happens for a rejected or failed execution;
 - multi-symbol paper behaviour remains enabled by default;
