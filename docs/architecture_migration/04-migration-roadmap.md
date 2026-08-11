@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a pure order lifecycle) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (open positions preserved on init) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9a versioned baseline) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -932,8 +932,72 @@ and seeds `np.open_positions`, invokes `init_db()` a second time, and confirms
 that the row remains. The container is isolated from operator databases and is
 removed after the check. The full suite passes 1,239 tests, skips 9, deselects
 3, and keeps only the unchanged local PostgreSQL baseline failure because
-`np.trades` is absent. M9a must still add a versioned migration runner and an
-order journal with transaction, uniqueness, replay, and idempotency tests.
+`np.trades` is absent. The versioned runner is introduced in M9a below; the
+order journal still requires transaction, uniqueness, replay, and idempotency
+tests after the M8b position-effect contract is stable.
+
+### M9a versioned PostgreSQL baseline
+
+`trading.persistence.migration_runner` loads ordered SQL through
+`importlib.resources`, calculates an immutable SHA-256 digest, rejects an empty
+catalogue and missing, duplicate, reordered, unknown, modified, or non-prefix
+versions, and applies pending work under a PostgreSQL transaction advisory lock.
+It requires a dedicated psycopg2 connection in the ready/`IDLE` state and
+establishes `READ COMMITTED` before acquiring that lock, so a concurrent waiter
+observes the winner's commit instead of an older snapshot. Migration metadata,
+every pending DDL statement, and its version record commit together; any failure
+rolls back the complete pending sequence. The runner refuses autocommit, a
+prepared connection, or an existing caller transaction and never closes a
+caller-owned connection. A small SQL lexer rejects top-level transaction or
+session-setting commands while correctly ignoring quoted text, CR/LF comments,
+nested block comments, and dollar-quoted procedural bodies, so packaged SQL
+cannot commit outside the runner's boundary. Standard string syntax is restored
+immediately before every migration.
+
+The runner creates `np` and its migration ledger as transaction metadata; the
+packaged `0001_legacy_baseline.sql` then creates the current legacy tables
+additively without a `DROP`, rename, or destructive backfill. Existing
+positional column order and `REAL`/naive timestamp types are preserved for
+compatibility. Before recording version 1, the migration validates exact column
+order/types/nullability/default semantics, ordinary permanent relations,
+required non-deferrable constraints, and the two contract indexes. It refuses
+an incompatible legacy or migration-ledger layout, including unlogged state,
+non-durable serial sequences, triggers, rules, RLS, policies, or inheritance.
+Each version record uses `INSERT ... RETURNING`; after deferred constraints are
+forced, the ledger contract and complete ordered history are revalidated before
+commit. This
+baseline is schema-only: it never inserts USDT, BNB, or other business state.
+Later repositories will use typed exact storage instead of silently changing
+these consumers. The SQL file is explicit package data and was verified inside
+the built wheel. Nothing imports the runner from `main.py`, bootstrap, or the
+legacy database helper in this slice.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_migration_runner.py
+.venv/bin/black --target-version py310 --check trading/persistence tests/test_migration_runner.py
+.venv/bin/isort --check-only trading/persistence tests/test_migration_runner.py
+.venv/bin/flake8 trading/persistence tests/test_migration_runner.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/persistence tests/test_migration_runner.py
+/usr/local/bin/python3.10 -m pip wheel --no-deps --wheel-dir <temporary-directory> .
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 35 tests. An isolated PostgreSQL 15 smoke applies the
+baseline from an empty database, verifies an idempotent second run and no balance
+seed, serializes two concurrent runners, and proves that rejecting a caller's
+active transaction neither commits nor rolls it back. It upgrades an exact
+legacy schema while preserving an `open_positions` sentinel; incompatible
+defaults, indexes, deferrable constraints, `UNLOGGED` state, and ledger layouts
+are rejected without recording version 1. A suppressed ledger insert and a
+top-level `COMMIT` attempt are also rejected. A failing second migration rolls
+back both its DDL and version. A post-baseline `orders` table and `position_key`
+extension survive the next no-op run, keeping M8b/M9b free to define their own
+contract. The full suite passes 1,274 tests, skips 9, deselects 3, and keeps only
+the known ambient-database test failure; the next atomic test-infrastructure
+commit moves that test to a required isolated PostgreSQL CI job rather than
+masking it.
 
 ## Cut-over policy
 

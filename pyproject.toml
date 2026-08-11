@@ -66,6 +66,9 @@ test = [
 [tool.setuptools.packages.find]
 include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "scripts*"]
 
+[tool.setuptools.package-data]
+"trading.persistence.sql_migrations" = ["*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
