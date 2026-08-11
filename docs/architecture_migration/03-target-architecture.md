@@ -171,15 +171,23 @@ Successive migration slices introduce small immutable values:
   with client/venue IDs and a retry-safety decision kept separate from outcome;
 - `OrderLifecycleState`: pending/reconciling/open/partial/filled,
   cancel-pending/cancelled/failed, projected only through validated immutable
-  events; and
+  events;
+- `PositionEffect`: explicit `OPEN` or `REDUCE_ONLY`, coupled to one approved
+  order intent before submission;
+- `PositionSide`: `LONG` or `SHORT`, deliberately distinct from order direction;
+- `TakeProfitProfile` and `PositionExitContext`: the resolved entry-time exit
+  policy retained for the lifetime of a position key;
+- `Position`: an immutable projection of confirmed fills with exact opened,
+  reduced, and remaining quantities; and
 - `CycleOutcome`: terminal result and per-stage timings.
 
 M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
 `OrderIntent`, and `SubmissionReport`. M7a adds the correlated `RiskDecision`
 contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
-runtime. The pre-trade service, durable order journal, position effects, and
-`CycleOutcome` remain later slices; they are not placeholder classes in the
-current package.
+runtime. M8b adds pure `PositionInstruction`, `PositionFill`, and `Position`
+transitions without a production consumer. The pre-trade service, durable order
+journal, runtime `PositionService`, and `CycleOutcome` remain later slices; they
+are not placeholder classes in the current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-
@@ -230,7 +238,11 @@ fallbacks.
 Is the sole owner of open-position transitions, stop loss, take profit,
 trailing stop, partial fill, and close reconciliation. The background risk
 thread and inline exit loop are retired only after this service covers their
-behaviour.
+behaviour. M8b supplies its pure confirmed-fill transition contract: an `OPEN`
+fill can create or scale a stable position key, while `REDUCE_ONLY` can only
+reduce the opposite side and can never create or flip a position. That reducer
+does not yet constitute this service, select an exit, calculate cost basis or
+PnL, or perform I/O; no production module consumes it yet.
 
 ## Runtime and configuration
 
@@ -282,6 +294,12 @@ write before commit. It is deliberately not wired to startup yet; the isolated
 PostgreSQL harness now validates the boundary, while an operator migration
 command must still be in place before it can become a readiness prerequisite.
 Order and position repositories remain later slices.
+
+M8b requires a stable `position_key` and immutable exit context on the future
+pre-submission position instruction, but neither value is stored by the legacy
+tables. M9b must journal the instruction and correlated confirmed fills, then
+rebuild the exact M8b projection on replay before `PositionService` can own the
+runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

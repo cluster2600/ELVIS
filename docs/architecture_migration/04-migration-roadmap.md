@@ -30,7 +30,7 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a lifecycle plus transactional legacy-exit prerequisite) |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9a versioned baseline) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
@@ -828,8 +828,9 @@ legacy fee-gate behaviour for rollback.
 
 This slice changes only the new-order fee gate. The quality-label cache and the
 open-position exit block remain legacy and are not silently recast as a
-position-bound regime. Associating an immutable entry-time profile with a
-position remains an M8 responsibility.
+position-bound regime. M8b now represents an immutable entry-time profile in a
+pure position instruction. Resolving and associating that profile in the live
+submission/fill path remains part of the future `PositionService` cut-over.
 
 Verification at implementation time:
 
@@ -876,16 +877,17 @@ that ID only while `CANCEL_PENDING`, so a delayed response for attempt A cannot
 clear a newer attempt B. Partial fills during cancellation remain
 cancel-pending; late fills after confirmed cancellation are still counted, and
 an exact full fill wins over cancellation. The reducer has no clock, UUID,
-logger, environment read, I/O, database, executor, position effect, or runtime
-consumer.
+logger, environment read, I/O, database, executor, or runtime consumer. M8b's
+pure position reducer is now its only consumer outside the lifecycle module,
+and remains inside `trading.domain`.
 
 This is deliberately not a runtime cut-over. ELVIS does not yet provide a
 reliable fill stream, a truthful paper cancellation adapter, durable correlated
-order/fill tables, or startup reconciliation. M8b will add explicit
-OPEN/REDUCE_ONLY position effects and entry-time exit context. M9 must add the
-transactional journal, uniqueness constraints, register-before-submit,
-restart replay, reconciliation, and quarantine before lifecycle idempotence can
-be described as durable.
+order/fill tables, or startup reconciliation. M8b now supplies explicit
+`OPEN`/`REDUCE_ONLY` position effects and entry-time exit context, still without
+runtime wiring. M9b must add the transactional journal, uniqueness constraints,
+register-before-submit, restart replay, reconciliation, and quarantine before
+lifecycle idempotence can be described as durable.
 
 Verification at implementation time:
 
@@ -902,8 +904,8 @@ The focused suite passes 262 tests. It covers every non-fill transition, exact
 and conflicting duplicates, large-precision full fills and overfills under
 different ambient decimal contexts, correlation mismatches, state-construction
 invariants, stale cancellation responses, late fills, and ACK/fill/cancel
-permutations. The production tree has no lifecycle consumer; only the pure
-domain export exposes the types for the next migration slice. The full suite
+permutations. The production tree has no lifecycle consumer outside the pure
+domain; M8b's position reducer is the first internal consumer. The full suite
 passes 1,238 tests, skips 9, deselects 3, and keeps only the unchanged local
 PostgreSQL baseline failure because `np.trades` is absent.
 
@@ -963,6 +965,66 @@ time across midnight and still asserts that the date did not change. The same
 suite under UTC passes 1,239 tests with the same 49 skips and 12 deselections;
 this slice does not alter the risk-manager clock.
 
+### M8b pure position-effect implementation record
+
+`trading.domain.positions` now defines the immutable position projection that
+the future `PositionService` must own. A `PositionInstruction` binds one stable
+`position_key`, an explicit `OPEN` or `REDUCE_ONLY` effect, and the approved
+`OrderIntent` before submission. `OPEN` also captures a typed entry-time
+`PositionExitContext`; `REDUCE_ONLY` cannot replace it. `PositionSide.LONG` and
+`SHORT` remain distinct from order direction, so `OPEN BUY` creates or scales a
+long position, `OPEN SELL` creates or scales a short position, and a reduction
+must use the opposite order side. A reduction never creates a position, clips
+an over-reduction, or flips the remainder.
+
+The `position_fill_from_lifecycle` boundary binds only a `ConfirmedFill` already
+present in the matching `OrderLifecycle`; replay may reconstruct the same
+validated immutable value from a durable confirmed event. Position-local fill
+identity is the composite `(client_order_id, trade_id)`; exact duplicates are
+identity no-ops, including after closure, while conflicting payloads fail.
+Partial fills for one client order must retain the exact instruction and venue
+order ID and cannot exceed that intent's quantity. Canonical composite-ID
+ordering makes independent arrival orders converge. Opened, reduced, and
+remaining quantities reuse M8a's isolated exact-`Decimal` arithmetic, so
+ambient precision, rounding mode, and traps cannot hide a per-order overfill or
+global over-reduction.
+
+The aggregate retains the opening leverage and exit context. Scale-ins must
+match both; reductions deliberately do not compare their order leverage because
+it is not a position quantity effect and may differ after configuration or
+venue changes. An exact reduction closes the key; a new fill after closure is a
+conflict rather than an implicit reopen. M8b does not calculate average entry,
+realised PnL, fee conversion, lot allocation, or exit triggers.
+
+This slice is pure and deliberately unused by production. The package facade
+re-exports the contracts, so loading another `trading.domain` submodule may load
+the file, but no production module outside `trading.domain` references or
+applies it. An import-aware AST gate covers direct, facade, relative, aliased,
+and literal dynamic imports without confusing the generic name `Position` with
+unrelated classes. The legacy inline and Balanced Starter owners, paper
+executor, and positional PostgreSQL tables remain authoritative. M9b must
+journal the instruction and correlated fills, replay the projection, and
+reconcile ambiguous submissions before any runtime cut-over.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_position_lifecycle.py tests/test_order_lifecycle.py tests/test_domain_contracts.py tests/test_risk_decision.py
+.venv/bin/black --target-version py310 --check trading/domain tests/test_position_lifecycle.py tests/test_order_lifecycle.py
+.venv/bin/isort --check-only trading/domain tests/test_position_lifecycle.py tests/test_order_lifecycle.py
+.venv/bin/flake8 trading/domain/_decimal.py trading/domain/positions.py tests/test_position_lifecycle.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/domain tests/test_position_lifecycle.py
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=UTC .venv/bin/python -m pytest -q tests/ -m 'not perf and not postgres'
+```
+
+The focused suite passes 322 tests. It covers exact Decimal boundaries,
+open/scale/reduce/close transitions, long and short directions, fill and
+lifecycle correlation, per-order caps, canonical permutations, duplicate and
+terminal precedence, direct-construction invariants, and zero runtime
+consumers. The isolated non-PostgreSQL suite passes 1,317 tests, skips 49, and
+deselects 12 under UTC.
+
 ### M9 prerequisite: preserve open positions during initialization
 
 `utils.paper_trade_db.init_db()` no longer drops `np.open_positions` during
@@ -990,7 +1052,7 @@ removed after the check. The full suite passes 1,239 tests, skips 9, deselects
 3, and keeps only the unchanged local PostgreSQL baseline failure because
 `np.trades` is absent. The versioned runner is introduced in M9a below; the
 order journal still requires transaction, uniqueness, replay, and idempotency
-tests after the M8b position-effect contract is stable.
+tests now that the M8b position-effect contract is stable.
 
 ### M9a versioned PostgreSQL baseline
 
@@ -1049,9 +1111,10 @@ defaults, indexes, deferrable constraints, `UNLOGGED` state, and ledger layouts
 are rejected without recording version 1. A suppressed ledger insert and a
 top-level `COMMIT` attempt are also rejected. A failing second migration rolls
 back both its DDL and version. A post-baseline `orders` table and `position_key`
-extension survive the next no-op run, keeping M8b/M9b free to define their own
-contract. The full suite passes 1,274 tests, skips 9, deselects 3, and keeps only
-the known ambient-database test failure; the next atomic test-infrastructure
+extension survive the next no-op run, keeping M9b free to persist the M8b
+contract additively. The full suite passes 1,274 tests, skips 9, deselects 3,
+and keeps only the known ambient-database test failure; the next atomic
+test-infrastructure
 commit moves that test to a required isolated PostgreSQL CI job rather than
 masking it.
 

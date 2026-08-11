@@ -976,6 +976,7 @@ def test_order_lifecycle_module_is_pure_and_not_wired_to_production() -> None:
     excluded = {
         module_path,
         root / "trading" / "domain" / "__init__.py",
+        root / "trading" / "domain" / "positions.py",
     }
     for source_path in root.rglob("*.py"):
         if (

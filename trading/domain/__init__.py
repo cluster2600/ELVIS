@@ -25,6 +25,20 @@ from trading.domain.orders import (
     SubmissionReport,
     SubmissionStatus,
 )
+from trading.domain.positions import (
+    InvalidPositionTransition,
+    Position,
+    PositionEffect,
+    PositionExitContext,
+    PositionFill,
+    PositionInstruction,
+    PositionSide,
+    PositionState,
+    TakeProfitProfile,
+    new_position,
+    position_fill_from_lifecycle,
+    reduce_position,
+)
 from trading.domain.risk import RiskDecision
 from trading.domain.signals import Signal, SignalAction
 
@@ -34,12 +48,20 @@ __all__ = [
     "CancellationRequested",
     "ConfirmedFill",
     "InvalidOrderTransition",
+    "InvalidPositionTransition",
     "OrderIntent",
     "OrderLifecycle",
     "OrderLifecycleEvent",
     "OrderLifecycleState",
     "OrderSide",
     "OrderType",
+    "Position",
+    "PositionEffect",
+    "PositionExitContext",
+    "PositionFill",
+    "PositionInstruction",
+    "PositionSide",
+    "PositionState",
     "RetrySafety",
     "RiskDecision",
     "Signal",
@@ -50,7 +72,11 @@ __all__ = [
     "SubmissionEvent",
     "SubmissionFailed",
     "SubmissionStatus",
+    "TakeProfitProfile",
     "new_order_lifecycle",
+    "new_position",
+    "position_fill_from_lifecycle",
     "reduce_order_lifecycle",
+    "reduce_position",
     "submission_event_from_report",
 ]
