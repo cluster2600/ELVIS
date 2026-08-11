@@ -148,8 +148,9 @@ Feature ownership is similarly scattered:
 
 - `EnsembleStrategy.REQUIRED_FEATURES` contains 20 CoreML inputs;
 - research and Bonenkamp strategies construct either 9 or 11 inputs;
-- both committed research model and scaler artefacts currently report 11
-  inputs;
+- the locally present research model and scaler report 11 inputs, but both are
+  ignored by Git (`*.pkl`), can be rewritten by procedural tests, and are not
+  versioned deployable artefacts;
 - `tests/test_feature_fix.py` still claims that 9 is the only correct shape and
   returns booleans instead of asserting, so pytest does not enforce the claim;
 - the trade-learned model stores `feature_names` when produced by its current

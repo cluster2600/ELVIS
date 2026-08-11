@@ -222,19 +222,27 @@ them.
   10-fold CV. Because financial samples are time-ordered, this trains only on
   past data and validates on future data — unlike the default (Stratified)`KFold`
   that `cross_val_score` would otherwise select for an integer `cv` value.
-- **Feature-count consistency.** At predict time the feature vector length now
-  respects the social flag: **11 features** (9 financial + 2 social) when
-  `social_data_enabled=True`, and **9 features** when it is disabled. This
-  matches the training-time vector, so the model no longer silently truncates
-  the two social features to 9.
+- **Versioned feature consistency.** Training and inference resolve the same
+  immutable ordered schema: **11 features** (9 financial + 2 social) when
+  `social_data_enabled=True`, and **9 features** when it is disabled. Missing,
+  non-numeric, or non-finite values are rejected; vectors are never padded,
+  truncated, sent to a fitted scaler with another dimension, or passed to the
+  classifier without the fitted scaler selected by the artefact.
+- **Strict artefact loading.** A model/scaler pair is activated only after its
+  sibling `feature_manifest.json` proves the exact schema, scikit-learn version,
+  filenames, and SHA-256 hashes. Validation happens before `joblib.load`, and
+  model plus scaler are assigned only after concrete implementation types,
+  dimensions, and the binary class order pass. Retraining uses local candidates
+  and preserves the prior active pair on any validation or persistence failure.
+  Old unmanifested local pickles are ignored and must be retrained by the
+  current runtime.
 
 #### How to use
 
 - Run the strategy as usual (see [Usage](#usage)); the binary-signal behavior is
   automatic and needs no configuration.
-- Keep `SOCIAL_DATA_ENABLED` consistent between training and inference so the
-  9-vs-11 feature count matches. If you train with social data enabled, run
-  inference with it enabled too (and vice versa).
+- Keep `SOCIAL_DATA_ENABLED` consistent between training and inference. A model
+  trained under the other schema is rejected rather than adapted silently.
 - No action is required to get time-series CV — it is the default for
   `train_model()`.
 

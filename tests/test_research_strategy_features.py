@@ -59,6 +59,17 @@ def _make_ohlcv(periods=80, base_price=100000.0, seed=7):
     )
 
 
+def _financial_features(rsi=50.0):
+    from trading.models.feature_schemas import RESEARCH_FINANCIAL_9_V1
+
+    values = {
+        name: float(index + 1)
+        for index, name in enumerate(RESEARCH_FINANCIAL_9_V1.names)
+    }
+    values["RSI"] = rsi
+    return values
+
+
 def test_generate_signals_untrained_never_hold(tmp_path):
     """Untrained model must fall back to a binary BUY/SELL, never HOLD."""
     strategy = _make_strategy(tmp_path)
@@ -81,7 +92,7 @@ def test_generate_signals_untrained_neutral_rsi_picks_side(tmp_path):
     with patch.object(
         strategy,
         "calculate_financial_indicators",
-        return_value={"RSI": 50.0},
+        return_value=_financial_features(),
     ):
         signals = strategy.generate_signals({"BTCUSDT": df})
 
@@ -98,12 +109,14 @@ def test_generate_signals_trained_prediction_never_hold(tmp_path):
     # probabilities[0]=SELL prob, probabilities[1]=BUY prob
     mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
     strategy.rf_model = mock_model
+    strategy.feature_scaler = strategy.feature_scaler.fit(np.ones((2, 9)))
 
     df = _make_ohlcv()
     signals = strategy.generate_signals({"BTCUSDT": df})
 
     assert signals["BTCUSDT"]["signal"] in ("BUY", "SELL")
     assert signals["BTCUSDT"]["signal"] != "HOLD"
+    mock_model.predict_proba.assert_called_once()
 
 
 def test_generate_signals_prediction_failure_fallback_never_hold(tmp_path):
@@ -114,18 +127,20 @@ def test_generate_signals_prediction_failure_fallback_never_hold(tmp_path):
     mock_model = MagicMock()
     mock_model.predict_proba.side_effect = RuntimeError("boom")
     strategy.rf_model = mock_model
+    strategy.feature_scaler = strategy.feature_scaler.fit(np.ones((2, 9)))
 
     df = _make_ohlcv()
     # Neutral RSI to hit the previously-HOLD branch inside the fallback.
     with patch.object(
         strategy,
         "calculate_financial_indicators",
-        return_value={"RSI": 50.0},
+        return_value=_financial_features(),
     ):
         signals = strategy.generate_signals({"BTCUSDT": df})
 
     assert signals["BTCUSDT"]["signal"] in ("BUY", "SELL")
     assert signals["BTCUSDT"]["signal"] != "HOLD"
+    mock_model.predict_proba.assert_called_once()
 
 
 def test_generate_signals_empty_data_never_hold(tmp_path):

@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from trading.models.feature_schema import FeatureContractError, FeatureSchema
 
@@ -197,3 +197,14 @@ def validate_feature_manifest(
             raise ArtifactCompatibilityError(
                 f"feature manifest component {name!r} digest does not match"
             )
+
+
+def validate_classifier_classes(
+    classifier: object, expected_classes: Sequence[object], owner: str
+) -> None:
+    """Require a fitted classifier to expose the expected class order."""
+    actual = getattr(classifier, "classes_", None)
+    if actual is None or tuple(actual) != tuple(expected_classes):
+        raise ArtifactCompatibilityError(
+            f"{owner} class order is incompatible with the strategy"
+        )

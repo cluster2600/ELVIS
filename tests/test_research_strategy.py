@@ -21,7 +21,7 @@ from trading.strategies.research_based_strategy import ResearchBasedStrategy
 from utils.logger_config import setup_logging
 
 
-def test_research_strategy():
+def test_research_strategy(tmp_path):
     """Test the research-based strategy implementation."""
 
     # Setup logging
@@ -32,7 +32,10 @@ def test_research_strategy():
 
     # Initialize strategy
     strategy = ResearchBasedStrategy(
-        logger=logger, social_data_enabled=True, enable_rolling_training=True
+        logger=logger,
+        social_data_enabled=True,
+        enable_rolling_training=True,
+        model_save_path=str(tmp_path / "models"),
     )
 
     print(f"✅ Strategy initialized")
@@ -229,7 +232,9 @@ def test_research_strategy():
     print(f"STRATEGY_MODE=research python main.py --mode paper")
     print(f"SOCIAL_DATA_ENABLED=true STRATEGY_MODE=research python main.py")
 
-    return True
+    assert features.shape == (1, 11)
+    assert signal in ("BUY", "SELL")
+    assert 0.0 <= confidence <= 1.0
 
 
 if __name__ == "__main__":

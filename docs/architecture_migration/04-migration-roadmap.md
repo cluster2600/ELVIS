@@ -24,7 +24,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5b) |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5c Research) |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -230,6 +230,41 @@ All 10 M5b tests passed, including a fitted sklearn
 training--persistence--validation--inference round trip. Runtime loaders remain
 unchanged until M5c, so this commit cannot activate or reject a production
 model by itself.
+
+### M5c Research implementation record
+
+`ResearchBasedStrategy` now selects a distinct 9- or 11-feature schema once at
+construction. Training and inference vectorize the same named mapping in that
+schema's order. A missing value, non-finite value, scaler mismatch, unfitted
+preprocessor, or wrong shape raises a feature-contract error; the former
+pad/truncate and unscaled-prediction paths are gone. Feature preparation is
+performed only for an activated model; the untrained RSI fallback does not
+pretend to be model inference.
+
+Training fits cloned model/scaler candidates and activates them together only
+after cross-validation, fitted dimensions, concrete implementation types,
+binary class order, persistence, and manifest creation all succeed. A failed
+retraining therefore leaves the active in-memory pair untouched. Loading
+validates the manifest, exact scikit-learn version, and component hashes before
+joblib; treats `InconsistentVersionWarning` as an incompatibility; validates
+both loaded objects in locals; and assigns them together only after every check
+passes. Unmanifested ignored local pickles are therefore not activated. The old
+procedural mismatch test was replaced with isolated assertions, and the
+remaining research integration test now writes only under `tmp_path`.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/models trading/strategies/research_based_strategy.py
+.venv/bin/python -m pytest tests/test_research_feature_schema.py tests/test_research_strategy_features.py tests/test_feature_fix.py tests/test_research_strategy.py -q
+.venv/bin/python -m pytest tests/test_feature_schema_contracts.py tests/test_feature_artifact_manifest.py tests/test_research_feature_schema.py tests/test_research_strategy_features.py tests/test_feature_fix.py -q
+```
+
+The Research-focused suite passed 22 tests and the cumulative M5 contract suite
+passed 52. The full non-performance suite reached 839 passed, 9 skipped, 3
+deselected, and the same baseline PostgreSQL failure (`np.trades` is absent).
+M5 remains in progress for Bonenkamp and the active Ensemble model adapters.
+Signal-policy fallbacks are intentionally left to M6.
 
 ## Cut-over policy
 
