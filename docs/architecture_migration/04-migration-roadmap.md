@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a pure order lifecycle) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (open positions preserved on init) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -906,6 +906,34 @@ permutations. The production tree has no lifecycle consumer; only the pure
 domain export exposes the types for the next migration slice. The full suite
 passes 1,238 tests, skips 9, deselects 3, and keeps only the unchanged local
 PostgreSQL baseline failure because `np.trades` is absent.
+
+### M9 prerequisite: preserve open positions during initialization
+
+`utils.paper_trade_db.init_db()` no longer drops `np.open_positions` during
+ordinary executor construction. Within an already existing `np` schema, its
+table setup remains additive through `CREATE TABLE IF NOT EXISTS`; only the
+explicit paper-reset workflow calls `clear_open_positions()`. This closes the
+immediate restart-data-loss hazard without claiming that the legacy initializer
+can bootstrap the schema, or yet introducing a repository or changing the
+positional legacy schema.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_paper_db_schema.py tests/test_paper_fill_integrity.py
+.venv/bin/black --target-version py310 --check utils/paper_trade_db.py tests/test_paper_db_schema.py
+.venv/bin/isort --check-only utils/paper_trade_db.py tests/test_paper_db_schema.py
+.venv/bin/flake8 tests/test_paper_db_schema.py --max-line-length=88
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 10 tests. A PostgreSQL 15 container smoke test creates
+and seeds `np.open_positions`, invokes `init_db()` a second time, and confirms
+that the row remains. The container is isolated from operator databases and is
+removed after the check. The full suite passes 1,239 tests, skips 9, deselects
+3, and keeps only the unchanged local PostgreSQL baseline failure because
+`np.trades` is absent. M9a must still add a versioned migration runner and an
+order journal with transaction, uniqueness, replay, and idempotency tests.
 
 ## Cut-over policy
 

@@ -71,7 +71,6 @@ def init_db():
                 fee REAL
             )
         """)
-        c.execute("DROP TABLE IF EXISTS np.open_positions CASCADE;")
         c.execute("""
             CREATE TABLE IF NOT EXISTS np.open_positions (
                 id SERIAL PRIMARY KEY,

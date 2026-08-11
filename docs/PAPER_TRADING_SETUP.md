@@ -174,6 +174,13 @@ from utils.paper_trade_db import reset_trading_session
 reset_trading_session()  # inserts a new reset marker; historical trades kept
 ```
 
+Within an existing `np` schema, database initialization is non-destructive:
+calling `init_db()` again creates missing tables but preserves
+`np.open_positions`. Schema creation and versioned migrations are introduced by
+the later persistence migration. Use the explicit reset script below when
+positions and balances really must be cleared; restarting the bot is not a
+reset operation.
+
 ## Monitoring
 
 The paper trading system provides real-time monitoring of:
@@ -197,4 +204,4 @@ To start fresh paper trading:
 - Paper trading uses simulated trades, no real money is involved
 - All trading logic is identical to live trading
 - Performance metrics accurately reflect trading strategy effectiveness
-- Database persistence ensures trade history survives restarts
+- Database persistence ensures trade history and open positions survive restarts
