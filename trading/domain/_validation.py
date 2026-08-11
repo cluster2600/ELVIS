@@ -44,3 +44,11 @@ def require_positive_decimal(name: str, value: object) -> None:
         raise TypeError(f"{name} must be a Decimal")
     if not value.is_finite() or value <= 0:
         raise ValueError(f"{name} must be finite and positive")
+
+
+def require_non_negative_decimal(name: str, value: object) -> None:
+    """Require an exact, finite Decimal which may be zero."""
+    if not isinstance(value, Decimal):
+        raise TypeError(f"{name} must be a Decimal")
+    if not value.is_finite() or value < 0:
+        raise ValueError(f"{name} must be finite and non-negative")

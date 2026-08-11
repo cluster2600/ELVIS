@@ -169,14 +169,17 @@ Successive migration slices introduce small immutable values:
 - `RiskDecision`: approved/rejected plus reasons and optional order intent;
 - `SubmissionReport`: `NOT_SENT`, `VENUE_REJECTED`, `SUBMITTED`, or `AMBIGUOUS`,
   with client/venue IDs and a retry-safety decision kept separate from outcome;
-- `OrderState`: pending/open/partial/filled/cancel-pending/cancelled/failed,
-  changed only through validated transitions; and
+- `OrderLifecycleState`: pending/reconciling/open/partial/filled,
+  cancel-pending/cancelled/failed, projected only through validated immutable
+  events; and
 - `CycleOutcome`: terminal result and per-stage timings.
 
 M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
 `OrderIntent`, and `SubmissionReport`. M7a adds the correlated `RiskDecision`
-contract. The pre-trade service, order state machine, and `CycleOutcome` remain
-later slices; they are not placeholder classes in the current package.
+contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
+runtime. The pre-trade service, durable order journal, position effects, and
+`CycleOutcome` remain later slices; they are not placeholder classes in the
+current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-

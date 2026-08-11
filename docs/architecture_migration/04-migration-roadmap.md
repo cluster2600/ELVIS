@@ -30,7 +30,7 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a pure order lifecycle) |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
@@ -848,6 +848,64 @@ local provenance, `HOLD` before either fee calculation on invalid input, the
 single downstream typed submission, and an unchanged legacy exit cache. The
 full suite passes 1,101 tests, skips 9, deselects 3, and keeps only the unchanged
 local PostgreSQL baseline failure because `np.trades` is absent.
+
+### M8a pure order-lifecycle implementation record
+
+`trading.domain.order_lifecycle` now defines one immutable projection for what
+ELVIS knows about an order. Its explicit states are `PENDING`, `RECONCILING`,
+`OPEN`, `PARTIAL`, `CANCEL_PENDING`, `CANCELLED`, `FILLED`, and `FAILED`.
+Submission acknowledgement remains distinct from a fill: the pure mapper turns
+a `SubmissionReport.SUBMITTED` into `SubmissionAcknowledged` even when the
+legacy `venue_status` string says `FILLED`. An ambiguous submission becomes
+`RECONCILING`; a proven `NOT_SENT` or `VENUE_REJECTED` result becomes `FAILED`
+while retaining the original status and orthogonal retry-safety value.
+
+Confirmed fills carry correlated client, venue, trade, symbol, and side IDs,
+exact quantity/price/fee `Decimal` values, and an injected aware venue
+timestamp. A positive fee requires its asset; a zero fee may omit it. Fill
+totals and remaining quantity use an isolated, explicitly dimensioned decimal
+context with inexact arithmetic trapped. They therefore do not inherit a
+caller's decimal precision and cannot silently round an overfill into an
+accepted quantity. Fills are deduplicated by `trade_id`; an exact duplicate is
+an identity no-op, while a conflicting payload or overfill raises
+`InvalidOrderTransition`. Canonical trade-ID ordering makes supported event
+permutations converge without sorting or rejecting by venue timestamps.
+
+Cancellation events carry a stable `cancel_request_id`. The lifecycle retains
+that ID only while `CANCEL_PENDING`, so a delayed response for attempt A cannot
+clear a newer attempt B. Partial fills during cancellation remain
+cancel-pending; late fills after confirmed cancellation are still counted, and
+an exact full fill wins over cancellation. The reducer has no clock, UUID,
+logger, environment read, I/O, database, executor, position effect, or runtime
+consumer.
+
+This is deliberately not a runtime cut-over. ELVIS does not yet provide a
+reliable fill stream, a truthful paper cancellation adapter, durable correlated
+order/fill tables, or startup reconciliation. M8b will add explicit
+OPEN/REDUCE_ONLY position effects and entry-time exit context. M9 must add the
+transactional journal, uniqueness constraints, register-before-submit,
+restart replay, reconciliation, and quarantine before lifecycle idempotence can
+be described as durable.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_order_lifecycle.py tests/test_domain_contracts.py tests/test_order_service.py tests/test_legacy_paper_adapter.py
+.venv/bin/black --target-version py310 --check trading/domain/_validation.py trading/domain/order_lifecycle.py trading/domain/__init__.py tests/test_order_lifecycle.py
+.venv/bin/isort --check-only trading/domain/_validation.py trading/domain/order_lifecycle.py trading/domain/__init__.py tests/test_order_lifecycle.py
+.venv/bin/flake8 trading/domain/_validation.py trading/domain/order_lifecycle.py trading/domain/__init__.py tests/test_order_lifecycle.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/domain tests/test_order_lifecycle.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 262 tests. It covers every non-fill transition, exact
+and conflicting duplicates, large-precision full fills and overfills under
+different ambient decimal contexts, correlation mismatches, state-construction
+invariants, stale cancellation responses, late fills, and ACK/fill/cancel
+permutations. The production tree has no lifecycle consumer; only the pure
+domain export exposes the types for the next migration slice. The full suite
+passes 1,238 tests, skips 9, deselects 3, and keeps only the unchanged local
+PostgreSQL baseline failure because `np.trades` is absent.
 
 ## Cut-over policy
 
