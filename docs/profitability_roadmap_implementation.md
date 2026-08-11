@@ -27,7 +27,10 @@ the live loop) is wired into `main.py` behind an environment flag.
 - **#4 Trailing stop loss** — `trading.execution.exits.TrailingStop`
   Position loop · `ELVIS_TRAILING_STOP=1`, trail via `ELVIS_TRAIL_PCT` (0.02)
 - **#5 Fee optimization (all-in cost gate)** — `trading.fees.fee_gate.is_trade_viable`
-  Pre-execution · `ELVIS_FEE_GATE=1`
+  Pre-execution · `ELVIS_FEE_GATE=1`. Quantity is the contract/base quantity:
+  entry and exit fees use their respective fill notionals, while leverage only
+  changes required margin. Invalid cost inputs and gate exceptions fail closed
+  to HOLD.
 - **#6 Momentum confirmation** — `trading.signals.filters.has_momentum`
   Signal gates · `ELVIS_ROADMAP_FILTERS=1`
 - **#7 Bollinger Band squeeze** — `trading.signals.filters.detect_bb_squeeze`
@@ -73,9 +76,10 @@ the loop.
 3. **Sizing** — `volume_multiplier(data)` scales the adaptive position size
    (0.5x–2.0x by volume vs its 20-bar mean); the optional Kelly stage derives
    f* from the last 200 paper trades' PnL and *caps* (never raises) the size.
-4. **Fee gate** — before `execute_buy/sell`, the expected move to the
+4. **Fee gate** — before typed order submission, the expected move to the
    regime's take-profit target is compared against all-in costs (entry+exit
-   taker fees + funding); non-viable trades are skipped with a logged breakdown.
+   taker fees + funding); non-viable trades and calculation failures are skipped
+   with a logged breakdown.
 5. **Exits** — the position loop updates a per-position `TrailingStop`
    (2% giveback from the high-water mark, both sides) and, when the symbol's
    regime is known, replaces the fixed $8 take-profit with the regime target

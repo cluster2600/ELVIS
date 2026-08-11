@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7a contract) |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7c cost semantics) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -605,6 +605,51 @@ missing-key fail-closed case. The focused bootstrap/execution regression suite
 passes 51 tests. The full suite passes 1,001 tests, skips 9, deselects 3, and
 keeps only the unchanged local PostgreSQL baseline failure because `np.trades`
 is absent.
+
+### M7c contract-quantity cost semantics implementation record
+
+The fee-gate audit found that its `quantity` is already the contract/base
+quantity used by the executor. Multiplying `price * quantity`, fees, and PnL by
+leverage a second time produced incorrect amounts and would corrupt every
+future positive profit threshold. The corrected convention is:
+
+```text
+entry_notional = entry_price * quantity
+exit_notional  = exit_price * quantity
+initial_margin = entry_notional / leverage
+gross_pnl      = direction * (exit_price - entry_price) * quantity
+```
+
+`all_in_cost` now requires `expected_exit_price` by keyword, charges each taker
+fee on its own fill notional, and funds the entry notional. Leverage is absent
+from both cost/viability APIs; for a fixed quantity it changes margin, not PnL
+or exchange fees. The keyword-only exit price also makes the removed legacy
+three-positional-argument form fail instead of silently remapping values.
+
+Invalid, boolean, negative, non-finite, conversion-overflowed, or
+calculation-overflowed cost inputs remain distinguishable from a deliberate
+zero-fee schedule. They return a finite non-viable result. A negative minimum
+profit is rejected. In `main.py`, an unexpected fee-gate exception now forces
+HOLD instead of leaving BUY/SELL actionable. This slice does not yet reserve
+margin, reconcile exposure, or claim a venue-accurate future funding schedule;
+those remain in the pre-trade snapshot/service work.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_fee_gate.py tests/test_roadmap_wiring.py tests/test_main_order_submission.py
+.venv/bin/python -m doctest trading/fees/fee_gate.py
+.venv/bin/black --target-version py310 --check trading/fees/fee_gate.py tests/test_fee_gate.py tests/test_roadmap_wiring.py
+.venv/bin/isort --check-only trading/fees/fee_gate.py tests/test_fee_gate.py tests/test_roadmap_wiring.py
+.venv/bin/flake8 trading/fees/fee_gate.py tests/test_fee_gate.py tests/test_roadmap_wiring.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/fees/fee_gate.py main.py tests/test_fee_gate.py tests/test_roadmap_wiring.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 84 tests, including cross-checks against
+`BinanceFeeCalculator` at 1x/3x/10x and an AST gate for exception-to-HOLD. The
+full suite passes 1,038 tests, skips 9, deselects 3, and keeps only the
+unchanged local PostgreSQL baseline failure because `np.trades` is absent.
 
 ## Cut-over policy
 

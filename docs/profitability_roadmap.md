@@ -170,21 +170,23 @@ def update_trailing_stop(self, position, current_price):
 
 **Implementation:**
 ```python
-# Fee-aware entry decision
-def calculate_all_in_cost(self, entry_price, exit_price, quantity, leverage):
-    notional = entry_price * quantity * leverage
-    
-    # Binance futures fees (no BNB discount)
-    entry_fee = notional * 0.0004  # 0.04% taker
-    exit_fee = notional * 0.0004
-    funding_fee = notional * 0.0001 * 8  # 8 hours funding
-    
+# Fee-aware entry decision. Quantity is already the contract/base quantity;
+# leverage changes required margin, not the fee or PnL formula.
+def calculate_all_in_cost(self, entry_price, exit_price, quantity):
+    entry_notional = entry_price * quantity
+    exit_notional = exit_price * quantity
+
+    # Binance futures fees (no BNB discount), one 8-hour funding period.
+    entry_fee = entry_notional * 0.0004  # 0.04% taker
+    exit_fee = exit_notional * 0.0004
+    funding_fee = entry_notional * 0.0001
+
     all_in_cost = entry_fee + exit_fee + funding_fee
     gross_profit = (exit_price - entry_price) * quantity
-    
+
     net_profit = gross_profit - all_in_cost
-    
-    if net_profit < 0:
+
+    if net_profit <= 0:
         self.logger.warning(f"Trade not profitable after fees: ${net_profit:.2f}")
         return False
     return True

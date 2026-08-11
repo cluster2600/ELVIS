@@ -2260,6 +2260,7 @@ def main(mode: str, log_level: str):
                                                     logger.error(
                                                         f"⚠️ Fee gate error: {fee_error}"
                                                     )
+                                                    signal = "HOLD"
 
                                             if signal in ("BUY", "SELL"):
                                                 logger.info(
