@@ -174,9 +174,9 @@ Successive migration slices introduce small immutable values:
 - `CycleOutcome`: terminal result and per-stage timings.
 
 M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
-`OrderIntent`, and `SubmissionReport`. `RiskDecision`, the order state machine,
-and `CycleOutcome` remain later slices; they are not placeholder classes in the
-current package.
+`OrderIntent`, and `SubmissionReport`. M7a adds the correlated `RiskDecision`
+contract. The pre-trade service, order state machine, and `CycleOutcome` remain
+later slices; they are not placeholder classes in the current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-

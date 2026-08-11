@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7a contract) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -539,6 +539,37 @@ post-legacy, non-assigned shadow call, the same `_filter_rsi` input on both
 paths, and no second submission API. The full-suite result is recorded after
 the final review: 976 passed, 9 skipped, 3 deselected, and only the unchanged
 local PostgreSQL baseline failure because `np.trades` is absent.
+
+### M7a risk-decision contract implementation record
+
+`trading.domain.RiskDecision` is an immutable, infrastructure-free boundary
+between pre-trade planning and execution. It contains one clean decision ID, a
+strict approval boolean, immutable reason codes, and an optional
+strict approval boolean, immutable reasons, and an optional
+`OrderIntent`. Approval requires exactly one typed intent carrying the same
+decision ID. Rejection forbids an intent and requires at least one reason, so a
+denied plan cannot cross accidentally into `OrderService`.
+
+This slice is deliberately unused by `main.py`. It adds no portfolio snapshot,
+configuration, sizing algorithm, fallback, database read, or feature flag. The
+legacy planner remains authoritative until a later M7 slice can compare a
+complete candidate plan without inheriting the known cross-symbol data and
+leverage-configuration defects.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_risk_decision.py tests/test_domain_contracts.py
+.venv/bin/black --target-version py310 --check trading/domain/risk.py trading/domain/__init__.py tests/test_risk_decision.py
+.venv/bin/isort --check-only trading/domain/risk.py trading/domain/__init__.py tests/test_risk_decision.py
+.venv/bin/flake8 trading/domain/risk.py trading/domain/__init__.py tests/test_risk_decision.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/domain tests/test_risk_decision.py
+```
+
+The focused contract suite passed 22 tests and the cumulative domain suite
+passed 107. The full suite passed 998 tests, skipped 9, deselected 3, and kept
+only the unchanged local PostgreSQL baseline failure because `np.trades` is
+absent. The existing domain import-purity gate covers the new module.
 
 ## Cut-over policy
 

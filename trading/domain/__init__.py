@@ -8,6 +8,7 @@ from trading.domain.orders import (
     SubmissionReport,
     SubmissionStatus,
 )
+from trading.domain.risk import RiskDecision
 from trading.domain.signals import Signal, SignalAction
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "OrderSide",
     "OrderType",
     "RetrySafety",
+    "RiskDecision",
     "Signal",
     "SignalAction",
     "SubmissionReport",
