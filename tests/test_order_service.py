@@ -178,7 +178,7 @@ def test_execution_protocol_is_structural() -> None:
 
 def test_application_package_has_only_standard_library_and_domain_imports() -> None:
     application_dir = Path(__file__).parents[1] / "trading" / "application"
-    standard_library_roots = {"typing"}
+    standard_library_roots = {"dataclasses", "typing"}
 
     imported_modules: set[str] = set()
     for module_path in application_dir.rglob("*.py"):

@@ -28,7 +28,7 @@ rollback decision that does not restore unsafe behaviour.
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
-| M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
+| M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
@@ -417,6 +417,50 @@ matches. The full non-performance suite reached 863 passed, 9 skipped, 3
 deselected, and only the same local PostgreSQL baseline failure because
 `np.trades` is absent. The pinned baseline audit and historical changelog remain
 unchanged.
+
+### M6a fail-closed signal-policy core implementation record
+
+`trading.application.SignalPolicyPipeline` is a pure, deliberately unused
+application primitive. It applies an immutable tuple of named policies exactly
+once and in order. A policy returns only `SignalPolicyResult`: it may attach
+reasons, adjust confidence, or veto. It cannot return an action or a replacement
+signal, so promotion from HOLD and reversal between BUY and SELL are
+unrepresentable. The pipeline alone rebuilds the validated `Signal`, preserving
+its decision ID, symbol, side, price, timestamp, strategy, and prior reasons.
+
+Policy IDs are validated and snapshotted at composition time. A malformed
+return, `TimeoutError`, or other `Exception` becomes HOLD at confidence zero,
+stops later policies, and adds a stable `policy:<id>:...` reason without the
+exception message. `BaseException` is not swallowed. An incoming HOLD and an
+empty pipeline return the exact input object and perform no calls.
+
+This slice has no `main.py` wiring and therefore changes no trading behaviour.
+It intentionally does not claim to interrupt blocking calls: the synchronous
+core can only convert a `TimeoutError` already raised by a policy. Network or
+database-backed policies remain excluded until a bounded adapter exists. The
+next slice will add one pure RSI policy and compare it in shadow mode before it
+can become authoritative.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/application tests/test_signal_policy.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/black --target-version py310 --check trading/application tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/isort --check-only trading/application tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/flake8 trading/application tests/test_signal_policy.py tests/test_order_service.py --max-line-length=88
+git grep -n 'SignalPolicyPipeline' -- main.py core trading | grep -v 'trading/application'
+```
+
+The focused suite covers validation boundaries, immutability, fixed order,
+confidence propagation, reason attribution, identity preservation, veto
+short-circuiting, malformed returns, timeout/exception sanitisation, HOLD
+short-circuiting, import purity, and non-swallowing of `KeyboardInterrupt`.
+It passed 50 policy tests, 67 combined application tests, and 152 combined
+domain/application tests. The executable wiring check returned no matches in
+M6a. The full non-performance suite reached 913 passed, 9 skipped, 3
+deselected, and only the unchanged local PostgreSQL baseline failure because
+`np.trades` is absent.
 
 ## Cut-over policy
 
