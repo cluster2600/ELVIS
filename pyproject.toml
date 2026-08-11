@@ -74,6 +74,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "perf: API latency/load benchmarks (run explicitly with -m perf)",
+    "postgres: isolated PostgreSQL integration tests (requires an explicit admin DSN)",
 ]
 
 [tool.black]

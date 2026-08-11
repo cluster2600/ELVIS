@@ -999,6 +999,61 @@ the known ambient-database test failure; the next atomic test-infrastructure
 commit moves that test to a required isolated PostgreSQL CI job rather than
 masking it.
 
+### M9a isolated PostgreSQL test gate
+
+Database-backed tests now require the explicit
+`ELVIS_TEST_POSTGRES_ADMIN_DSN` contract. The harness creates a fresh
+`elvis_pytest_<uuid>` database for each test and drops only that exact database
+afterward. It never reads `DATABASE_URL`, the runtime `POSTGRES_*`/`DB_*`
+variables, `.env`, or Vault. An absent DSN skips PostgreSQL tests locally; with
+`ELVIS_TEST_POSTGRES_REQUIRED=1`, absence or connection/setup failure fails the
+suite. Merely adding the `postgres` marker is insufficient: the test must also
+consume the isolated database fixture. Pytest also forces `VAULT_ENABLED=false`
+and `PYTHON_DOTENV_DISABLED=1` before application modules are imported.
+Collection-time and background-thread database connections fail closed with
+`OperationalError`; during an ordinary test, a main-thread connection becomes a
+visible skip. Legacy diagnostics that used to catch an error and return `False`
+can therefore no longer contact an operator database or count that attempt as a
+passing database check.
+
+The PostgreSQL suite applies the packaged baseline on an empty database, checks
+its no-op replay and lack of balance seed, adopts an exact unversioned legacy
+layout without losing an open-position sentinel, rolls back a failing second
+migration with its ledger, and serializes two concurrent runners. The adaptive
+feedback SQL regression now inserts deterministic rows directly into the
+disposable database and proves a zero-PnL close is returned before a later
+profitable close; it no longer discovers or deletes rows in the ambient local
+database. CI separates the fast unit job (`not perf and not postgres`) from a
+required PostgreSQL 15/Python 3.10 job, and image publication depends on both.
+The migration runner remains unused by production startup.
+
+Verification at implementation time:
+
+```bash
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN -u ELVIS_TEST_POSTGRES_REQUIRED \
+  .venv/bin/python -m pytest -q -ra tests/postgres
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/python -m pytest -q tests/ -m 'not perf and not postgres'
+/usr/local/bin/python3.10 -m compileall -q tests/postgres tests/conftest.py
+```
+
+The first command skips explicitly without a DSN. The second command runs only
+against a disposable PostgreSQL database supplied by the test harness. Legacy
+script-like diagnostics that still have no assertions are quarantined as
+visible skips when they attempt PostgreSQL; converting or removing those files
+is a separate cleanup and does not weaken this connection boundary.
+The boolean-returning diagnostics in `test_database_connection.py`,
+`test_database_integration.py`, and `test_vault_integration.py` are no longer
+collected as pytest tests. The similarly procedural `test_vault_connection.py`,
+which can write a Vault test secret, is also manual-only. All four retain their
+existing `__main__` entry points.
+The six PostgreSQL tests pass both in the project environment and in a minimal
+Python 3.10 environment against PostgreSQL 15; teardown leaves zero
+`elvis_pytest_*` databases. With no test DSN, the full non-performance suite
+passes 1,225 tests, explicitly skips 49, and deselects 9. Setting the required
+flag without a DSN fails setup as designed.
+
 ## Cut-over policy
 
 Each later behavioural migration has three modes:

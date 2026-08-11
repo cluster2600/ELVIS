@@ -279,9 +279,9 @@ additive, schema-only baseline for the existing legacy tables. It neither seeds
 paper capital nor accepts an incompatible pre-existing layout as migrated. It
 also rejects migration-owned transaction control and verifies the durable ledger
 write before commit. It is deliberately not wired to startup yet; the isolated
-PostgreSQL harness and operator migration command must be in place before it can
-become a readiness prerequisite. Order and position repositories remain later
-slices.
+PostgreSQL harness now validates the boundary, while an operator migration
+command must still be in place before it can become a readiness prerequisite.
+Order and position repositories remain later slices.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

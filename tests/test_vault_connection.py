@@ -11,13 +11,15 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# Set vault environment
-os.environ["VAULT_ADDR"] = "http://127.0.0.1:8200"
-os.environ["VAULT_TOKEN"] = "trading-bot-token"
-os.environ["VAULT_ENABLED"] = "true"
+
+def _configure_local_vault_test():
+    """Configure the explicit local Vault target for manual execution only."""
+    os.environ["VAULT_ADDR"] = "http://127.0.0.1:8200"
+    os.environ["VAULT_TOKEN"] = "trading-bot-token"
+    os.environ["VAULT_ENABLED"] = "true"
 
 
-def test_vault():
+def check_vault():
     """Test vault connection"""
     print("🔒 Testing Vault Connection")
     print("=" * 50)
@@ -70,7 +72,7 @@ def test_vault():
         return False
 
 
-def test_secrets_manager():
+def check_secrets_manager():
     """Test secrets manager with vault"""
     print("\n🔐 Testing Secrets Manager")
     print("-" * 50)
@@ -110,8 +112,9 @@ def test_secrets_manager():
 
 
 if __name__ == "__main__":
-    vault_ok = test_vault()
-    secrets_ok = test_secrets_manager()
+    _configure_local_vault_test()
+    vault_ok = check_vault()
+    secrets_ok = check_secrets_manager()
 
     print("\n" + "=" * 60)
     print("📋 VAULT TEST SUMMARY:")

@@ -9,19 +9,80 @@ import os
 # ponytail: same libomp-duplicate segfault guard as main.py; must precede ML imports
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ["VAULT_ENABLED"] = "false"
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
+import psycopg2
 import pytest
+from psycopg2.extensions import make_dsn, parse_dsn
 import logging
 import tempfile
 import shutil
+import threading
 from pathlib import Path
 from unittest.mock import Mock, MagicMock
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
+
+_ORIGINAL_PSYCOPG2_CONNECT = psycopg2.connect
+
+
+def _block_collection_time_postgres(*args, **kwargs):
+    raise psycopg2.OperationalError(
+        "ambient PostgreSQL access is disabled during test collection"
+    )
+
+
+psycopg2.connect = _block_collection_time_postgres
 
 # Disable logging during tests unless explicitly needed
 logging.disable(logging.CRITICAL)
+
+
+@pytest.fixture(autouse=True)
+def block_ambient_postgres_connections(
+    monkeypatch,
+    request,
+    postgres_connection_allowlist,
+):
+    """Never let an ordinary test fall through to an operator database."""
+    authorized = (
+        request.node.get_closest_marker("postgres") is not None
+        and "postgres_database_dsn" in request.fixturenames
+    )
+    if authorized:
+
+        def connect_allowlisted(dsn=None, *args, **kwargs):
+            if args:
+                pytest.fail("PostgreSQL test connections require one explicit DSN")
+            try:
+                candidate = frozenset(parse_dsn(make_dsn(dsn, **kwargs)).items())
+            except Exception:
+                pytest.fail("PostgreSQL test connection parameters are invalid")
+            if candidate not in postgres_connection_allowlist:
+                pytest.fail(
+                    "PostgreSQL test connection is outside the disposable database"
+                )
+            return _ORIGINAL_PSYCOPG2_CONNECT(dsn, **kwargs)
+
+        monkeypatch.setattr(psycopg2, "connect", connect_allowlisted)
+        return
+
+    def skip_ambient_connection(*args, **kwargs):
+        if threading.current_thread() is not threading.main_thread():
+            raise psycopg2.OperationalError(
+                "ambient PostgreSQL access is disabled during tests"
+            )
+        pytest.skip(
+            "PostgreSQL access requires the isolated postgres_database_dsn fixture"
+        )
+
+    monkeypatch.setattr(psycopg2, "connect", skip_ambient_connection)
+
+
+@pytest.fixture
+def postgres_connection_allowlist():
+    """Mutable, test-local identities populated only by the PostgreSQL harness."""
+    return set()
 
 
 @pytest.fixture
@@ -41,6 +102,9 @@ def temp_dir():
 @pytest.fixture
 def sample_price_data():
     """Generate sample price data for testing"""
+    import numpy as np
+    import pandas as pd
+
     dates = pd.date_range(start="2024-01-01", periods=100, freq="5min")
     prices = 50000 + np.random.randn(100).cumsum() * 100
 
@@ -59,6 +123,8 @@ def sample_price_data():
 @pytest.fixture
 def sample_candles():
     """Generate sample candle data in Binance format"""
+    import numpy as np
+
     base_time = int(datetime.now().timestamp() * 1000)
     candles = []
 
@@ -156,6 +222,8 @@ def trading_config():
 @pytest.fixture
 def mock_model():
     """Mock machine learning model"""
+    import numpy as np
+
     model = MagicMock()
     model.predict.return_value = np.array([0.7])  # Bullish prediction
     model.get_params.return_value = {"n_estimators": 100, "max_depth": 10}
