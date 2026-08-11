@@ -24,7 +24,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5a) |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5b) |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -199,6 +199,37 @@ Verification at implementation time:
 All 21 M5a contract tests passed. M5 remains in progress until manifests are
 validated before deserialization and the active producers/consumers use these
 schemas.
+
+### M5b implementation record
+
+The second model slice adds a model-local feature manifest. It records the exact
+feature schema, model kind, library and library version, a timezone-aware
+creation time, component filenames, and SHA-256 digests. Validation rejects an
+unknown format, another schema or runtime version, malformed data, missing or
+tampered files, symbolic links, components outside the manifest directory, and
+duplicate component paths.
+
+The manifest is written atomically and last. A loader can therefore validate
+schema, runtime, path, and hash before invoking a pickle/joblib deserializer.
+This contract complements `core.models.ModelRegistry`: the existing registry is
+an unused approval catalogue, whereas the sibling manifest is an enforced
+compatibility boundary for all components of one model. They are not treated as
+two deployment authorities.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/models/artifact_manifest.py
+.venv/bin/python -m pytest tests/test_feature_artifact_manifest.py -q
+.venv/bin/python -m black --target-version py310 --check trading/models/artifact_manifest.py trading/models/__init__.py tests/test_feature_artifact_manifest.py
+.venv/bin/python -m isort --check-only trading/models/artifact_manifest.py trading/models/__init__.py tests/test_feature_artifact_manifest.py
+.venv/bin/python -m flake8 trading/models/artifact_manifest.py trading/models/__init__.py tests/test_feature_artifact_manifest.py --max-line-length=88
+```
+
+All 10 M5b tests passed, including a fitted sklearn
+training--persistence--validation--inference round trip. Runtime loaders remain
+unchanged until M5c, so this commit cannot activate or reject a production
+model by itself.
 
 ## Cut-over policy
 
