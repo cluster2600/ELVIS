@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from trading.analysis.technical_indicators import add_technical_indicators
 
@@ -29,9 +30,14 @@ def test_add_technical_indicators_adds_expected_columns():
         "rsi",
         "macd",
         "signal_line",
+        "macd_histogram",
         "lower_bb",
         "sma_bb",
         "upper_bb",
         "atr",
     }
     assert expected_columns.issubset(set(result.columns))
+    latest = result.dropna(subset=["macd", "signal_line", "macd_histogram"]).iloc[-1]
+    assert latest["macd_histogram"] == pytest.approx(
+        latest["macd"] - latest["signal_line"]
+    )

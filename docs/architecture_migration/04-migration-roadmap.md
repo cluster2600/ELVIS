@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7d per-symbol inputs) |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7e MACD contract) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -693,6 +693,39 @@ four consumers receive `symbol_history`, both temporary results reset before
 use, and the symbol loop contains no read of the global BTC `data` alias. The
 full suite passes 1,052 tests, skips 9, deselects 3, and keeps only the unchanged
 local PostgreSQL baseline failure because `np.trades` is absent.
+
+### M7e MACD histogram producer-contract implementation record
+
+The roadmap divergence filter has always consumed a `macd_histogram` candle
+column, but the active technical-indicator producer emitted only `macd` and
+`signal_line`. The filter therefore treated every runtime frame as missing the
+input and silently returned no divergence. The producer now emits
+`macd_histogram` directly from `ta.trend.MACD.macd_diff()`. The per-symbol
+market-frame boundary requires the new column, its latest finite value, and two
+finite `close`/`macd_histogram` observations because the divergence consumer
+compares a two-candle window. A partial calculation therefore cannot
+reintroduce the silent fallback.
+
+The change does not alter filter thresholds, override defaults, signal-policy
+authority, or filter order. It only completes the producer/consumer contract
+that the active roadmap gate already declared.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_technical_indicators_module.py tests/test_symbol_market_data.py tests/test_signal_filters.py tests/test_roadmap_wiring.py tests/test_rsi_policy_shadow.py
+.venv/bin/black --target-version py310 --check trading/analysis/technical_indicators.py trading/data/market_frames.py tests/test_technical_indicators_module.py tests/test_symbol_market_data.py
+.venv/bin/isort --check-only trading/analysis/technical_indicators.py trading/data/market_frames.py tests/test_technical_indicators_module.py tests/test_symbol_market_data.py
+.venv/bin/flake8 trading/analysis/technical_indicators.py trading/data/market_frames.py tests/test_technical_indicators_module.py tests/test_symbol_market_data.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/analysis/technical_indicators.py trading/data/market_frames.py tests/test_technical_indicators_module.py tests/test_symbol_market_data.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 122 tests. It verifies the complete output schema and
+the numerical identity `macd_histogram == macd - signal_line`, alongside the
+existing divergence matrix, two-candle input boundary, and per-symbol wiring
+gates. The full suite passes 1,054 tests, skips 9, deselects 3, and keeps only
+the unchanged local PostgreSQL baseline failure because `np.trades` is absent.
 
 ## Cut-over policy
 

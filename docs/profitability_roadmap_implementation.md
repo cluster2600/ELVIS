@@ -38,7 +38,9 @@ the live loop) is wired into `main.py` behind an environment flag.
 - **#8 Time-of-day filter** — `trading.signals.filters.is_optimal_trading_hour`
   Signal gates · `ELVIS_ROADMAP_FILTERS=1`
 - **#9 MACD histogram divergence** — `trading.signals.filters.detect_macd_divergence`
-  Signal gates (veto; BUY/SELL override is opt-in) · `ELVIS_ROADMAP_FILTERS=1`
+  Signal gates (veto; BUY/SELL override is opt-in) · `ELVIS_ROADMAP_FILTERS=1`.
+  The active market-frame producer emits `macd_histogram` from the same MACD
+  calculation as `macd` and `signal_line`.
 - **#10 Dynamic take profit by regime** — `trading.execution.exits.dynamic_take_profit`
   Position loop, replaces the fixed $8 target · `ELVIS_DYNAMIC_TP=1`
 - **#11 Adaptive ML ensemble weights** — `trading.signals.adaptive_ensemble` + `trading.signals.model_feedback`

@@ -19,6 +19,7 @@ REQUIRED_INDICATORS = {
     "rsi",
     "macd",
     "signal_line",
+    "macd_histogram",
     "lower_bb",
     "sma_bb",
     "upper_bb",
@@ -163,6 +164,33 @@ def test_missing_volume_column_is_not_tradeable() -> None:
     frame = _ohlcv(100.0, 160.0, last_volume=100.0).drop(columns="volume")
 
     assert market_frames.enrich_symbol_frames({"BTCUSDT": frame}) == {}
+
+
+@pytest.mark.parametrize("column", ["close", "macd_histogram"])
+def test_non_finite_penultimate_divergence_input_omits_only_that_symbol(
+    monkeypatch: pytest.MonkeyPatch, column: str
+) -> None:
+    raw = {
+        "BTCUSDT": _ohlcv(100.0, 160.0, last_volume=100.0),
+        "BNBUSDT": _ohlcv(600.0, 540.0, last_volume=1.0),
+    }
+    real_enricher = market_frames.add_technical_indicators
+
+    def invalidate_penultimate_observation(frame, logger=None):
+        candidate = real_enricher(frame, logger)
+        if candidate.iloc[0]["close"] > 500.0:
+            candidate.loc[candidate.index[-2], column] = np.nan
+        return candidate
+
+    monkeypatch.setattr(
+        market_frames,
+        "add_technical_indicators",
+        invalidate_penultimate_observation,
+    )
+
+    enriched = market_frames.enrich_symbol_frames(raw)
+
+    assert tuple(enriched) == ("BTCUSDT",)
 
 
 def test_main_symbol_loop_uses_only_its_symbol_history() -> None:

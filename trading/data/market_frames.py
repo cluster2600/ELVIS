@@ -15,6 +15,7 @@ _REQUIRED_INDICATOR_COLUMNS = (
     "rsi",
     "macd",
     "signal_line",
+    "macd_histogram",
     "lower_bb",
     "sma_bb",
     "upper_bb",
@@ -22,16 +23,26 @@ _REQUIRED_INDICATOR_COLUMNS = (
 )
 _REQUIRED_MARKET_COLUMNS = ("close", "high", "low", "volume")
 _REQUIRED_LATEST_COLUMNS = _REQUIRED_MARKET_COLUMNS + _REQUIRED_INDICATOR_COLUMNS
+_REQUIRED_DIVERGENCE_COLUMNS = ("close", "macd_histogram")
 
 
-def _has_finite_latest_values(
-    frame: pd.DataFrame, required_columns: tuple[str, ...]
+def _has_finite_tail_values(
+    frame: pd.DataFrame,
+    required_columns: tuple[str, ...],
+    *,
+    rows: int = 1,
 ) -> bool:
-    if frame.empty or not set(required_columns).issubset(frame.columns):
+    if (
+        rows < 1
+        or len(frame) < rows
+        or not set(required_columns).issubset(frame.columns)
+    ):
         return False
     try:
         return all(
-            math.isfinite(float(frame.iloc[-1][column])) for column in required_columns
+            math.isfinite(float(value))
+            for column in required_columns
+            for value in frame[column].iloc[-rows:]
         )
     except (TypeError, ValueError, OverflowError):
         return False
@@ -50,7 +61,7 @@ def enrich_symbol_frames(
                 "Skipping %s: market frame is missing or empty", symbol
             )
             continue
-        if not _has_finite_latest_values(frame, _REQUIRED_MARKET_COLUMNS):
+        if not _has_finite_tail_values(frame, _REQUIRED_MARKET_COLUMNS):
             active_logger.warning(
                 "Skipping %s: latest market observation is incomplete", symbol
             )
@@ -64,8 +75,12 @@ def enrich_symbol_frames(
                 type(exc).__name__,
             )
             continue
-        if not isinstance(candidate, pd.DataFrame) or not _has_finite_latest_values(
-            candidate, _REQUIRED_LATEST_COLUMNS
+        if (
+            not isinstance(candidate, pd.DataFrame)
+            or not _has_finite_tail_values(candidate, _REQUIRED_LATEST_COLUMNS)
+            or not _has_finite_tail_values(
+                candidate, _REQUIRED_DIVERGENCE_COLUMNS, rows=2
+            )
         ):
             active_logger.warning(
                 "Skipping %s: indicator enrichment is incomplete", symbol

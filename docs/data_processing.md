@@ -267,9 +267,9 @@ classDiagram
 
 `add_technical_indicators(data, logger=None)` is a **module-level function**
 (no class). It uses the `ta` library and adds: `sma_20`, `sma_50`, `adx`,
-`rsi`, `macd` + `signal_line`, Bollinger Bands (`lower_bb`/`sma_bb`/`upper_bb`),
-and `atr`. It returns the input unchanged if `len(data) < 50` or if
-`close`/`high`/`low` columns are missing.
+`rsi`, `macd` + `signal_line` + `macd_histogram`, Bollinger Bands
+(`lower_bb`/`sma_bb`/`upper_bb`), and `atr`. It returns the input unchanged if
+`len(data) < 50` or if `close`/`high`/`low` columns are missing.
 
 ---
 
