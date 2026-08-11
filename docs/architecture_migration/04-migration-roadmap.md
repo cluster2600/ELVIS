@@ -12,8 +12,11 @@ Every slice must be independently reviewable and reversible:
 6. update this status ledger and relevant operator documentation; and
 7. create one explicit commit containing only that slice.
 
-No slice enables unattended live trading, changes secrets, deploys, pushes, or
-deletes a legacy path before its replacement has passed parity checks.
+No slice enables unattended live trading, changes secrets, deploys, or pushes.
+A load-bearing legacy path is deleted only after its replacement passes parity
+checks. A path proven synthetic, non-deployable, and inactive may instead be
+retired after an explicit audit, zero-call regression tests, and a documented
+rollback decision that does not restore unsafe behaviour.
 
 ## Roadmap
 
@@ -24,7 +27,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | In progress (M5c strategies) |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, synthetic 20-feature paths retired, training/inference round trip | revert only the current contract adapter; never restore synthetic loaders | In progress (M5d; trade-learned pending) |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -172,13 +175,13 @@ baseline failure: the locally reachable PostgreSQL instance lacks
 
 ### M5a implementation record
 
-The first model slice defines immutable, Python 3.10-compatible feature schemas
-without changing runtime model selection. Research and Bonenkamp each receive
+The first model slice defined immutable, Python 3.10-compatible feature schemas
+without changing runtime model selection. Research and Bonenkamp each received
 distinct 9- and 11-feature identities because their indicator implementations
-and social inputs are not interchangeable. The tracked YDF artefact and the
-CoreML path also receive distinct 20-feature contracts: the YDF `data_spec.pb`
-order differs from the legacy CoreML order, and their preprocessing and dtypes
-differ.
+and social inputs are not interchangeable. It also captured the incompatible
+orders of the then-present YDF and CoreML 20-feature paths. M5d subsequently
+used that evidence to retire both synthetic placeholders and removed their
+unused runtime schemas; the Research and Bonenkamp contracts remain active.
 
 Each schema owns its ordered names, logical dtypes, and preprocessing version.
 Vectorization rejects missing, boolean, non-numeric, NaN, or infinite values;
@@ -304,6 +307,68 @@ M5 remains in progress for the active Ensemble model adapters. Transactional
 multi-file artefact publication remains a later persistence hardening slice;
 the current manifest is atomic and written last, so interrupted bundles reject
 closed on the next load.
+
+### M5d Ensemble placeholder retirement implementation record
+
+The 20-feature investigation established that neither legacy Ensemble member
+was a deployable model. The tracked YDF directory was a provenance-less
+synthetic classifier: its own OOB accuracy was 37.1%, below the 39.3%
+majority-class baseline, while the configured TensorFlow-DF loader could not
+load its native YDF bundle. Even if loaded with the correct API, the runtime
+mistook a three-probability output for a class index and fabricated confidence.
+The CoreML artefact expected by runtime did not exist; its only producer trained
+on random data, exposed different input/output names, and wrote to a developer
+absolute path.
+
+Both members were therefore retired instead of repaired. Their imports,
+constructor options, loaders, prediction branches, unused feature schemas,
+configuration keys, random-data generator, and tracked 5.5 MB placeholder were
+removed. `DataProcessor` and the legacy DataFrame adapter no longer invent
+order, future-price, sentiment, social, or order-book inputs. Legitimate
+features such as a computed rolling volume mean remain available when an
+actual producer creates them.
+
+The unused YDF/CoreML packages and provisioning hooks were also removed. The
+optional Python 3.10 training image remains for the real unified training entry
+point and now explicitly installs pinned CPU PyTorch, TensorFlow, and seaborn;
+Ansible installs only runtime requirements into its deployment venv. The
+container entry point now runs its child from the repository root, preserves
+Compose-provided database settings, propagates child failures, and cleans up
+without turning a successful run into a failure.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/models trading/data/data_processor.py trading/strategies/ensemble_strategy.py scripts/train_no_vault.py tests/test_ensemble_placeholder_retirement.py tests/test_training_entrypoint.py
+.venv/bin/python -m pytest -q tests/test_ensemble_placeholder_retirement.py tests/test_feature_schema_contracts.py tests/test_main_retrain_hook.py tests/test_training_entrypoint.py
+.venv/bin/python -m pytest -q tests/test_feature_schema_contracts.py tests/test_feature_artifact_manifest.py tests/test_research_feature_schema.py tests/test_research_strategy_features.py tests/test_feature_fix.py tests/test_research_strategy.py tests/test_bonenkamp_feature_schema.py tests/test_bonenkamp_strategy.py tests/test_ensemble_placeholder_retirement.py tests/test_main_retrain_hook.py tests/test_training_entrypoint.py
+ansible-playbook --syntax-check ansible/playbook.yml -i 'localhost,' --connection=local
+docker compose --profile ml config --no-env-resolution --no-path-resolution --no-interpolate -q
+docker compose --profile ml build elvis-ml-trainer
+docker run --rm --network none --entrypoint python \
+  elvis-architecture-migration-elvis-ml-trainer:latest \
+  -c "import torch, tensorflow, seaborn; from training.models.model_trainer import ModelTrainer; print(torch.__version__, tensorflow.__version__, seaborn.__version__, ModelTrainer.__name__)"
+docker run --rm --network none --entrypoint python \
+  elvis-architecture-migration-elvis-ml-trainer:latest \
+  training/train_models.py --help
+docker run --rm --network none -v "$PWD/data:/app/data:ro" \
+  elvis-architecture-migration-elvis-ml-trainer:latest \
+  bash scripts/run_training.sh --quick --no-vault
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused retirement/contracts/entry-point suite passed 35 tests and the
+cumulative M5 suite passed 91. The rebuilt Python 3.10 image imported CPU
+PyTorch 2.10.0, TensorFlow 2.16.2, seaborn 0.13.2, and `ModelTrainer`; the
+checked-in sample data completed the real no-Vault training command with exit
+code zero. A no-data smoke reached the same child and returned its failure
+without printing the global success banner. The full non-performance suite
+reached 863 passed, 9 skipped, 3 deselected, and the same baseline
+PostgreSQL failure (`np.trades` is absent).
+M5 remains in progress for the incompatible trade-learned producer/consumer
+contract; no replacement 20-feature model will be admitted without causal
+data, a reproducible producer, a manifest round trip, and out-of-sample evidence
+above a declared baseline.
 
 ## Cut-over policy
 

@@ -27,15 +27,15 @@ def setup_training_environment():
     os.environ["BINANCE_API_SECRET"] = "training_mode_secret"
 
     # Database settings for training
-    os.environ["POSTGRES_HOST"] = "localhost"
-    os.environ["POSTGRES_PORT"] = "5432"
-    os.environ["POSTGRES_USER"] = "postgres"
-    os.environ["POSTGRES_PASSWORD"] = "training_password"
-    os.environ["POSTGRES_DBNAME"] = "trading_db"
+    os.environ.setdefault("POSTGRES_HOST", "localhost")
+    os.environ.setdefault("POSTGRES_PORT", "5432")
+    os.environ.setdefault("POSTGRES_USER", "postgres")
+    os.environ.setdefault("POSTGRES_PASSWORD", "training_password")
+    os.environ.setdefault("POSTGRES_DBNAME", "trading_db")
 
     # Redis settings
-    os.environ["REDIS_HOST"] = "localhost"
-    os.environ["REDIS_PORT"] = "6379"
+    os.environ.setdefault("REDIS_HOST", "localhost")
+    os.environ.setdefault("REDIS_PORT", "6379")
 
     print("✅ Training environment configured")
 
@@ -101,8 +101,9 @@ def run_training(args):
 
     try:
         # Run training with clean environment
+        repository_root = Path(__file__).resolve().parent.parent
         result = subprocess.run(
-            cmd_parts, env=os.environ.copy(), cwd=str(Path(__file__).parent)
+            cmd_parts, env=os.environ.copy(), cwd=str(repository_root)
         )
 
         if result.returncode == 0:
@@ -111,11 +112,14 @@ def run_training(args):
             print(f"📂 Check {args.output}/ for results")
         else:
             print(f"\n❌ Training failed with code {result.returncode}")
+        return result.returncode
 
     except KeyboardInterrupt:
         print("\n⚠️  Training interrupted")
+        return 130
     except Exception as e:
         print(f"\n❌ Training error: {e}")
+        return 1
 
 
 def main():
@@ -145,13 +149,15 @@ def main():
     os.makedirs(args.output, exist_ok=True)
 
     # Run training
-    run_training(args)
+    status = run_training(args)
 
-    print("\n💡 Next steps:")
-    print("   - Check model outputs in models/")
-    print("   - Review logs for training progress")
-    print("   - Test models with paper trading")
+    if status == 0:
+        print("\n💡 Next steps:")
+        print("   - Check model outputs in models/")
+        print("   - Review logs for training progress")
+        print("   - Test models with paper trading")
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

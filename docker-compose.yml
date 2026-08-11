@@ -160,8 +160,8 @@ services:
     networks:
       - elvis-network
 
-  # ML-legacy trainer — Python 3.10 (tensorflow/ydf/coremltools have no 3.14
-  # wheels). Shares ONLY the models/ volume with the 3.14 bot: coupling is
+  # Unified ML trainer — Python 3.10. It requires PyTorch and keeps optional
+  # TensorFlow isolated from the 3.14 bot. Shares ONLY the models/ volume; coupling is
   # saved model files, never imports. Run on demand:
   #   docker compose --profile ml run --rm elvis-ml-trainer
   elvis-ml-trainer:

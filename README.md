@@ -7,8 +7,9 @@
 [![Python](https://img.shields.io/badge/python-3.14%20%7C%203.10%20(ML)-blue)](docs/DEPLOYMENT.md)
 [![License](https://img.shields.io/badge/license-BTC__BOT-lightgrey)](LICENSE)
 
-ELVIS is a BTC futures trading bot that combines an ML ensemble (RandomForest,
-neural nets, optional YDF/CoreML members), market-regime detection, and a
+ELVIS is a BTC futures trading bot that combines technical analysis,
+contract-gated Random Forest strategies, reinforcement learning,
+market-regime detection, and a
 layered signal-quality pipeline with strict risk management. Secrets live in
 HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
 
@@ -19,8 +20,9 @@ HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
 
 ## Features
 
-- **Ensemble strategy** — multiple models vote; graceful degradation when
-  optional ML deps (ydf, tensorflow, coremltools) are absent
+- **Ensemble strategy** — technical, research, RL, Bonenkamp, trade-learned,
+  and optional MLX signals vote; incompatible Research/Bonenkamp artefacts stay
+  disabled
 - **Signal-quality gates** — market regime, RSI, momentum persistence,
   BB squeeze, trading hours, MACD divergence, order flow, multi-timeframe
   alignment ([roadmap implementation](docs/profitability_roadmap_implementation.md))
@@ -55,12 +57,13 @@ python main.py --mode paper
 ```bash
 docker compose up -d                                  # bot + database
 docker compose --profile observability up -d          # + Prometheus/Grafana/Loki
-docker compose --profile ml run --rm elvis-ml-trainer # py3.10 ML-legacy training
+docker compose --profile ml run --rm elvis-ml-trainer # py3.10 ML training
 ```
 
-The bot image runs Python 3.14; TensorFlow/YDF/CoreML training runs in a
-separate Python 3.10 container sharing the `models/` volume — see
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+The bot image runs Python 3.14; the unified PyTorch trainer and its optional
+TensorFlow path run in a separate Python 3.10 container sharing the `models/`
+volume — see
+[docs/UNIFIED_TRAINING_GUIDE.md](docs/UNIFIED_TRAINING_GUIDE.md).
 
 ## Project layout
 

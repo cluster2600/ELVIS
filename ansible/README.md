@@ -51,7 +51,9 @@ The Ansible playbook automatically installs and configures:
 
 ### Python Environment
 - **Virtual environment** - Isolated Python environment
-- **All Python dependencies** - From requirements.txt, requirements/requirements_coreml.txt, requirements/requirements_ydf.txt
+- **Runtime Python dependencies** - From requirements.txt. The optional
+  Python 3.10 ML stack is isolated in `docker/Dockerfile.ml310`, not installed
+  into the deployment venv.
 
 ### Services & Monitoring
 - **Systemd service** - Auto-start ELVIS bot

@@ -231,11 +231,11 @@ DataProcessor(exchange, feature_config, quality_config, logger)
    `feature_config.orderbook_features` (via `exchange.fetch_order_book`).
 5. Optionally add `funding_rate` if `feature_config.funding_features`
    (via `exchange.fetch_funding_rate`).
-6. Backfill a fixed list of `required_features` expected by
-   `EnsembleStrategy` (e.g. `price`, `atr`, `macd`, `signal_line`, `rsi`,
-   `lower_bb`/`sma_bb`/`upper_bb`, plus placeholders like `news_sentiment`,
-   `social_feature`, `order_book_depth` defaulted to `0.0`).
-7. Optionally `handle_missing_data(df)` if `quality_config.handle_missing_data`.
+6. Optionally `handle_missing_data(df)` if `quality_config.handle_missing_data`.
+
+The processor does not invent model inputs. The retired Ensemble path used to
+backfill unknown order, future-price, sentiment, and order-book values with
+zeros; that could hide feature drift and has been removed.
 
 **`add_technical_indicators(data)`** uses the **`ta`** library and adds:
 `sma_20`, `sma_50`, `adx`, `rsi`, `macd` + `macd_signal`, Bollinger Bands
@@ -389,15 +389,15 @@ Missing/placeholder keys degrade gracefully to public/keyless clients (and, for
 
 - **TA-Lib** (`talib`) is an **optional** import in `BinanceProcessor`; if the
   C library/wheel is unavailable it sets `HAS_TALIB = False` and logs a
-  warning. Pin `ta-lib==0.6.3` lives only in `requirements/requirements_coreml.txt`.
+  warning. The `[ml]` extra can install it when needed.
 - **`ta`** (pure-Python) is a hard dependency (`requirements.txt`) and backs
   `DataProcessor` and `trading/analysis/technical_indicators.py`.
 - **`ccxt`** backs `BinanceProcessor`; **`python-binance`** (`binance.*`) backs
   `PriceFetcher` and `data_downloader.py`; **`websocket-client`** backs the live
   stream.
-- `tensorflow` / `ydf` and similar have **no Python 3.14 wheels** and are not
-  used by the data-processing path (they appear only in `requirements/requirements_coreml.txt`
-  / `requirements/requirements_ydf.txt` for the CoreML/YDF training variants).
+- TensorFlow has no Python 3.14 wheel and remains isolated in the optional
+  Python 3.10 training image. It is not part of data processing or Ensemble
+  inference.
 
 ---
 

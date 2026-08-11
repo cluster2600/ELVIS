@@ -58,6 +58,4 @@ FILE_PATHS = {
     "TRAINING_DATA": "data/processed/training_data.csv",
     "TRANSFORMER_MODEL": "models/transformer_model.pt",
     "NN_MODEL": "models/nn_model.h5",
-    "RF_MODEL": "models/model_rf.ydf/",
-    "COREML_MODEL": "models/NNModel.mlpackage/",
 }

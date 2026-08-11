@@ -26,9 +26,9 @@ This strategy helps to **reduce overfitting** and improve **generalization** com
 ## 🎯 Use in the ELVIS Trading System
 
 ELVIS ships **two** Random Forest implementations, both built on **scikit-learn's**
-`RandomForestClassifier` and persisted with **joblib** (there is no TensorFlow
-Decision Forests / `.ydf` model behind these classes — that lives only in the
-separate `EnsembleStrategy` YDF loader):
+`RandomForestClassifier` and persisted with **joblib**. The unrelated synthetic
+YDF placeholder and its Ensemble loader were retired; neither backs these
+classes:
 
 | Class | File | Purpose |
 | --- | --- | --- |
@@ -44,10 +44,9 @@ it into the ensemble. The `EnhancedRandomForestModel` is trained via
 `scripts/train_enhanced_rf.py` and integrated through
 `core/models/integration/enhanced_rf_integration.py`.
 
-> **Optional dependencies.** SHAP, Optuna, TensorFlow, and YDF have no wheels on
-> some Python versions (including the 3.14 target). Every use of them in this
-> code is guarded by a `try/import`, so the models still work without them —
-> they simply fall back to scikit-learn equivalents (or disable that feature).
+> **Optional dependencies.** SHAP and Optuna have no wheels on some Python
+> versions (including the 3.14 target). Their use is guarded, so these models
+> keep their documented scikit-learn fallbacks when either is unavailable.
 
 ---
 

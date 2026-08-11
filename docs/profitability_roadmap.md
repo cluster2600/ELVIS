@@ -417,49 +417,16 @@ def calculate_dynamic_take_profit(self, market_regime: str, entry_price: float) 
 **Problem:** Ensemble models have similar predictions (redundancy)
 
 **Solution:**
-- Retrain YDF/CoreML models on recent 6 months data
-- Add Gradient Boosting model (XGBoost)
-- Weight models by recent accuracy, not equally
-- Use stacking approach (meta-learner on model outputs)
+- Keep the retired random-data YDF/CoreML placeholders disabled.
+- Admit a new model only with causal data, a reproducible producer, a feature
+  manifest, and out-of-sample performance above a declared trivial baseline.
+- Measure prediction correlation before adding another voter.
+- Weight only validated models by recent paper/replay accuracy; never assign a
+  weight to a missing or incompatible artefact.
 
-**Implementation:**
-```python
-# Weighted ensemble by recent performance
-class AdaptiveEnsemble:
-    def __init__(self):
-        self.model_accuracies = {
-            'ydf': 0.45,
-            'nn': 0.42,
-            'trade_learned': 0.38,
-            'xgboost': 0.50  # New model
-        }
-        self.weights = self._normalize_accuracies()
-    
-    def _normalize_accuracies(self):
-        total = sum(self.model_accuracies.values())
-        return {k: v/total for k, v in self.model_accuracies.items()}
-    
-    def get_ensemble_signal(self, predictions):
-        """Weighted average of model predictions"""
-        weighted_pred = 0
-        for model, weight in self.weights.items():
-            weighted_pred += predictions[model] * weight
-        return weighted_pred
-    
-    def update_accuracies(self, model, accuracy):
-        """Adapt weights based on recent performance"""
-        self.model_accuracies[model] = accuracy * 0.7 + \
-                                       self.model_accuracies[model] * 0.3
-        self.weights = self._normalize_accuracies()
-```
-
-**Expected Impact:**
-- Better signal diversity: 45% → 55%
-- Reduce correlation between models
-- Win rate: 35% → 52%
-
-**Effort:** 5 days (includes retraining)  
-**ROI Improvement:** +35%
+**Acceptance evidence:** reproducible dataset/version, leak-free temporal split,
+baseline comparison, calibration and latency report, manifest round trip, and
+shadow-mode results. No profitability or win-rate uplift is assumed in advance.
 
 ---
 
@@ -838,4 +805,3 @@ The 15-idea roadmap provides **multiple paths** to improve profitability:
 **Conservative estimate:** $10k capital → $25k+ monthly with full implementation.
 
 Start with Phase 1 (3-4 days work) for immediate +7% improvement, then compound with subsequent phases.
-

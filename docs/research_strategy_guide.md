@@ -117,7 +117,7 @@ ROLLING_TRAINING_ENABLED=true STRATEGY_MODE=research python main.py --mode paper
 | Feature | Ensemble Strategy | Research Strategy |
 |---------|------------------|-------------------|
 | **Signal Types** | BUY, SELL, HOLD | BUY, SELL only |
-| **Models** | Multiple (YDF, CoreML, DRL) | Pure Random Forest |
+| **Models** | Technical, trade-learned, RL, research, Bonenkamp | Pure Random Forest |
 | **Training** | Static pre-trained | Rolling 1-week windows |
 | **Social Data** | None | Twitter + Google Trends |
 | **Research Basis** | Custom implementation | Academic paper (2021) |

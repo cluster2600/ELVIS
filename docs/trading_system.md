@@ -30,7 +30,7 @@ graph TB
     subgraph "Signal Generation"
         DataFeed[Market Data / PriceFetcher]
         Features[Feature Dict]
-        Models[YDF / CoreML / trade-learned / RL / research / Bonenkamp-HFT]
+        Models[technical / trade-learned / RL / research / Bonenkamp-HFT]
         Signal[signal, confidence]
     end
 
@@ -128,10 +128,7 @@ with technical analysis into a weighted vote.
 classDiagram
     class EnsembleStrategy {
         +symbols: List~str~
-        +REQUIRED_FEATURES: List~str~  20 features
         +CLASSES: List~str~  BUY, HOLD, SELL
-        +ydf_model
-        +nn_model  CoreML
         +trade_learned_model  sklearn via joblib
         +drl_agent
         +research_strategy
@@ -155,16 +152,15 @@ classDiagram
 
 How it actually works:
 
-- **Model sources (all optional).** On construction it tries to load a YDF
-  Random Forest (`models/model_rf.ydf` native, else a TensorFlow-DF export at
-  `models/model_rf_tf`), a CoreML neural net (`models/NNModel.mlpackage`), and a
+- **Model sources (all optional).** On construction it tries to load a
   trade-learned scikit-learn classifier persisted with `joblib`
   (`training/models/trade_learned_model.pkl`). It also optionally wires in a DRL
   agent, a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an
-  MLX LLM endpoint (`MLX_URL`). Any source that fails to import or load is simply
-  skipped — `ydf`, `tensorflow`, and `coremltools` have no Python 3.14 wheels and
-  are guarded behind `try/except`, so on 3.14 the strategy runs on technical
-  analysis plus whichever pure-Python sources are present.
+  MLX LLM endpoint (`MLX_URL`). The former YDF and CoreML branches were removed:
+  the CoreML producer trained on random data, while the provenance-less YDF
+  artefact scored 37.1% OOB accuracy versus a 39.3% majority-class baseline and
+  could not be loaded by its configured loader. Neither path had a compatible
+  production artefact.
 - **Research and Bonenkamp artefacts are contract-gated.** Their separate 9- and
   11-feature schemas define order and preprocessing. A model/scaler pair is
   activated only when its sibling manifest, hashes, runtime version, concrete

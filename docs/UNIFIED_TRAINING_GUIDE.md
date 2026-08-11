@@ -144,11 +144,15 @@ need them, so the training modules are designed to import and run without them.
 - **Enable a feature** — install the corresponding extra and rerun:
   ```bash
   venv314/bin/pip install optuna       # AutoML hyperparameter search
-  venv314/bin/pip install tensorflow   # TensorFlow / keras model paths
   venv314/bin/pip install shap lime    # model explanations
+  docker compose --profile ml run --rm elvis-ml-trainer  # Python 3.10 TensorFlow path
   ```
-  With the library present, the matching `*_AVAILABLE` flag flips to `True` and
-  the feature activates automatically — no code changes needed.
+The Docker profile installs `requirements/requirements_ml310.txt`; TensorFlow
+must not be added to the Python 3.14 runtime venv. With a supported optional
+library present, the matching `*_AVAILABLE` flag activates its code path.
+Compose mounts `./data` as training input and `./models` as output.
+Missing input or a child-process failure returns a non-zero status; the wrapper
+does not report a failed run as successful.
 
 ## 📈 **What Gets Produced**
 

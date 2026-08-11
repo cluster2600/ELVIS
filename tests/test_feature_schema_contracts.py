@@ -10,8 +10,6 @@ from trading.models.feature_schema import (
 from trading.models.feature_schemas import (
     BONENKAMP_FINANCIAL_9_V1,
     BONENKAMP_SOCIAL_11_V1,
-    ENSEMBLE_COREML_20_V1,
-    ENSEMBLE_YDF_20_V1,
     RESEARCH_FINANCIAL_9_V1,
     RESEARCH_SOCIAL_11_V1,
 )
@@ -24,8 +22,6 @@ from trading.models.feature_schemas import (
         (BONENKAMP_FINANCIAL_9_V1, 9),
         (RESEARCH_SOCIAL_11_V1, 11),
         (BONENKAMP_SOCIAL_11_V1, 11),
-        (ENSEMBLE_YDF_20_V1, 20),
-        (ENSEMBLE_COREML_20_V1, 20),
     ],
 )
 def test_registered_schemas_have_stable_sizes(schema: FeatureSchema, size: int) -> None:
@@ -48,21 +44,6 @@ def test_optional_social_variants_have_distinct_identities() -> None:
         "TWITTER_PRICE_LAG",
         "GOOGLE_TRENDS",
     )
-
-
-def test_ydf_and_coreml_have_distinct_order_and_preprocessing() -> None:
-    assert ENSEMBLE_YDF_20_V1.names[:4] == ("price", "volume", "rsi", "macd")
-    assert ENSEMBLE_COREML_20_V1.names[:4] == (
-        "price",
-        "Order_Amount",
-        "sma",
-        "Filled",
-    )
-    assert ENSEMBLE_YDF_20_V1.names != ENSEMBLE_COREML_20_V1.names
-    assert ENSEMBLE_YDF_20_V1.preprocessing_id == "identity.v1"
-    assert ENSEMBLE_COREML_20_V1.preprocessing_id == "legacy-amplitude.v1"
-    assert set(ENSEMBLE_YDF_20_V1.dtypes) == {"float64"}
-    assert set(ENSEMBLE_COREML_20_V1.dtypes) == {"float32"}
 
 
 def test_vectorize_uses_schema_order_and_ignores_unrelated_context() -> None:
