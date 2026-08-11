@@ -30,7 +30,7 @@ graph TB
     subgraph "Signal Generation"
         DataFeed[Market Data / PriceFetcher]
         Features[Feature Dict]
-        Models[technical / trade-learned / RL / research / Bonenkamp-HFT]
+        Models[technical / RL / research / Bonenkamp-HFT / optional MLX]
         Signal[signal, confidence]
     end
 
@@ -129,7 +129,6 @@ classDiagram
     class EnsembleStrategy {
         +symbols: List~str~
         +CLASSES: List~str~  BUY, HOLD, SELL
-        +trade_learned_model  sklearn via joblib
         +drl_agent
         +research_strategy
         +rl_strategy
@@ -152,15 +151,11 @@ classDiagram
 
 How it actually works:
 
-- **Model sources (all optional).** On construction it tries to load a
-  trade-learned scikit-learn classifier persisted with `joblib`
-  (`training/models/trade_learned_model.pkl`). It also optionally wires in a DRL
-  agent, a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an
-  MLX LLM endpoint (`MLX_URL`). The former YDF and CoreML branches were removed:
-  the CoreML producer trained on random data, while the provenance-less YDF
-  artefact scored 37.1% OOB accuracy versus a 39.3% majority-class baseline and
-  could not be loaded by its configured loader. Neither path had a compatible
-  production artefact.
+- **Model sources (all optional).** On construction it can wire in a DRL agent,
+  a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an MLX LLM
+  endpoint (`MLX_URL`). The former YDF, CoreML, and trade-learned branches were
+  retired after audit: none had a causally valid, runtime-compatible production
+  artefact. The migration ledger records the evidence and acceptance tests.
 - **Research and Bonenkamp artefacts are contract-gated.** Their separate 9- and
   11-feature schemas define order and preprocessing. A model/scaler pair is
   activated only when its sibling manifest, hashes, runtime version, concrete

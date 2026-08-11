@@ -1,4 +1,4 @@
-"""Regression tests for retired synthetic YDF/CoreML ensemble members."""
+"""Regression tests for retired invalid Ensemble model members."""
 
 import ast
 import inspect
@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pandas as pd
 
 from trading.data.data_processor import DataProcessor
@@ -43,13 +44,24 @@ def test_ensemble_runtime_exposes_no_retired_model_hooks() -> None:
     assert {"ydf", "coremltools"}.isdisjoint(imported_roots)
     assert "ydf_model_path" not in inspect.signature(EnsembleStrategy).parameters
     assert "coreml_model_path" not in inspect.signature(EnsembleStrategy).parameters
+    assert (
+        "trade_learned_model_path" not in inspect.signature(EnsembleStrategy).parameters
+    )
+    assert (
+        inspect.signature(EnsembleStrategy).parameters["mlx_url"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
     for retired_hook in (
         "_load_ydf_model",
         "_load_coreml_model",
+        "_load_trade_learned_model",
         "self.ydf_model",
         "self.nn_model",
+        "self.trade_learned_model",
         'preds["ydf"]',
         'preds["nn"]',
+        'preds["trade_learned"]',
+        "_extract_trade_learned_features",
         "REQUIRED_FEATURES",
     ):
         assert retired_hook not in source
@@ -64,10 +76,15 @@ def test_injected_retired_models_are_never_invoked() -> None:
             self.calls += 1
             raise AssertionError("retired model was invoked")
 
+        def predict_proba(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("retired model was invoked")
+
     strategy = object.__new__(EnsembleStrategy)
     strategy.logger = MagicMock()
     strategy.CLASSES = ["BUY", "HOLD", "SELL"]
-    strategy.trade_learned_model = None
+    retired_trade_learned = RetiredModel()
+    strategy.trade_learned_model = {"model": retired_trade_learned}
     strategy.mlx_available = False
     strategy.drl_agent = None
     strategy.enable_research_strategy = False
@@ -94,7 +111,9 @@ def test_injected_retired_models_are_never_invoked() -> None:
 
     assert retired_ydf.calls == 0
     assert retired_coreml.calls == 0
+    assert retired_trade_learned.calls == 0
     assert set(predictions) == {"technical"}
+    np.testing.assert_allclose(predictions["technical"], [0.35, 0.30, 0.35])
 
 
 def test_dataframe_feature_adapter_does_not_invent_model_inputs() -> None:
@@ -165,6 +184,7 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
 
     assert not (REPOSITORY_ROOT / "models/model_rf_tf").exists()
     assert not (REPOSITORY_ROOT / "scripts/create_coreml_model.py").exists()
+    assert not (REPOSITORY_ROOT / "training/trade_based_trainer.py").exists()
     assert not (REPOSITORY_ROOT / "requirements/requirements_ydf.txt").exists()
     assert not (REPOSITORY_ROOT / "requirements/requirements_coreml.txt").exists()
     assert not (REPOSITORY_ROOT / "requirements/requirements_tensorflow.txt").exists()
@@ -183,6 +203,13 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
     pyproject = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     config = (REPOSITORY_ROOT / "config/__init__.py").read_text(encoding="utf-8")
     trainer = (REPOSITORY_ROOT / "docker/Dockerfile.ml310").read_text(encoding="utf-8")
+    dockerignore_lines = {
+        line.strip()
+        for line in (REPOSITORY_ROOT / ".dockerignore")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
 
     assert "coremltools" not in pyproject
     assert '"RF_MODEL"' not in config
@@ -190,6 +217,7 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
     assert "ydf" not in trainer.lower()
     assert "coreml" not in trainer.lower()
     assert "requirements_ml310.txt" in trainer
+    assert "*.pkl" in dockerignore_lines
     assert {"ydf", "coremltools"}.isdisjoint(requirement_names)
     assert "torch==2.10.0+cpu" in requirement_lines
     assert "seaborn==0.13.2" in requirement_lines

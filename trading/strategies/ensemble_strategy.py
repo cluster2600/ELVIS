@@ -24,19 +24,17 @@ from trading.strategies.bonenkamp_hft_strategy import BonenkampHFTStrategy
 
 class EnsembleStrategy(BaseStrategy):
     """
-    EnsembleStrategy combines predictions from multiple models:
-    - Trade-learned model (trained on actual trading history)
-    - (optional) MLX Large Language Model for additional decision support
+    EnsembleStrategy combines technical analysis with validated optional
+    strategies and an optional MLX language-model signal.
 
-    This strategy averages model outputs to determine a consensus BUY, SELL, or HOLD signal.
-    The trade-learned model provides adaptive learning from actual trading experience.
+    Available outputs are averaged to determine a BUY, SELL, or HOLD signal.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
         symbols: List[str] = ["BTCUSDT"],
-        trade_learned_model_path: str = "training/models/trade_learned_model.pkl",
+        *,
         mlx_url: str = None,
         risk_per_trade: float = 0.01,
         min_position_size: float = 0.001,
@@ -84,9 +82,6 @@ class EnsembleStrategy(BaseStrategy):
         self.mlx_url = mlx_url or os.getenv("MLX_URL", "")
         self.mlx_available = False
 
-        self.trade_learned_model = self._load_trade_learned_model(
-            trade_learned_model_path
-        )
         self._check_mlx_connectivity()
 
         # Initialize DRL agent
@@ -143,51 +138,6 @@ class EnsembleStrategy(BaseStrategy):
             self.logger.info(
                 f"⚡ Recorded trade signal: {signal} at ${price:.2f} - INSTANT NEXT TRADE ALLOWED"
             )
-
-    def _load_trade_learned_model(self, model_path: str):
-        """Load the trade-learned model from disk."""
-        try:
-            import joblib
-
-            if not os.path.exists(model_path):
-                self.logger.warning(
-                    f"Trade-learned model file not found at {model_path}"
-                )
-                return None
-
-            model_data = joblib.load(model_path)
-
-            # Handle both old format (direct model) and new format (dict with metadata)
-            if hasattr(model_data, "predict"):
-                # Direct model - wrap in dictionary format
-                wrapped_model = {
-                    "model": model_data,
-                    "model_type": "sklearn_classifier",
-                    "training_samples": "unknown",
-                    "cv_score": "unknown",
-                }
-                self.logger.info(
-                    f"Trade-learned model loaded from {model_path} (direct model)"
-                )
-                return wrapped_model
-            elif isinstance(model_data, dict) and "model" in model_data:
-                # New format with metadata
-                self.logger.info(f"Trade-learned model loaded from {model_path}")
-                self.logger.info(
-                    f"Model type: {model_data.get('model_type', 'unknown')}"
-                )
-                self.logger.info(
-                    f"Training samples: {model_data.get('training_samples', 'unknown')}"
-                )
-                self.logger.info(f"CV score: {model_data.get('cv_score', 'unknown')}")
-                return model_data
-            else:
-                self.logger.error("Invalid trade-learned model format")
-                return None
-
-        except Exception as e:
-            self.logger.error(f"Failed to load trade-learned model: {e}")
-            return None
 
     def _check_mlx_connectivity(self):
         """Check if MLX server is available."""
@@ -338,52 +288,6 @@ class EnsembleStrategy(BaseStrategy):
         """Predict using available models, with technical analysis fallback."""
         preds = {}
         self.logger.info("=== STARTING MODEL PREDICTIONS ===")
-
-        # Try trade-learned model if available
-        if self.trade_learned_model is not None:
-            try:
-                model_data = self.trade_learned_model
-                model = model_data["model"]
-                feature_names = model_data.get(
-                    "feature_names",
-                    [
-                        "rsi",
-                        "macd",
-                        "sma",
-                        "price",
-                        "volume",
-                        "atr",
-                        "adx",
-                        "bb_lower",
-                        "bb_upper",
-                        "sentiment",
-                    ],
-                )
-
-                # Extract features for the trade-learned model
-                trade_features = self._extract_trade_learned_features(features)
-
-                # Create feature array in the correct order
-                feature_array = np.array(
-                    [[trade_features.get(name, 0.0) for name in feature_names]]
-                )
-
-                # Get prediction probabilities
-                probabilities = model.predict_proba(feature_array)[0]
-
-                # Convert to [BUY, HOLD, SELL] format
-                # Model was trained with 0=loss, 1=profit
-                # Map: profit->BUY, loss->SELL, neutral->HOLD
-                if len(probabilities) == 2:  # Binary classifier
-                    # probabilities[0] = loss, probabilities[1] = profit
-                    buy_prob = probabilities[1]  # Profit probability -> BUY
-                    sell_prob = probabilities[0]  # Loss probability -> SELL
-                    hold_prob = 1.0 - max(buy_prob, sell_prob)  # Neutral
-                    preds["trade_learned"] = np.array([buy_prob, hold_prob, sell_prob])
-
-                self.logger.debug(f"Trade-learned model prediction successful")
-            except Exception as e:
-                self.logger.warning(f"Trade-learned model prediction failed: {e}")
 
         # Try MLX if available
         if self.mlx_available:
@@ -1327,83 +1231,6 @@ class EnsembleStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error(f"Error creating features: {e}")
             return {}
-
-    def _extract_trade_learned_features(self, features: dict) -> Dict[str, float]:
-        """
-        Extract features for the trade-learned model from market data
-        """
-        try:
-            # Get current time
-            now = datetime.now()
-
-            # Get current price and volume data
-            current_price = features.get("price", 97000.0)
-            current_volume = features.get("volume", 1000.0)
-
-            # Calculate trade characteristics (for simulation)
-            estimated_trade_size = 0.01  # Small default trade size
-            estimated_trade_value = estimated_trade_size * current_price
-
-            # Extract the features that the model was trained on
-            trade_features = {
-                # Market timing features
-                "hour_of_day": now.hour,
-                "day_of_week": now.weekday(),
-                "minute_of_hour": now.minute,
-                # Price and volatility features (simulated from current market data)
-                "price_ma_5": features.get("sma", current_price),
-                "price_ma_20": features.get("sma", current_price),
-                "price_momentum_short": 0.0,  # Would need historical data
-                "price_momentum_long": 0.0,  # Would need historical data
-                # Technical indicators
-                "rsi": features.get("rsi", 50.0),
-                "macd": features.get("macd", 0.0),
-                "bollinger_position": 0.5,  # Default neutral position
-                # Volume features
-                "volume_ma": features.get("volume_ma", current_volume),
-                "volume_ratio": 1.0,  # Default
-                # Market structure
-                "volatility_estimate": features.get("atr", current_price * 0.02)
-                / current_price,
-                "spread_estimate": 0.001,  # 0.1% default spread
-                # Trade characteristics (estimated)
-                "trade_size_btc": estimated_trade_size,
-                "trade_value_usd": estimated_trade_value,
-                "entry_price": current_price,
-                "trade_hour": now.hour,
-                "trade_dow": now.weekday(),
-                "position_size_ratio": estimated_trade_value
-                / 10000.0,  # Assume $10k portfolio
-            }
-
-            return trade_features
-
-        except Exception as e:
-            self.logger.error(f"Error extracting trade-learned features: {e}")
-            # Return default features
-            now = datetime.now()
-            return {
-                "price_ma_5": 97000.0,
-                "price_ma_20": 97000.0,
-                "price_momentum_short": 0.0,
-                "price_momentum_long": 0.0,
-                "rsi": 50.0,
-                "macd": 0.0,
-                "bollinger_position": 0.5,
-                "volume_ma": 1000.0,
-                "volume_ratio": 1.0,
-                "hour_of_day": now.hour,
-                "day_of_week": now.weekday(),
-                "minute_of_hour": now.minute,
-                "volatility_estimate": 0.02,
-                "spread_estimate": 0.001,
-                "trade_size_btc": 0.01,
-                "trade_value_usd": 970.0,
-                "entry_price": 97000.0,
-                "trade_hour": now.hour,
-                "trade_dow": now.weekday(),
-                "position_size_ratio": 0.097,
-            }
 
     def _technical_analysis_prediction(self, features: dict) -> np.ndarray:
         """Simple technical analysis based prediction as fallback."""

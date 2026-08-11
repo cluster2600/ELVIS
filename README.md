@@ -20,9 +20,8 @@ HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
 
 ## Features
 
-- **Ensemble strategy** — technical, research, RL, Bonenkamp, trade-learned,
-  and optional MLX signals vote; incompatible Research/Bonenkamp artefacts stay
-  disabled
+- **Ensemble strategy** — technical, research, RL, Bonenkamp, and optional MLX
+  signals vote; incompatible Research/Bonenkamp artefacts stay disabled
 - **Signal-quality gates** — market regime, RSI, momentum persistence,
   BB squeeze, trading hours, MACD divergence, order flow, multi-timeframe
   alignment ([roadmap implementation](docs/profitability_roadmap_implementation.md))

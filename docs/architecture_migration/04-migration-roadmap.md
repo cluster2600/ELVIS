@@ -27,7 +27,7 @@ rollback decision that does not restore unsafe behaviour.
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
-| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, synthetic 20-feature paths retired, training/inference round trip | revert only the current contract adapter; never restore synthetic loaders | In progress (M5d; trade-learned pending) |
+| M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
@@ -365,10 +365,58 @@ code zero. A no-data smoke reached the same child and returned its failure
 without printing the global success banner. The full non-performance suite
 reached 863 passed, 9 skipped, 3 deselected, and the same baseline
 PostgreSQL failure (`np.trades` is absent).
-M5 remains in progress for the incompatible trade-learned producer/consumer
-contract; no replacement 20-feature model will be admitted without causal
-data, a reproducible producer, a manifest round trip, and out-of-sample evidence
-above a declared baseline.
+No replacement model will be admitted without causal data, a reproducible
+producer, a manifest round trip, and out-of-sample evidence above a declared
+baseline.
+
+### M5e invalid trade-learned path retirement implementation record
+
+The remaining `trade_learned` vote was not a direction model. Its producer
+selected only completed SELL rows and labelled the same row from realised net
+PnL. Eleven of its twenty inputs were constants, symbol was absent, and its
+random split reused future observations during cross-validation. Runtime then
+constructed a different distribution from wall-clock time and simulated
+defaults, mapped "profitable SELL" to BUY, and emitted a three-value vector
+whose sum could exceed one. A manifest would have made this invalid meaning
+reproducible, not correct.
+
+The loader, constructor option, runtime vote, synthetic feature extractor, and
+isolated producer were therefore removed. Configuration arguments after
+`symbols` are keyword-only so an old positional model path fails immediately
+instead of being reinterpreted as the MLX URL. Research and Bonenkamp remain
+the only sklearn artefact-backed strategy members wired into Ensemble, and
+retain their strict schemas, manifests, hashes, version checks, and atomic
+activation. Ignored local pickle files are also excluded from Docker build
+contexts; no user-owned local artefact was deleted. A future learned component
+must start as either a causal future-return direction model or a meta-policy
+that can veto a proposed direction but cannot invent the opposite side.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_ensemble_placeholder_retirement.py tests/test_fixed_strategies.py tests/test_signal_generation.py
+.venv/bin/python -m pytest -q tests/test_feature_schema_contracts.py tests/test_feature_artifact_manifest.py tests/test_research_feature_schema.py tests/test_bonenkamp_feature_schema.py tests/test_ensemble_placeholder_retirement.py
+git grep -n -E 'trade_learned|TradeBasedTrainer|trade_based_trainer' -- core trading training scripts
+docker compose --profile ml build elvis-ml-trainer
+docker run --rm --network none --entrypoint python \
+  elvis-architecture-migration-elvis-ml-trainer:latest \
+  -c "from pathlib import Path; from trading.strategies.ensemble_strategy import EnsembleStrategy; import inspect; assert 'trade_learned_model_path' not in inspect.signature(EnsembleStrategy).parameters; assert not Path('/app/training/trade_based_trainer.py').exists(); assert not list(Path('/app').rglob('*.pkl')); print('retired-paths-absent')"
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The retirement tests prove that even an injected legacy object receives zero
+calls and that the unchanged technical fallback still supplies the only vote
+when no validated optional strategy is available. The focused strategy suite
+passed 9 tests (with 4 pre-existing return-value warnings), the cumulative
+feature-contract suite passed 61 tests (with 118 joblib/NumPy compatibility
+warnings), and an expanded Ensemble call-site suite passed 36 tests with one
+skip. The rebuilt image printed `retired-paths-absent`; it contained neither
+the producer nor any ignored pickle, while deployment can still mount validated
+artifacts under `/app/models`. The executable zero-reference check returned no
+matches. The full non-performance suite reached 863 passed, 9 skipped, 3
+deselected, and only the same local PostgreSQL baseline failure because
+`np.trades` is absent. The pinned baseline audit and historical changelog remain
+unchanged.
 
 ## Cut-over policy
 
