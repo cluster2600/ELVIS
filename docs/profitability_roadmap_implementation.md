@@ -63,7 +63,9 @@ the live loop) is wired into `main.py` behind an environment flag.
 
 All integration lives in `main.py`, mirroring the existing lazy-import pattern,
 and every stage is wrapped in try/except so a gate failure logs and never kills
-the loop.
+the loop. Each fetched symbol is copied and enriched with its own indicators;
+the BTC frame remains the dashboard view but is not reused for another pair's
+signal gates or sizing.
 
 1. **Signal gates** — after the existing high-win-rate filter, a
    `PROFITABILITY-ROADMAP SIGNAL GATES` block applies
@@ -73,9 +75,10 @@ the loop.
    signal to HOLD and logs the reason.
 2. **Regime cache** — the regime detected for each symbol is cached on
    `main._last_regime` and reused by the dynamic-TP and fee-gate stages.
-3. **Sizing** — `volume_multiplier(data)` scales the adaptive position size
-   (0.5x–2.0x by volume vs its 20-bar mean); the optional Kelly stage derives
-   f* from the last 200 paper trades' PnL and *caps* (never raises) the size.
+3. **Sizing** — `volume_multiplier(symbol_history)` scales the adaptive position
+   size (0.5x–2.0x by that symbol's volume vs its 20-bar mean); the optional
+   Kelly stage derives f* from the last 200 paper trades' PnL and *caps* (never
+   raises) the size.
 4. **Fee gate** — before typed order submission, the expected move to the
    regime's take-profit target is compared against all-in costs (entry+exit
    taker fees + funding); non-viable trades and calculation failures are skipped

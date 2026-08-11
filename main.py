@@ -43,6 +43,7 @@ from trading.analysis.technical_indicators import add_technical_indicators
 from trading.application.order_service import OrderService
 from trading.application.rsi_gate_policy import RsiGatePolicy
 from trading.application.signal_policy import SignalPolicyPipeline
+from trading.data.market_frames import enrich_symbol_frames
 from trading.domain.orders import OrderIntent, OrderSide, OrderType, SubmissionReport
 from trading.domain.signals import Signal, SignalAction
 from trading.execution.legacy_paper_adapter import LegacyPaperExecutionAdapter
@@ -632,7 +633,7 @@ def main(mode: str, log_level: str):
                                     f"⚠️ Error fetching {trading_symbol}: {e}"
                                 )
 
-                        # Use BTCUSDT as primary for dashboard/indicators
+                        # Use BTCUSDT as primary for the dashboard.
                         data = all_data.get("BTCUSDT", pd.DataFrame())
                         logger.debug(
                             f"Fetched data shape: {data.shape if not data.empty else 'EMPTY'}"
@@ -756,9 +757,19 @@ def main(mode: str, log_level: str):
                             )
 
                     if not data.empty:
-                        # Calculate technical indicators for the data
-                        logger.debug("Adding technical indicators...")
-                        data = add_technical_indicators(data, logger)
+                        # Enrich every fetched symbol independently. Keep
+                        # emergency fallback data outside all_data so it can
+                        # inform the dashboard without becoming tradeable.
+                        logger.debug(
+                            "Adding technical indicators for each available symbol..."
+                        )
+                        all_data = enrich_symbol_frames(all_data, logger)
+                        if "BTCUSDT" in all_data:
+                            data = all_data["BTCUSDT"]
+                        else:
+                            data = add_technical_indicators(
+                                data.copy(deep=True), logger
+                            )
                         logger.debug(f"Data with indicators shape: {data.shape}")
                         logger.debug(f"Available columns: {list(data.columns)}")
 
@@ -1596,6 +1607,12 @@ def main(mode: str, log_level: str):
                                         )
                                         continue
 
+                                    symbol_history = symbol_data.tail(100).copy(
+                                        deep=True
+                                    )
+                                    filter_result = None
+                                    regime_result = None
+
                                     # Extract current price and market data for this symbol
                                     current_price = float(symbol_data.iloc[-1]["close"])
 
@@ -1759,17 +1776,14 @@ def main(mode: str, log_level: str):
                                                     MarketRegimeDetector(logger)
                                                 )
 
-                                            # Convert current data to DataFrame for analysis
-                                            historical_df = data.tail(100).copy()
-
                                             # Analyze signal quality
                                             filter_result = main._winrate_filter.analyze_signal_quality(
-                                                symbol, market_data, historical_df
+                                                symbol, market_data, symbol_history
                                             )
 
                                             # Analyze market regime
                                             regime_result = main._regime_detector.detect_current_regime(
-                                                historical_df
+                                                symbol_history
                                             )
 
                                             # Cache regime per symbol for the
@@ -1868,7 +1882,7 @@ def main(mode: str, log_level: str):
                                                     apply_signal_filters(
                                                         signal,
                                                         confidence,
-                                                        data.tail(100),
+                                                        symbol_history,
                                                         rsi=_filter_rsi,
                                                     )
                                                 )
@@ -2115,8 +2129,8 @@ def main(mode: str, log_level: str):
                                             # Scale based on regime quality if filter was used
                                             regime_multiplier = 1.0
                                             if (
-                                                "filter_result" in locals()
-                                                and "regime_result" in locals()
+                                                filter_result is not None
+                                                and regime_result is not None
                                             ):
                                                 if (
                                                     regime_result[
@@ -2171,7 +2185,9 @@ def main(mode: str, log_level: str):
                                                         volume_multiplier,
                                                     )
 
-                                                    _vol_mult = volume_multiplier(data)
+                                                    _vol_mult = volume_multiplier(
+                                                        symbol_history
+                                                    )
                                                     if _vol_mult != 1.0:
                                                         position_size *= _vol_mult
                                                         logger.info(

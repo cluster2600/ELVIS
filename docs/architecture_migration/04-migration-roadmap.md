@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7c cost semantics) |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7d per-symbol inputs) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -650,6 +650,49 @@ The focused suite passes 84 tests, including cross-checks against
 `BinanceFeeCalculator` at 1x/3x/10x and an AST gate for exception-to-HOLD. The
 full suite passes 1,038 tests, skips 9, deselects 3, and keeps only the
 unchanged local PostgreSQL baseline failure because `np.trades` is absent.
+
+### M7d per-symbol market-input isolation implementation record
+
+The active multi-symbol loop previously enriched only the primary BTC frame,
+then reused that frame for every symbol's high-win-rate analysis, regime
+detection, roadmap filters, and volume sizing. A BNB decision could therefore
+be qualified and sized from BTC candles and volume. The temporary
+`filter_result` and `regime_result` values were also guarded through
+`locals()`, so a result from an earlier symbol or cycle could remain eligible.
+
+`trading.data.market_frames.enrich_symbol_frames` now deep-copies and enriches
+every fetched frame independently. The primary BTC view remains reserved for
+the dashboard. Emergency fallback data remains outside the symbol mapping, so
+it cannot become tradeable accidentally. At the start of each symbol pass,
+the loop takes one local 100-row `symbol_history` copy and resets both temporary
+filter results. High-win-rate analysis, regime detection, roadmap filters, and
+volume sizing all consume that same symbol-local history; no load of the global
+`data` alias remains inside the loop.
+
+This slice does not change flags, thresholds, filter order, the per-symbol
+regime cache used by open positions, or order submission. It also deliberately
+does not repair the separate MACD-histogram alias or regime-label vocabulary;
+those defects need their own tests and commits.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_symbol_market_data.py tests/test_technical_indicators_module.py tests/test_winrate_regime_units.py tests/test_signal_filters.py tests/test_position_sizing.py tests/test_rsi_policy_shadow.py tests/test_roadmap_wiring.py tests/test_main_order_submission.py
+.venv/bin/black --target-version py310 --check trading/data/market_frames.py tests/test_symbol_market_data.py
+.venv/bin/isort --check-only trading/data/market_frames.py tests/test_symbol_market_data.py
+.venv/bin/flake8 trading/data/market_frames.py tests/test_symbol_market_data.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/data/market_frames.py tests/test_symbol_market_data.py main.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 182 tests. Its behavioural cases prove independent
+RSI and volume outcomes from opposed BTC/BNB frames while preserving the raw
+inputs. Missing, non-finite, short, partially enriched, or failed symbol frames
+are omitted locally without suppressing a healthy peer. AST gates prove all
+four consumers receive `symbol_history`, both temporary results reset before
+use, and the symbol loop contains no read of the global BTC `data` alias. The
+full suite passes 1,052 tests, skips 9, deselects 3, and keeps only the unchanged
+local PostgreSQL baseline failure because `np.trades` is absent.
 
 ## Cut-over policy
 
