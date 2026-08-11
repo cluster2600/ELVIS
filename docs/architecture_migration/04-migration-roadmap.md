@@ -462,6 +462,39 @@ M6a. The full non-performance suite reached 913 passed, 9 skipped, 3
 deselected, and only the unchanged local PostgreSQL baseline failure because
 `np.trades` is absent.
 
+### M6b1 pure RSI gate implementation record
+
+`RsiGatePolicy` captures one immutable RSI observation and implements the
+legacy gate's strict valid-data boundaries independently: BUY is vetoed only
+above 70, SELL only below 30, and the boundary values pass. It returns only the
+restricted `SignalPolicyResult`, so it cannot reverse or promote a side. Its
+threshold configuration is finite, bounded, ordered, and immutable.
+
+Representative finite observations in `[0, 100]`, including both strict
+boundaries and values immediately on either side, are compared against the
+legacy `rsi_gate` and prove action/confidence parity. Missing, boolean,
+non-numeric, non-finite, or out-of-range observations deliberately diverge
+fail-closed to HOLD. This safer behaviour remains candidate-only until the next
+shadow slice measures it on the exact per-symbol input. The policy has no
+pandas, NumPy, logging, environment, database, clock, or network dependency and
+is not yet imported by `main.py`.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/application/rsi_gate_policy.py tests/test_rsi_gate_policy.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_rsi_gate_policy.py tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/black --target-version py310 --check trading/application tests/test_rsi_gate_policy.py tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/isort --check-only trading/application tests/test_rsi_gate_policy.py tests/test_signal_policy.py tests/test_order_service.py
+.venv/bin/flake8 trading/application tests/test_rsi_gate_policy.py tests/test_signal_policy.py tests/test_order_service.py --max-line-length=88
+```
+
+The focused suite passed 104 tests, including all valid RSI boundaries and the
+deliberate invalid-data divergence. The full non-performance suite reached 950
+passed, 9 skipped, 3 deselected, and only the unchanged local PostgreSQL
+baseline failure because `np.trades` is absent. Runtime authority remains
+wholly legacy.
+
 ## Cut-over policy
 
 Each later behavioural migration has three modes:
