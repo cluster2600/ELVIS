@@ -30,7 +30,7 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a pure order lifecycle) |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8a lifecycle plus transactional legacy-exit prerequisite) |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9a versioned baseline) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
@@ -906,6 +906,62 @@ permutations. The production tree has no lifecycle consumer; only the pure
 domain export exposes the types for the next migration slice. The full suite
 passes 1,238 tests, skips 9, deselects 3, and keeps only the unchanged local
 PostgreSQL baseline failure because `np.trades` is absent.
+
+### M8 prerequisite: make legacy exits one-shot and transactional
+
+The still-active paper exit path now closes one legacy position row under a
+row lock. Its closing-trade insert and exact-ID position delete use the same
+PostgreSQL connection and transaction; a delete count other than one, an
+invalid value, a missing row, or any database error rolls the transaction back
+and returns `False`. A successful commit returns `True`, and later diagnostic
+logging cannot change that committed outcome. This removes the earlier split
+transaction where a trade could survive without its position deletion, or a
+position could be deleted after the trade helper silently failed.
+
+The inline stop-loss, trailing-stop, and take-profit branches now end the
+current position iteration only after that committed `True` result. Their
+success messages use values that exist in the position tuple. The optional
+Balanced Starter owner also increments its close counters and reports success
+only when the same helper returns `True`; its six direct callers no longer turn
+a database failure into a reported close. A concurrent PostgreSQL regression
+proves that two closers produce one committed trade and one `True` result, and
+a foreign-key fault proves that a failed delete rolls the preceding insert
+back.
+
+This is a containment fix, not the M8 cut-over. The legacy tables still use
+`REAL`, carry no position key/effect or entry-time exit context, and cannot be
+replayed from confirmed fills. Balanced Starter and the inline loop remain
+separate position owners. M8b defines those missing pure domain contracts;
+M9b must journal directives and confirmed fills transactionally before a
+single `PositionService` can replace these owners. A lost connection while
+`COMMIT` is being acknowledged also remains an ambiguous outcome that only
+durable reconciliation can resolve; this boolean helper is not an exactly-once
+protocol.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_position_exit_control_flow.py tests/test_paper_db_schema.py tests/test_paper_fill_integrity.py tests/test_stop_loss_threshold.py tests/test_exits.py tests/test_main_order_submission.py tests/test_roadmap_wiring.py tests/test_take_profit_regime_cutover.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check utils/paper_trade_db.py trading/strategies/balanced_starter.py tests/test_position_exit_control_flow.py tests/postgres/test_position_close_postgres.py
+.venv/bin/isort --check-only utils/paper_trade_db.py trading/strategies/balanced_starter.py tests/test_position_exit_control_flow.py tests/postgres/test_position_close_postgres.py
+.venv/bin/flake8 tests/test_position_exit_control_flow.py tests/postgres/test_position_close_postgres.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q main.py utils/paper_trade_db.py trading/strategies/balanced_starter.py tests/test_position_exit_control_flow.py tests/postgres/test_position_close_postgres.py
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN -u ELVIS_TEST_POSTGRES_REQUIRED \
+  .venv/bin/python -m pytest -q tests/ -m 'not perf and not postgres'
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=UTC .venv/bin/python -m pytest -q tests/ -m 'not perf and not postgres'
+```
+
+The focused legacy suite passes 97 tests and skips one optional integration
+case. The isolated PostgreSQL 15 suite passes all 9 tests, including the three
+close-transaction cases. The local non-PostgreSQL suite passes 1,238 tests,
+skips 49, and deselects 12. Its only failure at 00:15 CEST is the pre-existing
+time-dependent `test_check_new_day_same_day`: it subtracts two hours from wall
+time across midnight and still asserts that the date did not change. The same
+suite under UTC passes 1,239 tests with the same 49 skips and 12 deselections;
+this slice does not alter the risk-manager clock.
 
 ### M9 prerequisite: preserve open positions during initialization
 

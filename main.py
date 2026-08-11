@@ -253,8 +253,9 @@ def _close_position_by_id(position, exit_price, realized_pnl, logger):
     it can't net cleanly — leaves the position open OR spawns a new opposite
     one. The position then re-triggers its exit every cycle (the take-profit
     that fired identically every 2s while 20 duplicate positions piled up).
-    close_position deletes the exact row and records the realized trade, so
-    the exit is deterministic and idempotent.
+    close_position locks the exact row and commits its realized trade and
+    deletion together. A missing/already-closed row returns False, so later
+    exit rules are short-circuited only after the close transaction commits.
     """
     from utils.paper_trade_db import close_position
 
@@ -262,8 +263,15 @@ def _close_position_by_id(position, exit_price, realized_pnl, logger):
         pos_id = position[0]
         qty = abs(float(position[4]))
         fee = abs(float(exit_price)) * qty * 0.0004
-        close_position(pos_id, float(exit_price), float(realized_pnl), fee)
-        return True
+        return (
+            close_position(
+                pos_id,
+                float(exit_price),
+                float(realized_pnl),
+                fee,
+            )
+            is True
+        )
     except Exception as exc:
         logger.error(f"Close-by-id failed for position {position[0]}: {exc}")
         return False
@@ -2579,6 +2587,7 @@ def main(mode: str, log_level: str):
                                                     logger.info(
                                                         f"🛑 Stop loss closed {pos_symbol} (pnl ${absolute_loss:.2f})"
                                                     )
+                                                    continue  # position closed
                                                 else:
                                                     logger.error(
                                                         f"❌ Stop loss execution failed for {pos_symbol}"
@@ -2630,7 +2639,7 @@ def main(mode: str, log_level: str):
                                                         logger,
                                                     ):
                                                         logger.info(
-                                                            f"📉 Trailing stop executed: {close_signal} "
+                                                            f"📉 Trailing stop closed {side.upper()} "
                                                             f"{abs(quantity):.6f} {pos_symbol}"
                                                         )
                                                         main._trailing.clear(
@@ -2705,8 +2714,9 @@ def main(mode: str, log_level: str):
                                                 )
                                                 if success:
                                                     logger.info(
-                                                        f"💰 Take profit executed: {close_signal.upper()} {close_size:.6f} {pos_symbol}"
+                                                        f"💰 Take profit closed {side.upper()} {abs(quantity):.6f} {pos_symbol}"
                                                     )
+                                                    continue  # position closed
                                                 else:
                                                     logger.error(
                                                         f"❌ Take profit execution failed for {pos_symbol}"

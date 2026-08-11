@@ -595,23 +595,29 @@ class BalancedStarterStrategy:
                     pnl = (current_price - entry_price) * quantity
 
                     # Close the position
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-
-                    self.logger.info(
-                        f"🚨 ATH CLOSURE: Closed LONG position {pos_id} - Entry: ${entry_price:,.2f}, Exit: ${current_price:,.2f}, P&L: ${pnl:.2f}"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.logger.info(
+                            f"🚨 ATH CLOSURE: Closed LONG position {pos_id} - Entry: ${entry_price:,.2f}, Exit: ${current_price:,.2f}, P&L: ${pnl:.2f}"
+                        )
+                    else:
+                        self.logger.error(
+                            f"ATH closure failed for LONG position {pos_id}"
+                        )
 
                 # At strong bullish bias, close SHORT positions
                 elif target_bias == "LONG" and side.upper() == "SELL":
                     pnl = (entry_price - current_price) * quantity
 
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-
-                    self.logger.info(
-                        f"📈 BULLISH CLOSURE: Closed SHORT position {pos_id} - Entry: ${entry_price:,.2f}, Exit: ${current_price:,.2f}, P&L: ${pnl:.2f}"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.logger.info(
+                            f"📈 BULLISH CLOSURE: Closed SHORT position {pos_id} - Entry: ${entry_price:,.2f}, Exit: ${current_price:,.2f}, P&L: ${pnl:.2f}"
+                        )
+                    else:
+                        self.logger.error(
+                            f"Bullish closure failed for SHORT position {pos_id}"
+                        )
 
             if closed_count > 0:
                 self.logger.info(
@@ -647,32 +653,40 @@ class BalancedStarterStrategy:
                 realistic_stop_loss = -1.00  # $1.00 stop loss (5:1 reward:risk ratio)
 
                 if pnl >= realistic_profit_target:
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-                    self.last_trade_time = current_time  # Track last trade time
-
-                    # Log all profitable closes for scalping
-                    self.logger.info(
-                        f"💰 PROFIT: {side} ${pnl:.4f} (target: ${realistic_profit_target})"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.last_trade_time = current_time
+                        self.logger.info(
+                            f"💰 PROFIT: {side} ${pnl:.4f} (target: ${realistic_profit_target})"
+                        )
+                    else:
+                        self.logger.error(f"Profit close failed for position {pos_id}")
 
                 # EMERGENCY: Close ANY position losing more than stop loss
                 elif pnl <= realistic_stop_loss:
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-                    self.last_trade_time = current_time  # Track last trade time
-                    self.logger.error(
-                        f"🛑 STOP LOSS: {side} ${pnl:.4f} (target: ${realistic_stop_loss})"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.last_trade_time = current_time
+                        self.logger.error(
+                            f"🛑 STOP LOSS: {side} ${pnl:.4f} (target: ${realistic_stop_loss})"
+                        )
+                    else:
+                        self.logger.error(
+                            f"Scalping stop close failed for position {pos_id}"
+                        )
 
                 # OPTIMIZED: Force close positions with reasonable losses (safety net)
                 elif pnl <= -2.00:  # Emergency stop if loss exceeds -$2.00
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-                    self.last_trade_time = current_time  # Track last trade time
-                    self.logger.error(
-                        f"🚨 EMERGENCY STOP: {side} ${pnl:.4f} - FORCE CLOSING RUNAWAY LOSS"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.last_trade_time = current_time
+                        self.logger.error(
+                            f"🚨 EMERGENCY STOP: {side} ${pnl:.4f} - FORCE CLOSING RUNAWAY LOSS"
+                        )
+                    else:
+                        self.logger.error(
+                            f"Emergency stop close failed for position {pos_id}"
+                        )
 
             # Only log summary if many positions closed
             if closed_count > 5:
@@ -698,11 +712,15 @@ class BalancedStarterStrategy:
 
                 # Close ALL positions that are losing money
                 if pnl < -0.05:  # Close anything losing more than 5 cents
-                    close_position(pos_id, current_price, pnl)
-                    closed_count += 1
-                    self.logger.error(
-                        f"🚨 EMERGENCY CLOSE: {side} position {pos_id} - Loss: ${pnl:.2f}"
-                    )
+                    if close_position(pos_id, current_price, pnl):
+                        closed_count += 1
+                        self.logger.error(
+                            f"🚨 EMERGENCY CLOSE: {side} position {pos_id} - Loss: ${pnl:.2f}"
+                        )
+                    else:
+                        self.logger.error(
+                            f"Emergency close failed for position {pos_id}"
+                        )
 
             if closed_count > 0:
                 self.logger.error(

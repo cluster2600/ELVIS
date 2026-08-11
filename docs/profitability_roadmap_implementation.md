@@ -103,7 +103,9 @@ signal gates or sizing.
    but the legacy cache currently reaches its RANGING fallback; M7f defines the
    correct producer contract before a later cut-over. Percentages are used
    because the roadmap's absolute dollar offsets do not transfer across price
-   levels.
+   levels. A confirmed stop-loss, trailing-stop, or take-profit close ends the
+   checks for that position in the current cycle; later exit rules cannot close
+   the same legacy row a second time.
 
 ## Why three flags default off
 
