@@ -22,7 +22,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M0 | Pin source revisions; measure source, test, CI, model, and Docker baseline | method and measured results recorded; reproducible test command recorded | documentation-only | Implemented |
 | M1 | Publish current map, reference comparison, target architecture, and this ledger | Markdown links and Mermaid blocks checked; docs review | revert docs commit | Implemented |
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
-| M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Planned |
+| M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
 | M4 | Add adapters for the current executor and success recorder; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | one call-site revert restores legacy branch | Planned |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | Planned |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
@@ -90,6 +90,31 @@ boundary; the later legacy adapter must map between the two enums deliberately.
 - the service has no environment, pandas, database, or Binance dependency; and
 - a focused latency test covers at least 10,000 fake executions without network
   I/O and guards against an accidental high-overhead design.
+
+### M3 implementation record
+
+`trading.application.OrderService` is stateless and still unused by the legacy
+runtime. It makes one `ExecutionPort.submit()` call per invocation. Exceptions,
+malformed responses, and mismatched client order IDs become `AMBIGUOUS` reports
+whose exception details are not exposed. Expected adapter failures remain typed
+return values. The service has no retry, recorder, telemetry, persistence,
+environment, pandas, database, or Binance dependency.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/application
+.venv/bin/python -m pytest tests/test_order_service.py -q
+.venv/bin/python -m pytest tests/perf/test_order_service_latency.py -q -m perf -s
+.venv/bin/python -m black --target-version py310 --check trading/application tests/test_order_service.py tests/perf/test_order_service_latency.py
+.venv/bin/python -m isort --check-only trading/application tests/test_order_service.py tests/perf/test_order_service_latency.py
+.venv/bin/python -m flake8 trading/application tests/test_order_service.py tests/perf/test_order_service_latency.py --max-line-length=88
+```
+
+The unit suite passed 17 tests. The warmed 10,000-sample in-memory run measured
+p99 at 0.21 microseconds with `perf_counter_ns`, garbage collection enabled,
+CPython 3.14.6, macOS 27.0 arm64, and an Apple M1 Max. This is an application-
+overhead regression tripwire, not an end-to-end exchange-latency claim.
 
 ### M4 acceptance criteria
 
