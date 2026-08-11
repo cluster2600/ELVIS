@@ -544,7 +544,6 @@ local PostgreSQL baseline failure because `np.trades` is absent.
 
 `trading.domain.RiskDecision` is an immutable, infrastructure-free boundary
 between pre-trade planning and execution. It contains one clean decision ID, a
-strict approval boolean, immutable reason codes, and an optional
 strict approval boolean, immutable reasons, and an optional
 `OrderIntent`. Approval requires exactly one typed intent carrying the same
 decision ID. Rejection forbids an intent and requires at least one reason, so a
