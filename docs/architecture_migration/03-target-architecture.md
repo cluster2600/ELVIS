@@ -123,10 +123,11 @@ sequenceDiagram
     participant S as StrategyPort
     participant G as SignalPolicyPipeline
     participant K as PreTradeRiskService
+    participant J as JournaledOrderService
+    participant P as DurableOrderJournal
     participant E as OrderService
     participant X as ExecutionPort
     participant L as PositionService
-    participant P as TradeRepository
     participant O as TelemetrySink
 
     R->>D: snapshot(symbol, deadline)
@@ -136,15 +137,24 @@ sequenceDiagram
     R->>G: evaluate(signal, snapshot, account)
     G-->>R: approved Signal or HOLD with reasons
     R->>K: plan(approved signal, portfolio snapshot)
-    K-->>R: rejected RiskDecision or OrderIntent
-    R->>E: submit(OrderIntent)
+    K-->>R: rejected or approved RiskDecision
+    R->>J: submit(PositionInstruction)
+    J->>P: register PENDING instruction
+    P-->>J: committed reservation
+    J->>E: submit(instruction.order_intent)
     E->>X: submit once with client order ID
     X-->>E: SubmissionReport
-    E-->>R: SubmissionReport
-    R->>P: record intent and submission outcome
+    E-->>J: SubmissionReport
+    J->>P: append submission observation
+    P-->>J: durable journal disposition
+    J-->>R: report plus journal disposition
     R-->>O: publish completed submission outcome and timings
     X-->>L: confirmed order/fill or reconciliation result
-    L->>P: record validated order/fill/position transition
+    L->>P: load ordered position stream
+    P-->>L: persisted facts
+    L->>L: apply lifecycle and position reducers
+    L->>P: append validated event at next position version
+    P-->>L: committed event
     L-->>O: publish completed position transition
 ```
 
@@ -185,9 +195,10 @@ M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
 `OrderIntent`, and `SubmissionReport`. M7a adds the correlated `RiskDecision`
 contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
 runtime. M8b adds pure `PositionInstruction`, `PositionFill`, and `Position`
-transitions without a production consumer. The pre-trade service, durable order
-journal, runtime `PositionService`, and `CycleOutcome` remain later slices; they
-are not placeholder classes in the current package.
+transitions without a production consumer. M9b.1 prepares the durable journal
+schema only. Its codecs, repository, replay service, runtime `PositionService`,
+the pre-trade service, and `CycleOutcome` remain later slices; they are not
+placeholder classes in the current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-
@@ -232,6 +243,18 @@ and never blindly retried. Durable idempotency and restart reconciliation are
 added with the order repository; an in-memory deduplication cache would provide
 false safety. The service does not invent quantity, leverage, price, or balance
 fallbacks.
+
+### `JournaledOrderService`
+
+The future durable wrapper accepts one `PositionInstruction`, commits its
+`PENDING` reservation, delegates the embedded `OrderIntent` exactly once to
+`OrderService`, and then appends the transport observation. The runner never
+coordinates those steps itself. A failed registration makes no adapter call;
+an existing unresolved reservation is reconciled and is never automatically
+resubmitted. The transport `SubmissionReport` remains distinct from the
+journal-write disposition, including an unknown commit acknowledgement. M9b.1
+only prepares the tables for this service; no implementation or runtime
+consumer exists yet.
 
 ### `PositionService`
 
@@ -283,8 +306,9 @@ unknown schema is not permitted. A deliberate optional feature set, such as the
 
 Repositories return named records, not positional tuples. Schema migrations
 create the namespace and tables before health is declared ready. Order, fill,
-and position transitions share a transaction where needed. A unique client
-order ID and venue order ID provide idempotency and reconciliation.
+and position transitions share a transaction where needed. Client order IDs
+are globally stable, while venue order IDs are unique only within an explicit
+execution scope and symbol; a bare venue ID is not a cross-account identity.
 
 M9a introduces the packaged, checksummed, forward-only migration runner and an
 additive, schema-only baseline for the existing legacy tables. It neither seeds
@@ -295,11 +319,33 @@ PostgreSQL harness now validates the boundary, while an operator migration
 command must still be in place before it can become a readiness prerequisite.
 Order and position repositories remain later slices.
 
-M8b requires a stable `position_key` and immutable exit context on the future
-pre-submission position instruction, but neither value is stored by the legacy
-tables. M9b must journal the instruction and correlated confirmed fills, then
-rebuild the exact M8b projection on replay before `PositionService` can own the
-runtime boundary.
+M9b.1 adds a separate, schema-only version 2 without altering or backfilling
+the legacy `trades` and `open_positions` tables. `position_streams` provides a
+globally unique stable key and future per-position lock/version boundary.
+`orders` stores a versioned `PositionInstruction` envelope and its payload hash
+before external submission. One decision ID may reserve only one order within
+an execution scope. `order_events` reserves a positive, per-position version
+key for future causal allocation; `(client_order_id, trade_id)` remains the
+confirmed-fill identity. The schema scopes venue identities by execution scope
+and symbol, and stores versioned payloads as JSON objects. Exact `Decimal`
+values must be encoded as strings by the future codec rather than as PostgreSQL
+`NUMERIC` or JSON numbers, whose representable range is narrower than the pure
+domain contract.
+
+The bounded indexed columns are a persistence representability contract, not a
+new domain invariant: before any submission, the future codec/repository must
+reject an otherwise valid domain value that exceeds those limits. SQL rejects
+empty and ordinary space-padded identifiers; the codec remains responsible for
+the domain's complete clean-text rule, including other whitespace.
+
+This schema is prepared storage, not a journal implementation. No codec,
+repository, replay, register-before-submit service, reconciliation path, or
+runtime consumer exists yet, and the migration runner is still not a startup
+readiness gate. M9b.2 and later slices must validate the envelope and hashes,
+allocate each position version under a stream lock, append facts and update the
+stream atomically, rebuild the exact M8a/M8b projections through their reducers,
+and quarantine unknown or conflicting observations before `PositionService`
+can own the runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

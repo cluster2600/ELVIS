@@ -15,6 +15,7 @@ from trading.persistence.migration_runner import (
     Migration,
     MigrationApplyError,
     MigrationDriftError,
+    _statement_prefixes,
     apply_migrations,
     load_migrations,
 )
@@ -53,10 +54,10 @@ def fake_connection(*, applied_rows=()):
     return connection, cursor
 
 
-def test_packaged_baseline_migration_is_ordered_and_additive() -> None:
+def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1,)
+    assert tuple(migration.version for migration in migrations) == (1, 2)
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -88,6 +89,23 @@ def test_packaged_baseline_migration_is_ordered_and_additive() -> None:
         "order_fills",
     ):
         assert deferred_contract not in migrations[0].sql.lower()
+
+    journal = migrations[1]
+    assert journal.name == "order_position_journal"
+    assert journal.checksum == (
+        "b33131cc968545de5d5fa18ea6c54a4a" "7e2da50941258a942894edda98d1e234"
+    )
+    assert "CREATE TABLE np.position_streams" in journal.sql
+    assert "CREATE TABLE np.orders" in journal.sql
+    assert "CREATE TABLE np.order_events" in journal.sql
+    assert "position_version" in journal.sql
+    assert "execution_scope" in journal.sql
+    assert "instruction_payload JSONB" in journal.sql
+    assert "event_payload JSONB" in journal.sql
+    assert "NUMERIC" not in journal.sql.upper()
+    assert "np.trades" not in journal.sql
+    assert "np.open_positions" not in journal.sql
+    assert {prefix[0] for prefix in _statement_prefixes(journal.sql)} == {"CREATE"}
 
 
 @pytest.mark.parametrize(

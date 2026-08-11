@@ -37,7 +37,7 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
     migrations = load_migrations()
     connection = _connect(postgres_database_dsn)
     try:
-        assert apply_migrations(connection, migrations) == (1,)
+        assert apply_migrations(connection, migrations) == (1, 2)
         assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -52,16 +52,27 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                 "margin_history",
                 "model_predictions",
                 "open_positions",
+                "order_events",
+                "orders",
+                "position_streams",
                 "schema_migrations",
                 "trades",
                 "trading_session_resets",
             )
             cursor.execute("SELECT version, name, checksum FROM np.schema_migrations")
             assert cursor.fetchall() == [
-                (1, migrations[0].name, migrations[0].checksum)
+                (migration.version, migration.name, migration.checksum)
+                for migration in migrations
             ]
             cursor.execute("SELECT COUNT(*) FROM np.account_balances")
             assert cursor.fetchone() == (0,)
+            cursor.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM np.position_streams),
+                    (SELECT COUNT(*) FROM np.orders),
+                    (SELECT COUNT(*) FROM np.order_events)
+                """)
+            assert cursor.fetchone() == (0, 0, 0)
     finally:
         connection.close()
 
@@ -81,7 +92,7 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (1,)
+        assert apply_migrations(connection, migrations) == (1, 2)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -94,6 +105,72 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
                 pytest.approx(0.01),
                 3.0,
             )
+    finally:
+        connection.close()
+
+
+def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:1]) == (1,)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO np.open_positions (
+                    symbol, side, entry_price, quantity, leverage
+                ) VALUES ('BTCUSDT', 'BUY', 51000, 0.02, 3)
+                """)
+        connection.commit()
+
+        assert apply_migrations(connection, migrations) == (2,)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT symbol, side, entry_price, quantity, leverage
+                FROM np.open_positions
+                """)
+            assert cursor.fetchone() == (
+                "BTCUSDT",
+                "BUY",
+                51000.0,
+                pytest.approx(0.02),
+                3.0,
+            )
+            cursor.execute("SELECT to_regclass('np.order_events')")
+            assert cursor.fetchone() == ("np.order_events",)
+    finally:
+        connection.close()
+
+
+def test_journal_table_collision_rolls_back_version_two_only(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:1]) == (1,)
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE np.orders (unexpected INTEGER)")
+            cursor.execute("""
+                INSERT INTO np.open_positions (
+                    symbol, side, entry_price, quantity, leverage
+                ) VALUES ('BNBUSDT', 'SELL', 600, 0.5, 2)
+                """)
+        connection.commit()
+
+        with pytest.raises(MigrationApplyError, match="0002_order_position_journal"):
+            apply_migrations(connection, migrations)
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT version FROM np.schema_migrations ORDER BY version")
+            assert cursor.fetchall() == [(1,)]
+            cursor.execute("SELECT to_regclass('np.position_streams')")
+            assert cursor.fetchone() == (None,)
+            cursor.execute("SELECT unexpected FROM np.orders")
+            assert cursor.fetchall() == []
+            cursor.execute("SELECT symbol FROM np.open_positions")
+            assert cursor.fetchone() == ("BNBUSDT",)
     finally:
         connection.close()
 
@@ -118,7 +195,7 @@ def test_broken_followup_rolls_back_baseline_and_ledger(postgres_database_dsn):
         connection.close()
 
 
-def test_concurrent_runners_apply_the_baseline_once(postgres_database_dsn):
+def test_concurrent_runners_apply_packaged_migrations_once(postgres_database_dsn):
     migrations = load_migrations()
     barrier = Barrier(2)
 
@@ -133,11 +210,11 @@ def test_concurrent_runners_apply_the_baseline_once(postgres_database_dsn):
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _: migrate(), range(2)))
 
-    assert sorted(results) == [(), (1,)]
+    assert sorted(results) == [(), (1, 2)]
     connection = _connect(postgres_database_dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM np.schema_migrations")
-            assert cursor.fetchone() == (1,)
+            assert cursor.fetchone() == (2,)
     finally:
         connection.close()

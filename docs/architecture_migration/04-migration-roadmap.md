@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9a versioned baseline) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.1 order/position journal schema; no repository or runtime wiring) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -882,12 +882,13 @@ pure position reducer is now its only consumer outside the lifecycle module,
 and remains inside `trading.domain`.
 
 This is deliberately not a runtime cut-over. ELVIS does not yet provide a
-reliable fill stream, a truthful paper cancellation adapter, durable correlated
-order/fill tables, or startup reconciliation. M8b now supplies explicit
-`OPEN`/`REDUCE_ONLY` position effects and entry-time exit context, still without
-runtime wiring. M9b must add the transactional journal, uniqueness constraints,
-register-before-submit, restart replay, reconciliation, and quarantine before
-lifecycle idempotence can be described as durable.
+reliable fill stream, a truthful paper cancellation adapter, or startup
+reconciliation. M8b now supplies explicit `OPEN`/`REDUCE_ONLY` position effects
+and entry-time exit context, still without runtime wiring. M9b.1 prepares the
+correlated order/event schema and uniqueness constraints; later M9b slices must
+add codecs, a transactional repository, register-before-submit, restart replay,
+reconciliation, and quarantine before lifecycle idempotence can be described
+as durable.
 
 Verification at implementation time:
 
@@ -934,11 +935,11 @@ This is a containment fix, not the M8 cut-over. The legacy tables still use
 `REAL`, carry no position key/effect or entry-time exit context, and cannot be
 replayed from confirmed fills. Balanced Starter and the inline loop remain
 separate position owners. M8b defines those missing pure domain contracts;
-M9b must journal directives and confirmed fills transactionally before a
-single `PositionService` can replace these owners. A lost connection while
-`COMMIT` is being acknowledged also remains an ambiguous outcome that only
-durable reconciliation can resolve; this boolean helper is not an exactly-once
-protocol.
+M9b.1 prepares their journal tables; a later transactional repository must
+append and replay directives and confirmed fills before a single
+`PositionService` can replace these owners. A lost connection while `COMMIT` is
+being acknowledged also remains an ambiguous outcome that only durable
+reconciliation can resolve; this boolean helper is not an exactly-once protocol.
 
 Verification at implementation time:
 
@@ -1002,9 +1003,10 @@ the file, but no production module outside `trading.domain` references or
 applies it. An import-aware AST gate covers direct, facade, relative, aliased,
 and literal dynamic imports without confusing the generic name `Position` with
 unrelated classes. The legacy inline and Balanced Starter owners, paper
-executor, and positional PostgreSQL tables remain authoritative. M9b must
-journal the instruction and correlated fills, replay the projection, and
-reconcile ambiguous submissions before any runtime cut-over.
+executor, and positional PostgreSQL tables remain authoritative. M9b.1 prepares
+the new journal schema; later slices must encode and append the instruction and
+correlated fills, replay the projection, and reconcile ambiguous submissions
+before any runtime cut-over.
 
 Verification at implementation time:
 
@@ -1111,8 +1113,10 @@ defaults, indexes, deferrable constraints, `UNLOGGED` state, and ledger layouts
 are rejected without recording version 1. A suppressed ledger insert and a
 top-level `COMMIT` attempt are also rejected. A failing second migration rolls
 back both its DDL and version. A post-baseline `orders` table and `position_key`
-extension survive the next no-op run, keeping M9b free to persist the M8b
-contract additively. The full suite passes 1,274 tests, skips 9, deselects 3,
+extension survive the next no-op version-1 run, proving that M9a does not freeze
+future namespaces. M9b.1 now claims its three new table names explicitly and
+rejects any pre-existing collision instead of silently adopting it. The full
+suite passes 1,274 tests, skips 9, deselects 3,
 and keeps only the known ambient-database test failure; the next atomic
 test-infrastructure
 commit moves that test to a required isolated PostgreSQL CI job rather than
@@ -1172,6 +1176,77 @@ Python 3.10 environment against PostgreSQL 15; teardown leaves zero
 `elvis_pytest_*` databases. With no test DSN, the full non-performance suite
 passes 1,225 tests, explicitly skips 49, and deselects 9. Setting the required
 flag without a DSN fails setup as designed.
+
+### M9b.1 prepared order/position journal schema
+
+The forward-only `0002_order_position_journal.sql` migration adds three
+separate, durable tables without altering, backfilling, or reading the legacy
+`np.trades` and `np.open_positions` layouts. `np.position_streams` owns a
+globally unique, stable `position_key`, execution scope, and future stream
+version.
+`np.orders` records the correlated client/decision IDs, position effect,
+execution scope, and a versioned `PositionInstruction` JSON envelope plus its
+payload hash. A decision ID may reserve only one order per execution scope.
+`np.order_events` records the seven M8a lifecycle fact types under
+a `position_version` intended for monotonic allocation, with stable event and
+confirmed-fill identities. There is deliberately no mutable `np.positions`
+table: the M8b position remains a projection to rebuild by replay.
+
+Indexed identifiers are bounded; the future repository must reject an
+otherwise valid domain value that exceeds those storage limits before any
+external submission. SQL rejects empty and ordinary space-padded identifiers,
+while the future codec remains responsible for the complete domain clean-text
+rule. Venue order IDs are unique only within `(execution_scope, symbol)`, rather
+than incorrectly assumed global across accounts or adapters. Event identity is
+unique per client order, and confirmed-fill identity is the M8b composite
+`(client_order_id, trade_id)`.
+Version columns reject unknown envelope versions, payload columns require JSON
+objects, and foreign keys prevent events from escaping their order and position
+stream. The JSON objects are storage envelopes, not a permissive serializer. A
+future strict codec must encode every exact `Decimal` as a JSON string and
+validate the full typed payload and SHA-256 digest before the repository writes.
+PostgreSQL `NUMERIC` and JSON numbers are intentionally absent because their
+range is narrower than the already accepted pure-domain Decimal range.
+
+This slice prepares storage only. The migration runner remains unwired to
+startup, and no production module imports a journal repository because none
+exists yet. `stream_version` is not allocated by application code in this
+slice. M9b.2 and later slices must add lossless codecs, an explicit
+transaction/repository boundary that reports a committed reservation,
+per-position locking/version allocation, reducer-based replay, a single
+application owner for register-before-submit and outcome persistence,
+reconciliation, and quarantine. Until those gates pass, the legacy executor
+and positional tables remain authoritative. Rolling application code back
+leaves these unused, additive tables in place; there is no destructive down
+migration.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_migration_runner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check trading/persistence tests/test_migration_runner.py tests/postgres
+.venv/bin/isort --check-only trading/persistence tests/test_migration_runner.py tests/postgres
+.venv/bin/flake8 trading/persistence tests/test_migration_runner.py tests/postgres --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q trading/persistence tests/test_migration_runner.py tests/postgres
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=UTC .venv/bin/python -m pytest -q tests/ -m 'not perf and not postgres'
+/usr/local/bin/python3.10 -m pip wheel --no-deps --wheel-dir <temporary-directory> .
+unzip -l <temporary-directory>/elvis_trading_bot-*.whl | rg '000[12]_.*\.sql'
+```
+
+The migration unit suite passes 35 tests. The isolated PostgreSQL 15 suite
+passes 21 tests from fresh and version-1 databases. It preserves a legacy
+sentinel during the version-2 upgrade, rejects a pre-existing incompatible
+`np.orders` relation with a complete version-2 rollback, and validates scoped
+venue identity, per-position version keys, correlated fills, and timezone-aware
+timestamps. It also demonstrates an exact Decimal string beyond the PostgreSQL
+numeric scale round-tripping unchanged. These are schema constraints, not
+repository idempotency, concurrency, or replay claims. The UTC non-PostgreSQL
+suite passes 1,317 tests, skips 49, and deselects 24. The Python 3.10 wheel
+contains both immutable SQL migrations; its generated local build tree was
+removed after inspection.
 
 ## Cut-over policy
 

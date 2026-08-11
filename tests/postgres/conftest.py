@@ -106,7 +106,9 @@ def migrated_postgres_dsn(postgres_database_dsn):
     connection = psycopg2.connect(postgres_database_dsn)
     connection.autocommit = False
     try:
-        assert apply_migrations(connection, load_migrations()) == (1,)
+        migrations = load_migrations()
+        expected = tuple(migration.version for migration in migrations)
+        assert apply_migrations(connection, migrations) == expected
     finally:
         connection.close()
     return postgres_database_dsn
