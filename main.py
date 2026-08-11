@@ -2,6 +2,7 @@
 # run before any ML import — do not let isort reorder this file)
 import argparse
 import logging
+import math
 import threading
 import signal
 import sys
@@ -40,6 +41,8 @@ from trading.utils.trade_history_api import app as trade_history_app
 from trading.cooldown.trade_cooldown_manager import TradeCooldownManager
 from trading.analysis.technical_indicators import add_technical_indicators
 from trading.application.order_service import OrderService
+from trading.application.rsi_gate_policy import RsiGatePolicy
+from trading.application.signal_policy import SignalPolicyPipeline
 from trading.domain.orders import OrderIntent, OrderSide, OrderType, SubmissionReport
 from trading.domain.signals import Signal, SignalAction
 from trading.execution.legacy_paper_adapter import LegacyPaperExecutionAdapter
@@ -316,6 +319,98 @@ def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
             record_entry(symbol, side, votes)
     except Exception as exc:
         logger.error(f"⚠️ Model-feedback record error: {exc}")
+
+
+def _observe_rsi_policy_shadow(
+    *,
+    signal_symbol: str,
+    legacy_action: str,
+    legacy_confidence: float,
+    reference_price: float,
+    strategy_id: str,
+    rsi: object,
+    legacy_rsi_reason: str | None,
+    logger: logging.Logger,
+) -> None:
+    """Compare the authoritative RSI gate with a side-effect-free candidate."""
+    try:
+        decision = Signal(
+            decision_id=uuid.uuid4().hex,
+            symbol=signal_symbol,
+            action=SignalAction(legacy_action),
+            confidence=legacy_confidence,
+            reference_price=reference_price,
+            observed_at=datetime.now(timezone.utc),
+            strategy_id=strategy_id,
+            reasons=("shadow.rsi.input",),
+        )
+        policy = RsiGatePolicy(rsi)
+        candidate = SignalPolicyPipeline((policy,)).evaluate(decision)
+
+        legacy_vetoed = legacy_rsi_reason is not None
+        observed_legacy_action = (
+            SignalAction.HOLD.value if legacy_vetoed else decision.action.value
+        )
+        observed_legacy_confidence = 0.0 if legacy_vetoed else decision.confidence
+        candidate_reasons = candidate.reasons[len(decision.reasons) :]
+        action_match = candidate.action.value == observed_legacy_action
+        confidence_match = candidate.confidence == observed_legacy_confidence
+        matched = action_match and confidence_match
+
+        observed_rsi = None
+        if isinstance(policy.rsi, (int, float)) and not isinstance(policy.rsi, bool):
+            numeric_rsi = float(policy.rsi)
+            if math.isfinite(numeric_rsi):
+                observed_rsi = numeric_rsi
+
+        extra = {
+            "event_type": "signal_policy_shadow",
+            "migration_slice": "M6b2",
+            "migration_mode": "shadow",
+            "stage": "roadmap_filters.rsi",
+            "policy_id": policy.policy_id,
+            "shadow_evaluation_id": decision.decision_id,
+            "signal_symbol": decision.symbol,
+            "strategy_id": decision.strategy_id,
+            "rsi": observed_rsi,
+            "legacy_action": observed_legacy_action,
+            "legacy_confidence": observed_legacy_confidence,
+            "candidate_action": candidate.action.value,
+            "candidate_confidence": candidate.confidence,
+            "legacy_reason": legacy_rsi_reason,
+            "candidate_reasons": candidate_reasons,
+            "action_match": action_match,
+            "confidence_match": confidence_match,
+            "matched": matched,
+        }
+        log = logger.info if matched else logger.warning
+        log(
+            "RSI policy shadow %s for %s: legacy=%s/%.3f candidate=%s/%.3f",
+            "match" if matched else "divergence",
+            decision.symbol,
+            observed_legacy_action,
+            observed_legacy_confidence,
+            candidate.action.value,
+            candidate.confidence,
+            extra=extra,
+        )
+    except Exception as exc:
+        try:
+            logger.warning(
+                "RSI policy shadow unavailable (%s)",
+                type(exc).__name__,
+                extra={
+                    "event_type": "signal_policy_shadow_error",
+                    "migration_slice": "M6b2",
+                    "migration_mode": "shadow",
+                    "stage": "roadmap_filters.rsi",
+                    "policy_id": "rsi-gate",
+                    "signal_symbol": signal_symbol,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
 
 
 def _legacy_order_intent(
@@ -1504,6 +1599,16 @@ def main(mode: str, log_level: str):
                                     # Extract current price and market data for this symbol
                                     current_price = float(symbol_data.iloc[-1]["close"])
 
+                                    # Preserve the per-symbol observation used
+                                    # by the legacy gate before the strategy's
+                                    # neutral fallback is applied.
+                                    _raw_filter_rsi = symbol_data.iloc[-1].get("rsi")
+                                    _filter_rsi = (
+                                        float(_raw_filter_rsi)
+                                        if pd.notna(_raw_filter_rsi)
+                                        else None
+                                    )
+
                                     # Create market data specific to this symbol
                                     market_data = {
                                         "close": current_price,
@@ -1522,8 +1627,8 @@ def main(mode: str, log_level: str):
                                             symbol_data.iloc[-1].get("volume", 1000)
                                         ),
                                         "rsi": (
-                                            float(symbol_data.iloc[-1].get("rsi", 50.0))
-                                            if pd.notna(symbol_data.iloc[-1].get("rsi"))
+                                            _filter_rsi
+                                            if _filter_rsi is not None
                                             else 50.0
                                         ),
                                         "macd": (
@@ -1757,14 +1862,45 @@ def main(mode: str, log_level: str):
                                                     apply_signal_filters,
                                                 )
 
+                                                _roadmap_input_signal = signal
+                                                _roadmap_input_confidence = confidence
                                                 signal, confidence, _gate_reasons = (
                                                     apply_signal_filters(
                                                         signal,
                                                         confidence,
                                                         data.tail(100),
-                                                        rsi=market_data.get("rsi"),
+                                                        rsi=_filter_rsi,
                                                     )
                                                 )
+                                                if (
+                                                    os.getenv(
+                                                        "ELVIS_RSI_POLICY_MODE",
+                                                        "legacy",
+                                                    )
+                                                    == "shadow"
+                                                ):
+                                                    _legacy_rsi_reason = next(
+                                                        (
+                                                            reason
+                                                            for reason in _gate_reasons
+                                                            if reason.startswith(
+                                                                "rsi_gate:"
+                                                            )
+                                                        ),
+                                                        None,
+                                                    )
+                                                    _observe_rsi_policy_shadow(
+                                                        signal_symbol=symbol,
+                                                        legacy_action=_roadmap_input_signal,
+                                                        legacy_confidence=_roadmap_input_confidence,
+                                                        reference_price=current_price,
+                                                        strategy_id=type(
+                                                            active_strategy
+                                                        ).__name__,
+                                                        rsi=_filter_rsi,
+                                                        legacy_rsi_reason=_legacy_rsi_reason,
+                                                        logger=logger,
+                                                    )
                                                 for _reason in _gate_reasons:
                                                     logger.warning(
                                                         f"🚧 {symbol} filter: {_reason}"

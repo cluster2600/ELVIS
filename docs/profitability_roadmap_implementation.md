@@ -18,7 +18,10 @@ the live loop) is wired into `main.py` behind an environment flag.
   Runs in the signal loop with the winrate filter (pre-existing wiring); its
   per-symbol regime cache also feeds #5 and #10. Always on.
 - **#2 RSI overbought/oversold filter** — `trading.signals.filters.rsi_gate`
-  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`. The legacy gate remains
+  authoritative. Set `ELVIS_RSI_POLICY_MODE=shadow` to compare the pure,
+  fail-closed candidate on the same per-symbol RSI; shadow output is logged and
+  never applied. The default is `legacy`.
 - **#3 Volume-based trade sizing** — `trading.risk.position_sizing.volume_multiplier`
   Sizing block · `ELVIS_VOLUME_SIZING=1`
 - **#4 Trailing stop loss** — `trading.execution.exits.TrailingStop`

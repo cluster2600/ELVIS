@@ -495,6 +495,51 @@ passed, 9 skipped, 3 deselected, and only the unchanged local PostgreSQL
 baseline failure because `np.trades` is absent. Runtime authority remains
 wholly legacy.
 
+### M6b2 RSI shadow wiring implementation record
+
+The loop now normalizes the current symbol's RSI gate observation once before
+the strategy's neutral `50.0` fallback. The authoritative
+`apply_signal_filters` call runs first and receives that same normalized value.
+Only after it completes does the shadow observer compare the legacy RSI-specific
+veto reason with `SignalPolicyPipeline((RsiGatePolicy(...),))`; HOLD decisions
+from momentum, squeeze, trading hours, or MACD do not contaminate the
+comparison.
+
+`ELVIS_RSI_POLICY_MODE=shadow` enables observation; the default and every other
+value remain legacy-only. The observer returns `None`, its call is a standalone
+expression, and it has no executor, order service, cooldown, model-feedback,
+portfolio, or database dependency. It catches ordinary candidate and logging
+failures after the authoritative filter has run. Structured match/divergence
+records carry a fresh shadow evaluation ID, current symbol, strategy, stage,
+legacy and candidate action/confidence, and reason codes, but no candle or
+order-book payload. The evaluation ID is deliberately not presented as the
+later order correlation ID. Keys which the global logging context overwrites
+are avoided.
+
+Valid observations match at the strict 70/30 boundaries. Missing and NaN values
+produce the expected candidate-only fail-closed divergence; some invalid values
+already veto in both paths depending on side. These differences are recorded,
+never applied. Activation remains a later commit: it requires a measured paper
+shadow window, disables only `rsi_gate` inside the legacy composite, and leaves
+the single downstream `OrderService` path unchanged.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_rsi_policy_shadow.py tests/test_rsi_gate_policy.py tests/test_signal_policy.py tests/test_main_order_submission.py
+.venv/bin/black --target-version py310 --check tests/test_rsi_policy_shadow.py tests/test_rsi_gate_policy.py
+.venv/bin/isort --check-only tests/test_rsi_policy_shadow.py tests/test_rsi_gate_policy.py
+.venv/bin/flake8 tests/test_rsi_policy_shadow.py tests/test_rsi_gate_policy.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q main.py trading/application tests/test_rsi_policy_shadow.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passed 121 tests. It includes AST gates proving one
+post-legacy, non-assigned shadow call, the same `_filter_rsi` input on both
+paths, and no second submission API. The full-suite result is recorded after
+the final review: 976 passed, 9 skipped, 3 deselected, and only the unchanged
+local PostgreSQL baseline failure because `np.trades` is absent.
+
 ## Cut-over policy
 
 Each later behavioural migration has three modes:
