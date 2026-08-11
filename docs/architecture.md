@@ -8,7 +8,7 @@ is import-verified.
 
 ```mermaid
 flowchart TD
-    A["main.py (paper or live mode)"] --> B["core.bootstrap.bootstrap_application"]
+    A["main.py (paper-only capability gate)"] --> B["core.bootstrap.bootstrap_application"]
     B --> C["core.di container"]
     C --> S["trading.strategies.EnsembleStrategy"]
     C --> X["trading.execution.BinanceExecutor"]
@@ -18,7 +18,10 @@ flowchart TD
     S -->|BUY / SELL / HOLD| G["signal-quality gates: regime detector + winrate filter + trading.signals (RSI, momentum, BB squeeze, hours, MACD, order flow, MTF)"]
     G -->|approved signal| SZ["sizing + fee gate: trading.risk.position_sizing + trading.fees.fee_gate"]
     G -->|vetoed| H["HOLD"]
-    SZ -->|viable trade| X
+    SZ -->|viable trade| I["typed Signal + OrderIntent"]
+    I --> OS["OrderService: one call, no retry"]
+    OS --> LA["LegacyPaperExecutionAdapter"]
+    LA --> X
     X -->|paper fills + PnL| DB[("Postgres: np.trades / np.open_positions")]
     X -.->|"exits: trading.execution.exits (trailing stop, regime take-profit)"| X
     DB --> API["trading.utils.trade_history_api Flask :5050"]

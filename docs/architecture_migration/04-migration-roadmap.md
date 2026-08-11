@@ -23,7 +23,7 @@ deletes a legacy path before its replacement has passed parity checks.
 | M1 | Publish current map, reference comparison, target architecture, and this ledger | Markdown links and Mermaid blocks checked; docs review | revert docs commit | Implemented |
 | M2 | Add immutable signal, order-intent, and submission-report domain contracts | domain unit tests; no I/O imports | remove new unused package | Implemented |
 | M3 | Add a direct `OrderService` and narrow `ExecutionPort` with one adapter call and no internal retry | application unit tests; 10,000-call latency tripwire; no network | remove new unused service | Implemented |
-| M4 | Add adapters for the current executor and success recorder; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | one call-site revert restores legacy branch | Planned |
+| M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11/20-feature contract tests, incompatible artefact rejection, training/inference round trip | retain prior artefact and loader adapter | Planned |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | Planned |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | Planned |
@@ -126,9 +126,49 @@ overhead regression tripwire, not an end-to-end exchange-latency claim.
   execution;
 - no recording happens for a rejected or failed execution;
 - multi-symbol paper behaviour remains enabled by default;
-- the disabled legacy single-symbol block is not re-enabled; and
+- `main.py` has no direct `place_order`, `execute_buy`, or `execute_sell` call,
+  no environment escape can restore one, and an old strategy API fails closed;
+- an acknowledged legacy fill must echo the exact symbol and side and contain a
+  non-blank order ID;
+- values that overflow or underflow during the `Decimal`-to-float boundary
+  conversion are rejected before any executor call; and
 - the full non-performance suite has no regression beyond a documented baseline
   environmental failure.
+
+### M4 implementation record
+
+The active multi-symbol branch now constructs a validated `Signal` and
+`OrderIntent`, then calls one `OrderService` for both BUY and SELL. The
+paper-only adapter converts `Decimal` to float at the legacy boundary and maps
+only explicit responses: `FILLED` with the exact symbol, side, and a non-blank
+order ID is acknowledged, `BLOCKED` is `NOT_SENT`, explicit `REJECTED` is
+`VENUE_REJECTED`, and empty, malformed, incoherent, or unknown responses are
+`AMBIGUOUS`. Non-representable or float-underflowed order values are rejected
+before the executor boundary. Votes and cooldown are recorded once only for an
+acknowledged report. The existing executor's own trade/database writes are not
+duplicated.
+
+`main(mode="live")` now fails before bootstrap, and the adapter independently
+returns `NOT_SENT` outside paper mode. This prevents bootstrap from creating an
+authenticated client or changing venue leverage under the unsupported live
+mode. The environment escape for duplicate single-symbol execution was removed,
+all direct placement calls were removed from `main.py`, and the old-strategy
+fallback now logs and refuses actionable output instead of submitting it.
+
+Verification at implementation time:
+
+```bash
+/usr/local/bin/python3.10 -m compileall -q trading/execution/legacy_paper_adapter.py main.py
+.venv/bin/python -m pytest tests/test_legacy_paper_adapter.py tests/test_main_order_submission.py -q
+.venv/bin/python -m pytest tests/test_binance_executor.py tests/test_paper_fill_integrity.py tests/test_roadmap_wiring.py -q
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The M4-focused suite passed 31 tests; the cumulative M2--M4 contract suite
+passed 133 tests; and the selected regression suite passed 25. The full result
+was 796 passed, 9 skipped, 3 deselected, and the same one
+baseline failure: the locally reachable PostgreSQL instance lacks
+`np.trades`. No new failure was introduced.
 
 ## Cut-over policy
 

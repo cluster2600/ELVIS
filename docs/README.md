@@ -58,7 +58,7 @@ bao kv put -mount=secrets binance \
 
 #### 3. Start Trading Bot
 ```bash
-# --mode accepts "paper" (default) or "live"
+# paper is the only executable mode; live is rejected before bootstrap
 python main.py --mode paper
 ```
 

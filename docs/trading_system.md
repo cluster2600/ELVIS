@@ -407,7 +407,7 @@ were previously split across `config/config.py` and `trading/config/*.yaml`.
 # trading_config.yaml
 trading:
   symbol: BTCUSDT
-  mode: paper                # paper | live
+  mode: paper                # only executable mode; live is rejected before bootstrap
   default_leverage: 3        # env DEFAULT_LEVERAGE overrides; >10x needs OVERRIDE_HIGH_LEVERAGE=true
   strategy: ensemble
 

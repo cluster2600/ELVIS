@@ -23,10 +23,11 @@ Binance REST endpoint the bot talks to: `paper` points `API_CONFIG` at
 `TESTNET_API_SPOT_SECRET`), any other value points it at
 `https://api.binance.com`.
 
-The bot's own paper/live behaviour is chosen separately by the `--mode`
-argument of `main.py` (`--mode paper|live`, default `paper`), passed through to
-`main(mode=...)`. For a normal paper-trading session leave both at their paper
-defaults.
+The bot's execution behaviour is selected separately by the `--mode` argument
+of `main.py`. `paper` is the only executable mode. The legacy `live` CLI value
+is rejected before bootstrap because the current executor exposes no validated
+live-submission capability. For a normal paper-trading session leave both
+settings at their paper defaults.
 
 ### Database Configuration
 The paper trading system uses PostgreSQL to track:

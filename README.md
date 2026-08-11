@@ -12,9 +12,10 @@ neural nets, optional YDF/CoreML members), market-regime detection, and a
 layered signal-quality pipeline with strict risk management. Secrets live in
 HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
 
-> **Paper trading is the supported mode.** Live mode exists but is not
-> considered safe for unattended use. Nothing here is financial advice, and no
-> profitability figures are guaranteed.
+> **Paper trading is the only executable mode.** `--mode live` is retained as a
+> compatibility value but is rejected before application bootstrap; the current
+> executor has no validated live-submission capability. Nothing here is
+> financial advice, and no profitability figures are guaranteed.
 
 ## Features
 

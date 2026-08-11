@@ -8,7 +8,9 @@ import sys
 import time
 import curses
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
 # ponytail: torch, sklearn and skimage each bundle their own libomp.dylib; loading
 # them together segfaults during RL training on macOS. Must be set before any
@@ -37,6 +39,10 @@ from utils.console_dashboard import ConsoleDashboard
 from trading.utils.trade_history_api import app as trade_history_app
 from trading.cooldown.trade_cooldown_manager import TradeCooldownManager
 from trading.analysis.technical_indicators import add_technical_indicators
+from trading.application.order_service import OrderService
+from trading.domain.orders import OrderIntent, OrderSide, OrderType, SubmissionReport
+from trading.domain.signals import Signal, SignalAction
+from trading.execution.legacy_paper_adapter import LegacyPaperExecutionAdapter
 import pandas as pd
 
 
@@ -312,6 +318,74 @@ def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
         logger.error(f"⚠️ Model-feedback record error: {exc}")
 
 
+def _legacy_order_intent(
+    *,
+    symbol: str,
+    signal: str,
+    confidence: float,
+    current_price: float,
+    position_size: float,
+    leverage: int,
+    strategy_id: str,
+) -> OrderIntent:
+    """Validate the legacy decision before it reaches the paper adapter."""
+    decision_id = uuid.uuid4().hex
+    observed_at = datetime.now(timezone.utc)
+    decision = Signal(
+        decision_id=decision_id,
+        symbol=symbol,
+        action=SignalAction(signal),
+        confidence=confidence,
+        reference_price=current_price,
+        observed_at=observed_at,
+        strategy_id=strategy_id,
+        reasons=("legacy signal filters approved",),
+    )
+    return OrderIntent(
+        client_order_id=f"ELV-{decision_id}",
+        decision_id=decision.decision_id,
+        symbol=decision.symbol,
+        side=OrderSide(decision.action.value),
+        quantity=Decimal(str(position_size)),
+        order_type=OrderType.MARKET,
+        reference_price=Decimal(str(decision.reference_price)),
+        leverage=leverage,
+        created_at=observed_at,
+    )
+
+
+def _record_acknowledged_legacy_order(
+    report: SubmissionReport,
+    intent: OrderIntent,
+    *,
+    confidence: float,
+    strategy,
+    cooldown_manager,
+    logger: logging.Logger,
+) -> bool:
+    """Record legacy feedback once, and only after a proven acknowledgment."""
+    if not report.acknowledged:
+        return False
+    if report.client_order_id != intent.client_order_id:
+        logger.error("Refusing to record an acknowledgment for another order")
+        return False
+
+    _record_model_votes(strategy, intent.symbol, intent.side.value, logger)
+    try:
+        cooldown_manager.record_trade(
+            intent.symbol,
+            intent.side.value,
+            float(intent.quantity),
+            confidence,
+        )
+    except Exception as exc:
+        logger.error(
+            f"⚠️ Cooldown record failed after acknowledged order "
+            f"{intent.client_order_id}: {type(exc).__name__}"
+        )
+    return True
+
+
 def _score_model_votes(logger: logging.Logger):
     """Adaptive-ensemble feedback (#11): score votes of closed positions.
 
@@ -334,9 +408,14 @@ def main(mode: str, log_level: str):
     Main entry point for the trading bot using dependency injection.
 
     Args:
-        mode (str): Trading mode, either 'paper' or 'live'.
+        mode (str): Trading mode. Only 'paper' is currently executable.
         log_level (str): Logging level string.
     """
+    if mode != "paper":
+        raise RuntimeError(
+            "ELVIS currently supports paper trading only; live execution is disabled"
+        )
+
     # Bootstrap the application
     bootstrapper = bootstrap_application(mode, log_level)
     logger = container.get("logger")
@@ -357,6 +436,8 @@ def main(mode: str, log_level: str):
         risk_manager = container.get("risk_manager")
         price_fetcher = container.get("price_fetcher")
         executor = container.get("executor")
+        legacy_execution = LegacyPaperExecutionAdapter(executor, runtime_mode=mode)
+        order_service = OrderService(legacy_execution)
         llm_advisor = container.get("llm_advisor")
 
         # Get the active strategy (ensemble or research-based)
@@ -2044,62 +2125,41 @@ def main(mode: str, log_level: str):
                                                         f"⚠️ Fee gate error: {fee_error}"
                                                     )
 
-                                            if signal == "BUY":
+                                            if signal in ("BUY", "SELL"):
                                                 logger.info(
-                                                    f"🟢 [BUY] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
+                                                    f"🎯 [{signal}] Submitting {symbol} paper order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
                                                 )
-                                                result = executor.execute_buy(
-                                                    symbol, position_size, current_price
+                                                intent = _legacy_order_intent(
+                                                    symbol=symbol,
+                                                    signal=signal,
+                                                    confidence=confidence,
+                                                    current_price=current_price,
+                                                    position_size=position_size,
+                                                    leverage=legacy_execution.default_leverage,
+                                                    strategy_id=type(
+                                                        active_strategy
+                                                    ).__name__,
                                                 )
+                                                report = order_service.submit(intent)
 
-                                                if result:
+                                                if _record_acknowledged_legacy_order(
+                                                    report,
+                                                    intent,
+                                                    confidence=confidence,
+                                                    strategy=active_strategy,
+                                                    cooldown_manager=trading_loop.cooldown_manager,
+                                                    logger=logger,
+                                                ):
                                                     logger.info(
-                                                        f"✅ [SUCCESS] {symbol} BUY executed successfully"
+                                                        f"✅ [ACKNOWLEDGED] {symbol} {signal} paper order {report.venue_order_id}"
                                                     )
-                                                    _record_model_votes(
-                                                        active_strategy,
-                                                        symbol,
-                                                        "BUY",
-                                                        logger,
-                                                    )
-                                                    trading_loop.cooldown_manager.record_trade(
-                                                        symbol,
-                                                        "BUY",
-                                                        position_size,
-                                                        confidence,
+                                                elif report.requires_reconciliation:
+                                                    logger.error(
+                                                        f"⚠️ [AMBIGUOUS] {symbol} {signal} submission requires reconciliation; no automatic retry"
                                                     )
                                                 else:
-                                                    logger.error(
-                                                        f"❌ [FAIL] Failed to execute {symbol} BUY order"
-                                                    )
-
-                                            elif signal == "SELL":
-                                                logger.info(
-                                                    f"🔴 [SELL] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
-                                                )
-                                                result = executor.execute_sell(
-                                                    symbol, position_size, current_price
-                                                )
-
-                                                if result:
-                                                    logger.info(
-                                                        f"✅ [SUCCESS] {symbol} SELL executed successfully"
-                                                    )
-                                                    _record_model_votes(
-                                                        active_strategy,
-                                                        symbol,
-                                                        "SELL",
-                                                        logger,
-                                                    )
-                                                    trading_loop.cooldown_manager.record_trade(
-                                                        symbol,
-                                                        "SELL",
-                                                        position_size,
-                                                        confidence,
-                                                    )
-                                                else:
-                                                    logger.error(
-                                                        f"❌ [FAIL] Failed to execute {symbol} SELL order"
+                                                    logger.warning(
+                                                        f"🚫 [NOT SUBMITTED] {symbol} {signal}: {report.status.value} ({report.reason})"
                                                     )
 
                                         except Exception as e:
@@ -2394,14 +2454,11 @@ def main(mode: str, log_level: str):
                                 "✅ Multi-symbol trading handled by main loop - BNBUSDT included"
                             )
 
-                            # The LEGACY single-symbol execution below reuses
-                            # whatever signal/confidence the LAST loop symbol
-                            # left behind — executing it again double-places
-                            # orders and double-records cooldown for that
-                            # symbol every cycle. Neutralize unless explicitly
-                            # re-enabled.
-                            if os.getenv("ELVIS_LEGACY_EXECUTION", "0") != "1":
-                                signal = "HOLD"
+                            # The legacy single-symbol branch reused the last
+                            # multi-symbol decision and could place it twice.
+                            # It is permanently fail-closed while its remaining
+                            # sizing code is removed in the risk-planning slice.
+                            signal = "HOLD"
 
                             # Continue with execution logic
                             current_price = data.iloc[-1]["close"]
@@ -2563,9 +2620,10 @@ def main(mode: str, log_level: str):
                             )
 
                             if signal == "BUY":
-                                order_result = executor.place_order(
-                                    symbol, "buy", position_size, current_price
+                                logger.error(
+                                    "Legacy duplicate BUY path is retired; order not submitted"
                                 )
+                                order_result = None
                                 if order_result:
                                     logger.info(
                                         f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}"
@@ -2620,9 +2678,10 @@ def main(mode: str, log_level: str):
                                         f"❌ [FAIL] Failed to execute BUY order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}"
                                     )
                             elif signal == "SELL":
-                                order_result = executor.place_order(
-                                    symbol, "sell", position_size, current_price
+                                logger.error(
+                                    "Legacy duplicate SELL path is retired; order not submitted"
                                 )
+                                order_result = None
                                 if order_result:
                                     logger.info(
                                         f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}"
@@ -2704,26 +2763,12 @@ def main(mode: str, log_level: str):
                                             )
                                         )
 
-                                        if signal == "BUY":
-                                            executor.place_order(
-                                                symbol,
-                                                "buy",
-                                                position_size,
-                                                current_price,
-                                            )
-                                            logger.info(
-                                                f"BUY signal executed: {position_size} BTC at {current_price}"
-                                            )
-                                        elif signal == "SELL":
-                                            executor.place_order(
-                                                symbol,
-                                                "sell",
-                                                position_size,
-                                                current_price,
-                                            )
-                                            logger.info(
-                                                f"SELL signal executed: {position_size} BTC at {current_price}"
-                                            )
+                                        logger.error(
+                                            "Strategy %s produced %s through the retired "
+                                            "generate_signals API; order not submitted",
+                                            type(active_strategy).__name__,
+                                            signal,
+                                        )
                     else:
                         logger.error("Data is empty even after mock data creation!")
 
