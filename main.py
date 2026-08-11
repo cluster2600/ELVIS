@@ -414,6 +414,76 @@ def _observe_rsi_policy_shadow(
             pass
 
 
+def _observe_take_profit_regime_shadow(
+    *,
+    signal_symbol: str,
+    quality_regime: object,
+    candidate_regime: object,
+    logger: logging.Logger,
+) -> None:
+    """Compare the legacy TP fallback with a side-effect-free regime candidate."""
+    supported_regimes = {"TRENDING", "REVERSAL", "RANGING", "CHOPPY"}
+    try:
+        normalized_quality = quality_regime if isinstance(quality_regime, str) else None
+        normalized_legacy = (
+            normalized_quality.upper() if normalized_quality is not None else ""
+        )
+        legacy_effective_regime = (
+            normalized_legacy if normalized_legacy in supported_regimes else "RANGING"
+        )
+        normalized_candidate = (
+            candidate_regime
+            if isinstance(candidate_regime, str)
+            and candidate_regime in supported_regimes
+            else None
+        )
+        candidate_available = normalized_candidate is not None
+        matched = normalized_candidate == legacy_effective_regime
+        extra = {
+            "event_type": "take_profit_regime_shadow",
+            "migration_slice": "M7g",
+            "migration_mode": "shadow",
+            "stage": "pretrade.take_profit_regime",
+            "shadow_evaluation_id": uuid.uuid4().hex,
+            "signal_symbol": signal_symbol,
+            "quality_regime": normalized_quality,
+            "legacy_effective_regime": legacy_effective_regime,
+            "candidate_regime": normalized_candidate,
+            "candidate_available": candidate_available,
+            "matched": matched,
+        }
+    except Exception as exc:
+        try:
+            logger.warning(
+                "Take-profit regime shadow unavailable (%s)",
+                type(exc).__name__,
+                extra={
+                    "event_type": "take_profit_regime_shadow_error",
+                    "migration_slice": "M7g",
+                    "migration_mode": "shadow",
+                    "stage": "pretrade.take_profit_regime",
+                    "signal_symbol": signal_symbol,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
+        return
+
+    try:
+        log = logger.info if matched else logger.warning
+        log(
+            "Take-profit regime shadow %s for %s: legacy=%s candidate=%s",
+            "match" if matched else "divergence",
+            signal_symbol,
+            legacy_effective_regime,
+            normalized_candidate or "unavailable",
+            extra=extra,
+        )
+    except Exception:
+        pass
+
+
 def _legacy_order_intent(
     *,
     symbol: str,
@@ -1612,6 +1682,7 @@ def main(mode: str, log_level: str):
                                     )
                                     filter_result = None
                                     regime_result = None
+                                    take_profit_regime = None
 
                                     # Extract current price and market data for this symbol
                                     current_price = float(symbol_data.iloc[-1]["close"])
@@ -1780,6 +1851,15 @@ def main(mode: str, log_level: str):
                                             filter_result = main._winrate_filter.analyze_signal_quality(
                                                 symbol, market_data, symbol_history
                                             )
+                                            market_regime_result = filter_result.get(
+                                                "market_regime"
+                                            )
+                                            if isinstance(market_regime_result, dict):
+                                                take_profit_regime = (
+                                                    market_regime_result.get(
+                                                        "take_profit_regime"
+                                                    )
+                                                )
 
                                             # Analyze market regime
                                             regime_result = main._regime_detector.detect_current_regime(
@@ -1793,6 +1873,21 @@ def main(mode: str, log_level: str):
                                             main._last_regime[symbol] = regime_result[
                                                 "regime"
                                             ]["class"]
+
+                                            if (
+                                                os.getenv(
+                                                    "ELVIS_TP_REGIME_MODE", "legacy"
+                                                )
+                                                == "shadow"
+                                            ):
+                                                _observe_take_profit_regime_shadow(
+                                                    signal_symbol=symbol,
+                                                    quality_regime=regime_result[
+                                                        "regime"
+                                                    ]["class"],
+                                                    candidate_regime=take_profit_regime,
+                                                    logger=logger,
+                                                )
 
                                             # Apply filtering logic
                                             original_signal = signal

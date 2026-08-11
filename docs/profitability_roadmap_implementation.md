@@ -44,8 +44,10 @@ the live loop) is wired into `main.py` behind an environment flag.
 - **#10 Dynamic take profit by regime** — `trading.execution.exits.dynamic_take_profit`
   Position loop · `ELVIS_DYNAMIC_TP=1`. The per-symbol analysis now exposes a
   distinct `take_profit_regime`; the legacy cache still holds a quality label
-  and therefore uses the conservative `RANGING` fallback until the M7 shadow
-  and cut-over slices. `REVERSAL` is supported but not currently produced.
+  and therefore uses the conservative `RANGING` fallback. Set
+  `ELVIS_TP_REGIME_MODE=shadow` to compare that effective legacy result with
+  the new profile without changing the fee gate, cache, or exits. `REVERSAL` is
+  supported but not currently produced.
 - **#11 Adaptive ML ensemble weights** — `trading.signals.adaptive_ensemble` + `trading.signals.model_feedback`
   Ensemble voting modulated by a per-model feedback loop · `ELVIS_ADAPTIVE_ENSEMBLE=1` —
   [how it works](#item-11-adaptive-ensemble--wired-via-a-real-feedback-pipeline)
@@ -80,8 +82,9 @@ signal gates or sizing.
    signal to HOLD and logs the reason.
 2. **Regime cache** — `main._last_regime` still caches the detector's quality
    label. M7f adds the separate, purpose-specific `take_profit_regime` producer,
-   but does not switch the fee gate or open-position exits before shadow
-   comparison and stale-cache handling are in place.
+   and M7g can observe it with `ELVIS_TP_REGIME_MODE=shadow`; neither slice
+   switches the fee gate or open-position exits before stale-cache handling is
+   in place.
 3. **Sizing** — `volume_multiplier(symbol_history)` scales the adaptive position
    size (0.5x–2.0x by that symbol's volume vs its 20-bar mean); the optional
    Kelly stage derives f* from the last 200 paper trades' PnL and *caps* (never

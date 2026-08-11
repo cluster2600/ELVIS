@@ -29,7 +29,7 @@ rollback decision that does not restore unsafe behaviour.
 | M4 | Add a typed adapter and acknowledged-success handler for the current executor; replace duplicated BUY/SELL submission in the multi-symbol paper path | adapter contract tests; main wiring test; full suite | revert typed wiring only; never restore duplicate direct-order paths | Implemented |
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
-| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7f TP-regime contract) |
+| M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7g TP-regime shadow) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | Planned |
 | M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | Planned |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
@@ -769,6 +769,44 @@ field, short-history failure, and the invariant that the classifier never
 emits `REVERSAL` or a quality label. The full suite passes 1,072 tests, skips 9,
 deselects 3, and keeps only the unchanged local PostgreSQL baseline failure
 because `np.trades` is absent.
+
+### M7g take-profit regime shadow implementation record
+
+`ELVIS_TP_REGIME_MODE=shadow` now compares the purpose-specific
+`take_profit_regime` produced by `HighWinRateFilter` with the effective legacy
+behaviour. The legacy cache continues to receive the quality label, so labels
+outside the supported TP vocabulary resolve to the existing `RANGING`
+fallback. The observer records that effective profile, the candidate profile,
+availability, and match status in a bounded structured event. Its evaluation
+identifier is explicitly shadow-only and is not presented as an order ID.
+
+The default is `legacy`; unknown values also keep legacy behaviour. The shadow
+call is a standalone expression after the authoritative high-win-rate analyses.
+It returns `None`, swallows ordinary calculation and logging failures, and has
+no reference to executors, order submission, cooldown, feedback, persistence,
+the fee gate, the open-position cache, or exit state. This slice deliberately
+does not rename or update `_last_regime`, change a take-profit target, or make a
+missing candidate reject an order. Stale-cache removal and fail-closed active
+consumption remain the next separately reviewed cut-over.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_take_profit_regime_shadow.py tests/test_winrate_regime_units.py tests/test_roadmap_wiring.py tests/test_main_order_submission.py
+.venv/bin/black --target-version py310 --check tests/test_take_profit_regime_shadow.py tests/test_winrate_regime_units.py
+.venv/bin/isort --check-only tests/test_take_profit_regime_shadow.py tests/test_winrate_regime_units.py
+.venv/bin/flake8 tests/test_take_profit_regime_shadow.py tests/test_winrate_regime_units.py --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q main.py tests/test_take_profit_regime_shadow.py
+.venv/bin/python -m pytest tests/ -q -m 'not perf'
+```
+
+The focused suite passes 52 tests. Behavioural tests cover legacy matches,
+expected TRENDING/CHOPPY divergences, unavailable candidates, sanitized logger
+failure, and exact structured fields. AST gates prove the call is opt-in,
+non-assigned, before the sole typed submission, incapable of adding a stateful
+dependency, and leaves the authoritative quality-label cache unchanged. The
+full suite passes 1,087 tests, skips 9, deselects 3, and keeps only the unchanged
+local PostgreSQL baseline failure because `np.trades` is absent.
 
 ## Cut-over policy
 
