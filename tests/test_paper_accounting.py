@@ -1020,10 +1020,11 @@ def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "domain" / "paper_accounting.py"
     facade_path = root / "trading" / "domain" / "__init__.py"
+    codec_path = root / "trading" / "persistence" / "paper_account_journal_codec.py"
     consumers = []
     for source_path in root.rglob("*.py"):
         if (
-            source_path in {module_path, facade_path}
+            source_path in {module_path, facade_path, codec_path}
             or "tests" in source_path.parts
             or ".venv" in source_path.parts
             or "build" in source_path.parts

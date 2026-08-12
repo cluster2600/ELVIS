@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; M9b.11 account contract is not durable; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; M9b.11 account contract and M9b.12a persistence codec are not durable; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -2455,6 +2455,132 @@ position, order, and domain command above passes 515 tests. Black, isort,
 flake8, Python 3.10 compilation, and the diff check pass. The complete M9b.11
 non-PostgreSQL gate passes 1,910 tests, skips 50, deselects 66, and passes 7
 subtests under `Pacific/Honolulu`.
+
+### M9b.12a compact paper-account journal codec
+
+M9b.12a adds the pure, unwired
+`trading.persistence.paper_account_journal_codec` contract before migration
+`0003` fixes the durable account schema. It is imported through its direct
+module and is deliberately not added to the lightweight `trading.persistence`
+migration facade.
+
+The opening envelope is produced by
+`encode_paper_account_opening(execution_scope, owner_generation, account)` and
+decoded by `decode_paper_account_opening(...)`. Encoding requires the exact
+empty M9b.11 account: current balances equal its explicit opening balances, and
+there are no settlement records or margin reservations. The canonical payload
+binds the execution scope and positive owner generation to
+`PaperAccountPolicy` and every opening balance. The indexed columns repeat the
+scope, account key, generation, and collateral asset. Decode verifies version
+1, strict payload shape and SHA-256, reconstructs the empty `PaperAccount`, and
+cross-checks all indexed columns. No capital is seeded, defaulted, backfilled,
+or represented as a fake fill.
+
+`encode_paper_account_settlement(admission)` accepts only a newly
+`PaperAccountAdmissionDisposition.APPLIED` result. The compact version-1
+payload contains:
+
+- account key and collateral asset;
+- account version plus position key/version, client order ID, event ID, and
+  trade ID;
+- versioned `LINEAR_QUOTE_MULTIPLIER_ONE` symbol/base/quote identity;
+- exact realised-PnL, fee-debit, and per-asset cash deltas;
+- the derived non-zero postings, resulting account state, and resulting margin
+  for the affected position.
+
+It intentionally omits the recursive `before`/`after` settlement chain, FIFO
+lots, cumulative economics, prior account records, and full account projection.
+`decode_paper_account_settlement(before, settlement, ...)` receives the trusted
+domain inputs needed to replay causality, calls M9b.11 admission at the indexed
+account version, requires a newly applied result, regenerates the payload, and
+cross-checks every denormalized account, journal, and instrument column. A
+standalone stored row cannot manufacture a settlement or establish the global
+account prefix without repository replay.
+
+The owner-provenance envelope is built from
+`PaperAccountBatchManifest` and `PaperAccountBatchFill`. The manifest binds
+execution scope, account, positive owner generation, position/order identity,
+and instruction SHA-256 to the ACK's event ID, position version, canonical
+observed time, and event SHA-256. Every fill reference binds the same
+position/order to event and trade IDs, position and account versions, the
+journal event SHA-256, and the corresponding account-settlement SHA-256. The
+manifest requires a non-empty fill tuple, consecutive fill position versions
+immediately after the ACK, consecutive account versions, and unique event and
+trade identities. `encode_paper_account_batch(...)` additionally exposes the
+first/last account versions, last position version, and fill count as indexed
+range columns. `decode_paper_account_batch(...)` reconstructs the manifest and
+cross-checks that range as well as every other indexed value.
+
+Every envelope is a frozen, slotted, validated value using canonical sorted,
+compact, ASCII JSON and lowercase SHA-256 over its UTF-8 bytes. Exact finite
+`Decimal` values remain canonical strings, preserving quantum, and the batch
+timestamp is normalized and stored as canonical UTC with six fractional
+digits, both in the indexed `submission_observed_at` and the payload. Decoders
+treat JSON text or PostgreSQL JSON objects as untrusted input: duplicate keys,
+JSON constants, extra/missing keys, non-canonical scalars, unknown versions,
+domain violations, hash changes, and payload/index disagreement fail closed
+with `JournalQuarantineError`. The hash detects drift and binds identities; it
+is not authentication or evidence that one database transaction produced the
+facts.
+
+This slice adds no SQL or migration and does not change migration `0002`. It
+implements no repository, PostgreSQL lock, transaction owner, batch write,
+account provisioning command, execution call, clock sampling, runtime wiring,
+readiness gate, reconciliation/quarantine workflow, legacy compatibility write,
+or sole-writer fence. It also adds no funding, borrowing, liquidation,
+unrealised mark-to-market, or price/tick/lot policy. Shape-compatible terminal
+history created before this codec still lacks owner/account provenance and
+requires reconciliation. Migration `0003` is the next additive slice; it must
+store these envelopes and projections dormantly before a future owner can lock
+the account first, lock the position second, and commit journal plus account
+facts atomically. Its manifest row must reference the exact immutable opening
+identified by `(execution_scope, account_key, owner_generation)`. Settlement
+rows omit scope and generation intentionally, so the schema must prevent
+orphans by binding every settlement's account/position/event/trade identities
+and payload hash to the exact manifest fill with composite foreign keys or an
+equivalently strict deferred constraint. Deferral may support one atomic batch
+insert; it must not weaken the invariant at commit.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_paper_account_journal_codec.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_journal_codec.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py \
+  tests/test_domain_contracts.py
+.venv/bin/black --target-version py310 --check \
+  trading/persistence/paper_account_journal_codec.py \
+  tests/test_paper_account_journal_codec.py
+.venv/bin/isort --check-only \
+  trading/persistence/paper_account_journal_codec.py \
+  tests/test_paper_account_journal_codec.py
+.venv/bin/flake8 \
+  trading/persistence/paper_account_journal_codec.py \
+  tests/test_paper_account_journal_codec.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/persistence/paper_account_journal_codec.py \
+  tests/test_paper_account_journal_codec.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The dedicated codec suite passes 136 tests under each supported Python
+interpreter. The exact focused codec, journal-codec, accounting, settlement,
+economics, position, order, and domain command above passes 746 tests. Black,
+isort, flake8, Python 3.10 compilation, and the diff check pass. The complete
+non-PostgreSQL gate passes 2,045 tests, skips 50, deselects 66, and passes 7
+subtests under `Pacific/Honolulu`. No PostgreSQL test is required for M9b.12a
+because it adds no schema or I/O.
 
 ## Cut-over policy
 

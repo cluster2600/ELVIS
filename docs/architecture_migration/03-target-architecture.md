@@ -225,6 +225,13 @@ M9b.11 adds the pure `trading.domain.paper_accounting` account fold: global
 settlement ordering, exact available/reserved balances, quantum-ceiling margin,
 derived postings, admission, replay, and insolvency semantics. It adds no SQL,
 durable account owner, or runtime composition.
+M9b.12a adds the pure, unwired
+`trading.persistence.paper_account_journal_codec` boundary for the next durable
+account slice. It defines compact, version-1 envelopes for an explicitly scoped
+empty-account opening, one newly applied settlement, and the ACK/full-fill batch
+that binds journal facts to account facts. It adds no migration, repository,
+transaction owner, or runtime composition; migration `0003` remains the next
+schema slice.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -610,6 +617,90 @@ borrowing, liquidation, unrealised mark-to-market PnL, durable opening-capital
 provenance, reconciliation/quarantine, sole-writer fencing, shadow parity, and
 cut-over remain outside this slice.
 
+M9b.12a fixes the lossless payload contract needed before that schema can be
+made immutable. The module is consumed directly rather than re-exported from
+the lightweight `trading.persistence` migration facade. Its frozen, slotted
+encoded values are:
+
+- `EncodedPaperAccountOpening`, with indexed execution scope, account key,
+  positive owner generation, collateral asset, envelope version, canonical
+  payload, and payload SHA-256;
+- `EncodedPaperAccountSettlement`, with indexed account/position/fill and
+  instrument identity, independent account and position versions, envelope
+  versions, canonical payload, and payload SHA-256; and
+- `EncodedPaperAccountBatch`, whose indexed owner/order/ACK identity and exact
+  account/position version ranges mirror a canonical
+  `PaperAccountBatchManifest` containing one or more
+  `PaperAccountBatchFill` references.
+
+`encode_paper_account_opening(execution_scope, owner_generation, account)`
+accepts only an empty `PaperAccount`: current balances must equal the explicit
+opening balances, and there may be no settlement record or margin reservation.
+The version-1 payload binds `execution_scope` and `owner_generation` to the
+complete account policy (`account_key`, `collateral_asset`, and exact
+`margin_quantum`) and the asset-sorted opening balances. Opening capital is
+therefore explicit provenance, not a synthetic settlement, implicit database
+default, seed, or backfill. `decode_paper_account_opening(...)` reconstructs the
+domain account and rejects any hash, version, payload-shape, domain, or
+denormalized-column mismatch.
+
+`encode_paper_account_settlement(admission)` accepts only a newly `APPLIED`
+`PaperAccountAdmission`. Its compact payload stores the account identity; the
+account/position version and fill/event reference; the versioned linear quote
+instrument identity; exact realised-PnL, fee-debit, and cash deltas; derived
+postings; resulting account state; and that position's resulting margin, if
+non-zero. It deliberately does not serialize `before`, the complete
+`PaperSettlement`, FIFO lots, the cumulative economic projection, all prior
+settlements, or a recursive `after` account. Consequently, history remains
+linear rather than growing quadratically. To decode a row,
+`decode_paper_account_settlement(before, settlement, ...)` requires the already
+validated prior account and exact settlement candidate, re-runs M9b.11
+admission, requires a newly applied result, regenerates the compact payload,
+and cross-checks every indexed identity. A row is not authority to invent a
+settlement or skip causal replay.
+
+`PaperAccountBatchManifest` is the provenance bridge that migration `0002`
+lacks. It binds `execution_scope`, `account_key`, a positive
+`owner_generation`, `position_key`, `client_order_id`, and the instruction
+payload SHA-256 to the ACK event ID, position version, observed time, and event
+payload SHA-256. Every `PaperAccountBatchFill` then binds the same order and
+position to its event ID, trade ID, position version, account version, journal
+event-payload SHA-256, and account-settlement-payload SHA-256. Fill position
+versions must immediately and contiguously follow the ACK; fill account
+versions must be contiguous; and event and trade identities must be unique.
+The encoded batch duplicates the first/last account versions, last position
+version, and fill count so a future repository can index and cross-check the
+complete range. This marker distinguishes eligible owner-produced accounting
+facts from a merely shape-compatible terminal history in migration `0002`; it
+does not retroactively confer atomic provenance on that older history.
+
+All three codecs use strict canonical JSON: sorted keys, compact separators,
+ASCII escaping, finite exact `Decimal` strings, and canonical UTC timestamps
+with six fractional digits where time is present. In particular, the manifest
+ACK `observed_at` is normalized to UTC in both its indexed value and canonical
+payload. Lowercase SHA-256 values bind the canonical UTF-8 bytes, while
+decoders accept a PostgreSQL JSON object or JSON text and then recanonicalize
+it. Duplicate keys, JSON constants, unknown or missing keys, unknown versions,
+non-canonical scalars, invalid domain data, hash drift, and indexed-column drift
+raise `JournalQuarantineError`. SHA-256 is an integrity and identity check, not
+a MAC or proof of who wrote a row.
+
+M9b.12a still performs no I/O and adds no SQL, migration, table, repository,
+lock, transaction, writer, account provisioning command, venue action, legacy
+projection, runtime consumer, readiness check, reconciliation workflow, or
+sole-writer fence. It does not add funding, borrowing, liquidation, unrealised
+mark-to-market, price/tick/lot discovery, or automatic adoption of pre-codec
+history. The next additive slice is migration `0003`, which can map these
+already fixed envelopes to dormant account-opening, account-settlement,
+posting/projection, reservation, and batch-provenance storage before an atomic
+owner is implemented. That schema must bind every manifest to the exact
+immutable `(execution_scope, account_key, owner_generation)` opening. Although
+settlement envelopes intentionally omit scope and generation, no settlement may
+be orphaned: every settlement/fill identity and payload hash must belong to the
+exact manifest fill through composite foreign keys or an equivalently strict
+deferred constraint that supports inserting the atomic batch in one
+transaction.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -744,6 +835,16 @@ M9b.11 adds the pure account-global sequence, margin/admission, posting,
 balance, replay, and insolvency rules over exact M9b.9 settlements, but does not
 persist or transact them. None of these slices activates runtime ownership or
 fences the legacy writers.
+M9b.12a adds compact version-1 opening, applied-settlement, and owner-batch
+envelopes before the schema is frozen. The opening binds explicit capital and
+policy to execution scope and owner generation. Each applied-settlement row is
+re-derived from its prior account and journal-sourced settlement, while the
+batch manifest hashes the instruction, ACK, every fill event, and every account
+settlement across exact contiguous position/account ranges. These codecs add no
+database relation and cannot establish a lock, atomic commit, active owner, or
+legacy fence by themselves. Migration `0003` remains pending and must bind each
+manifest to its exact immutable scoped opening and each settlement to its exact
+manifest fill without permitting orphan rows.
 
 Cut-over still requires: durable account-version, balance, reservation, and
 posting storage atomically owned with the journal batch; persisted instrument
