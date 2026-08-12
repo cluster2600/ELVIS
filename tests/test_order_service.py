@@ -176,24 +176,103 @@ def test_execution_protocol_is_structural() -> None:
     assert execution.submit(make_intent()).acknowledged is True
 
 
-def test_application_package_has_only_standard_library_and_domain_imports() -> None:
-    application_dir = Path(__file__).parents[1] / "trading" / "application"
-    standard_library_roots = {"dataclasses", "typing"}
+def _unexpected_application_imports(source: str) -> set[str]:
+    standard_library_roots = {"dataclasses", "datetime", "enum", "typing"}
+    tree = ast.parse(source)
+    dynamic_import_aliases = {"__import__"}
+    importlib_aliases = {"importlib"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            importlib_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "importlib"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            dynamic_import_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "import_module"
+            )
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            is_dynamic = (
+                isinstance(value, ast.Name) and value.id in dynamic_import_aliases
+            ) or (
+                isinstance(value, ast.Attribute)
+                and value.attr == "import_module"
+                and isinstance(value.value, ast.Name)
+                and value.value.id in importlib_aliases
+            )
+            if not is_dynamic:
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id not in dynamic_import_aliases
+                ):
+                    dynamic_import_aliases.add(target.id)
+                    changed = True
 
     imported_modules: set[str] = set()
-    for module_path in application_dir.rglob("*.py"):
-        tree = ast.parse(module_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_modules.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported_modules.add(node.module)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+        elif isinstance(node, ast.Call) and (
+            (isinstance(node.func, ast.Name) and node.func.id in dynamic_import_aliases)
+            or (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "import_module"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in importlib_aliases
+            )
+        ):
+            imported_modules.add("dynamic-import")
 
-    unexpected = {
+    return {
         module
         for module in imported_modules
         if module.split(".", 1)[0] not in standard_library_roots
         and not module.startswith("trading.application")
         and not module.startswith("trading.domain")
     }
-    assert unexpected == set()
+
+
+def test_application_package_has_only_static_stdlib_and_domain_imports() -> None:
+    application_dir = Path(__file__).parents[1] / "trading" / "application"
+
+    unexpected = {}
+    for module_path in application_dir.rglob("*.py"):
+        violations = _unexpected_application_imports(
+            module_path.read_text(encoding="utf-8")
+        )
+        if violations:
+            unexpected[module_path.name] = violations
+
+    assert unexpected == {}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import psycopg2",
+        "from trading.persistence import PostgresOrderPositionJournal",
+        "__import__('trading.persistence.order_position_journal')",
+        ("load = __import__\n" "load('trading.persistence.order_position_journal')"),
+        "import importlib as loader\nloader.import_module('trading.persistence')",
+    ],
+)
+def test_application_import_gate_rejects_infrastructure_and_dynamic_imports(
+    source,
+) -> None:
+    assert _unexpected_application_imports(source)

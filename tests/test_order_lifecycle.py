@@ -965,6 +965,8 @@ def _literal_import_target(call: ast.Call) -> str | None:
 def _uses_order_lifecycle_contract(source: str) -> bool:
     """Detect direct, facade, relative, and literal dynamic imports."""
     tree = ast.parse(source)
+    builtins_aliases = {"builtins"}
+    builtin_import_aliases = {"__import__"}
     importlib_aliases = {"importlib"}
     import_module_aliases = {"import_module"}
 
@@ -984,6 +986,8 @@ def _uses_order_lifecycle_contract(source: str) -> bool:
                     return True
                 if alias.name == "importlib":
                     importlib_aliases.add(alias.asname or alias.name)
+                if alias.name == "builtins":
+                    builtins_aliases.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
             imported_names = {alias.name for alias in node.names}
             module = node.module or ""
@@ -992,6 +996,12 @@ def _uses_order_lifecycle_contract(source: str) -> bool:
                     alias.asname or alias.name
                     for alias in node.names
                     if alias.name == "import_module"
+                )
+            if module == "builtins" and "__import__" in imported_names:
+                builtin_import_aliases.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "__import__"
                 )
             if module == "trading" and "domain" in imported_names:
                 return True
@@ -1009,11 +1019,56 @@ def _uses_order_lifecycle_contract(source: str) -> bool:
             if node.level and not module and "domain" in imported_names:
                 return True
 
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            is_builtin_import = (
+                isinstance(value, ast.Name) and value.id in builtin_import_aliases
+            ) or (
+                isinstance(value, ast.Attribute)
+                and value.attr == "__import__"
+                and isinstance(value.value, ast.Name)
+                and value.value.id in builtins_aliases
+            )
+            is_import_module = (
+                isinstance(value, ast.Name) and value.id in import_module_aliases
+            ) or (
+                isinstance(value, ast.Attribute)
+                and value.attr == "import_module"
+                and isinstance(value.value, ast.Name)
+                and value.value.id in importlib_aliases
+            )
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for assigned in targets:
+                if not isinstance(assigned, ast.Name):
+                    continue
+                if is_builtin_import and assigned.id not in builtin_import_aliases:
+                    builtin_import_aliases.add(assigned.id)
+                    changed = True
+                if is_import_module and assigned.id not in import_module_aliases:
+                    import_module_aliases.add(assigned.id)
+                    changed = True
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         target = _literal_import_target(node)
+        is_builtin_import = (
+            isinstance(node.func, ast.Name) and node.func.id in builtin_import_aliases
+        ) or (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "__import__"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in builtins_aliases
+        )
+        if is_builtin_import and target is not None and target.startswith("trading"):
+            return True
         if target not in {
+            "trading",
             "trading.domain",
             "trading.domain.order_lifecycle",
         }:
@@ -1059,6 +1114,19 @@ def _uses_order_lifecycle_contract(source: str) -> bool:
             "domain = load('trading.domain')\n"
             "value = getattr(domain, 'OrderLifecycle')"
         ),
+        "root = __import__('trading')\nvalue = root.domain.OrderLifecycle",
+        ("__import__('trading.domain.orders')" ".domain.OrderLifecycle"),
+        ("load = __import__\n" "load('trading.domain.orders').domain.OrderLifecycle"),
+        (
+            "import importlib as loader\n"
+            "load = loader.import_module\n"
+            "load('trading').domain.OrderLifecycle"
+        ),
+        (
+            "from importlib import import_module as load\n"
+            "root = load('trading')\n"
+            "value = root.domain.OrderLifecycle"
+        ),
     ],
 )
 def test_order_consumer_detector_rejects_facade_and_indirect_imports(
@@ -1082,7 +1150,7 @@ def test_order_consumer_detector_allows_explicit_unrelated_domain_imports(
     assert not _uses_order_lifecycle_contract(source)
 
 
-def test_order_lifecycle_only_journal_modules_consume_contract() -> None:
+def test_order_lifecycle_only_approved_modules_consume_contract() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "domain" / "order_lifecycle.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -1120,6 +1188,7 @@ def test_order_lifecycle_only_journal_modules_consume_contract() -> None:
             consumers.append(source_path.relative_to(root))
 
     assert sorted(consumers) == [
+        Path("trading/application/journaled_order_service.py"),
         Path("trading/persistence/journal_codec.py"),
         Path("trading/persistence/order_position_journal.py"),
     ]

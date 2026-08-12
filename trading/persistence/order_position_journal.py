@@ -95,7 +95,7 @@ ORDER BY position_version
 _INSERT_STREAM_SQL = """
 INSERT INTO np.position_streams (position_key, execution_scope)
 VALUES (%s, %s)
-ON CONFLICT (position_key) DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING position_key
 """
 
@@ -282,6 +282,11 @@ class ReservationCommit:
     disposition: ReservationDisposition
     order: ReplayedOrder
     current_stream: PositionStreamProjection
+
+    @property
+    def is_created(self) -> bool:
+        """Return whether this call committed a new durable reservation."""
+        return self.disposition is ReservationDisposition.CREATED
 
 
 @dataclass(frozen=True, slots=True)

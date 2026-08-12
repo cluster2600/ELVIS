@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.3 transactional repository and replay; no runtime wiring) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.4 unwired journaled application coordinator) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -878,8 +878,9 @@ clear a newer attempt B. Partial fills during cancellation remain
 cancel-pending; late fills after confirmed cancellation are still counted, and
 an exact full fill wins over cancellation. The reducer has no clock, UUID,
 logger, environment read, I/O, database, executor, or runtime consumer. M8b's
-pure position reducer and M9b.2/M9b.3 persistence modules are its only consumers
-outside the lifecycle module; none is wired to the runtime.
+pure position reducer and M9b.2/M9b.3 persistence modules are its infrastructure
+consumers; M9b.4's coordinator is its only application consumer. None is wired
+to the runtime.
 
 This is deliberately not a runtime cut-over. ELVIS does not yet provide a
 reliable fill stream, a truthful paper cancellation adapter, or startup
@@ -887,9 +888,9 @@ reconciliation. M8b now supplies explicit `OPEN`/`REDUCE_ONLY` position effects
 and entry-time exit context, still without runtime wiring. M9b.1 prepares the
 correlated order/event schema and uniqueness constraints, M9b.2 adds strict
 lossless codecs, and M9b.3 adds committed repository writes plus reducer-based
-restart replay. Later M9b slices must add register-before-submit,
-reconciliation, and durable quarantine before runtime lifecycle ownership can
-be described as complete.
+restart replay. M9b.4 adds an unwired register-before-submit owner; later M9b
+slices must add reconciliation, durable quarantine, and safe runtime composition
+before lifecycle ownership can be described as complete.
 
 Verification at implementation time:
 
@@ -909,9 +910,9 @@ mismatches, state-construction invariants, stale cancellation responses, late
 fills, and ACK/fill/cancel permutations. Its full-suite snapshot recorded 1,238
 passes, 9 skips, 3 deselections, and only the unchanged local PostgreSQL
 baseline failure because `np.trades` was absent. M8b subsequently became the
-first internal consumer. M9b.2/M9b.3 now permit the exact persistence codec and
-repository modules as infrastructure consumers; there is still no runtime
-consumer.
+first internal consumer. M9b.2/M9b.3 permit the exact persistence codec and
+repository modules as infrastructure consumers, and M9b.4 permits the exact
+application coordinator; there is still no runtime consumer.
 
 ### M8 prerequisite: make legacy exits one-shot and transactional
 
@@ -1002,15 +1003,16 @@ realised PnL, fee conversion, lot allocation, or exit triggers.
 
 This slice remains pure and unused by the runtime. The package facade re-exports
 the contracts, so loading another `trading.domain` submodule may load the file;
-M9b.2's codec and M9b.3's repository are the only production modules outside
-`trading.domain` allowed to reference its journal values. An import-aware AST
+M9b.2's codec, M9b.3's repository, and M9b.4's application coordinator are the
+only production modules outside `trading.domain` allowed to reference its
+journal values. An import-aware AST
 gate covers direct, facade, relative, aliased, and literal dynamic imports
 without confusing the generic name `Position` with unrelated classes. The
 legacy inline and Balanced Starter owners, paper executor, and positional
 PostgreSQL tables remain authoritative. M9b.1 prepares the journal schema,
-M9b.2 encodes its instruction and event payloads, and M9b.3 appends and replays
-them without runtime wiring; later slices must reconcile ambiguous submissions
-before any cut-over.
+M9b.2 encodes its instruction and event payloads, M9b.3 appends and replays them,
+and M9b.4 coordinates a committed reservation and one submission without runtime
+wiring; later slices must reconcile ambiguous submissions before any cut-over.
 
 Verification at implementation time:
 
@@ -1030,8 +1032,8 @@ directions, fill and lifecycle correlation, per-order caps, canonical
 permutations, duplicate and terminal precedence, direct-construction
 invariants, and zero runtime consumers. Its isolated non-PostgreSQL snapshot
 recorded 1,317 passes, 49 skips, and 12 deselections under UTC. M9b.2/M9b.3 now
-permit the exact codec and repository consumers while preserving the
-zero-runtime-consumer gate.
+permit the exact codec and repository consumers, and M9b.4 permits the exact
+application coordinator, while preserving the zero-runtime-consumer gate.
 
 ### M9 prerequisite: preserve open positions during initialization
 
@@ -1215,12 +1217,13 @@ PostgreSQL `NUMERIC` and JSON numbers are intentionally absent because their
 range is narrower than the already accepted pure-domain Decimal range.
 
 M9b.1 itself prepares storage only, and the migration runner remains unwired to
-startup. M9b.2 supplies the lossless codecs, and M9b.3 now supplies the
-transaction boundary, committed reservation, per-position locking/version
-allocation, and reducer-based replay. Later slices must add a single application
-owner for register-before-submit and outcome persistence, reconciliation, and
-durable quarantine. Until those gates pass, the legacy executor and positional
-tables remain authoritative. Rolling application code back leaves these unused,
+startup. M9b.2 supplies the lossless codecs, and M9b.3 supplies the transaction
+boundary, committed reservation, per-position locking/version allocation, and
+reducer-based replay. M9b.4 now supplies the unwired application owner for
+register-before-submit and submission-observation persistence. Later slices
+must add reconciliation, durable quarantine, startup readiness, and safe runtime
+composition. Until those gates pass, the legacy executor and positional tables
+remain authoritative. Rolling application code back leaves these unused,
 additive tables in place; there is no destructive down migration.
 
 Verification at implementation time:
@@ -1297,10 +1300,11 @@ fail before persistence. The codec deliberately invents no storage limit for
 unindexed payload-only reason, cancellation-request, or fee-asset text beyond
 clean Unicode representability.
 
-M9b.2 itself remains a representation slice. M9b.3 now supplies the repository,
-stream lock, `position_version` allocation, append transaction, and replay, but
-there is still no register-before-submit owner, reconciliation path, durable
-quarantine, or runtime cut-over. Activation has an additional adapter gate: every
+M9b.2 itself remains a representation slice. M9b.3 supplies the repository,
+stream lock, `position_version` allocation, append transaction, and replay;
+M9b.4 adds the unwired register-before-submit owner. There is still no
+reconciliation path, durable quarantine, startup readiness gate, or runtime
+cut-over. Activation has an additional adapter gate: every
 `venue_order_id` and `trade_id` emitted by an execution adapter must already be
 clean Unicode and no longer than the schema limit of 255 characters. A codec
 failure discovered only after the venue effect or fill observation would be too
@@ -1310,8 +1314,9 @@ Verification must cover golden version-1 JSON and SHA-256 vectors, lossless
 round trips for `OPEN`, `REDUCE_ONLY`, and all seven event types, malformed and
 tampered envelopes, metadata correlation, storage bounds, Python 3.10
 compatibility, and an import-aware AST gate. M9b.3 advances that gate to permit
-the exact codec and repository modules while proving that no application,
-adapter, composition root, or runtime module imports them. PostgreSQL
+the exact codec and repository modules; M9b.4 permits the exact application
+coordinator while proving that no adapter, composition root, or runtime module
+uses the migrated boundary. PostgreSQL
 integration remains the M9b.1 schema gate; M9b.2 adds no SQL or database I/O.
 
 Verification at implementation time:
@@ -1377,12 +1382,15 @@ external retry.
 
 Reservation creates or locks one globally stable position stream, verifies its
 execution scope, decodes and replays any existing rows, and inserts the exact
-version-1 instruction envelope. `CREATED` is the only disposition a future
-register-before-submit owner may treat as a new reservation. `EXISTING` means a
+version-1 instruction envelope. `CREATED` is the only disposition M9b.4's
+register-before-submit owner treats as a new reservation. `EXISTING` means a
 canonical reservation already exists and must be reconciled rather than blindly
 resubmitted. Client-order and scoped decision conflicts roll the transaction
 back, including any transient stream row, so a losing registration cannot
-commit an empty stream.
+commit an empty stream. The insert uses targetless conflict handling because two
+concurrent exact reservations may race on either the primary key or the
+equivalent scoped identity constraint; the locked replay still verifies that
+the winning stream has the exact execution scope.
 
 Append locks the `position_streams` row before resolving identities or
 allocating a version. It compares complete canonical envelopes, not domain
@@ -1406,8 +1414,9 @@ unknown orders, or reducer-invalid history raise `JournalReplayError`; no row is
 skipped and no partial projection escapes.
 
 This is still not a runtime cut-over. The repository is not exported through
-the persistence facade and no application, adapter, composition root, startup,
-or runtime module imports it. There is no durable quarantine record yet;
+the persistence facade, and M9b.4 depends only on its structural application
+port rather than importing this PostgreSQL module. No adapter, composition root,
+startup, or runtime module imports it. There is no durable quarantine record yet;
 M9b.3 promises typed fail-closed detection only. A forward migration and a
 separate post-rollback workflow are required before the word "quarantined" can
 describe durable state. Before activation, a pre-submission validator must also
@@ -1473,6 +1482,126 @@ distinct/exact appends and competing `REDUCE_ONLY` fills; the complete isolated
 PostgreSQL suite passes 31 tests. Black, isort, flake8, Python 3.10 compilation,
 and the diff check pass. The isolated non-PostgreSQL suite passes 1,463 tests,
 skips 49, and deselects 34 under `Pacific/Honolulu`.
+
+### M9b.4 unwired journaled submission coordinator
+
+M9b.4 adds `trading.application.journaled_order_service` as the single
+application owner of the prepared register-before-submit sequence. It accepts a
+complete `PositionInstruction` and depends on a storage-neutral
+`OrderJournalPort`, the existing single-call `OrderService`, and an injected
+wall clock. The application package has no PostgreSQL or persistence import.
+The concrete M9b.3 `ReservationCommit` exposes only the structural
+`is_created` receipt needed by this boundary.
+
+Only a committed receipt whose `is_created` value is exactly `True` authorizes
+an external call. A reservation error propagates before the clock or executor.
+An exact existing reservation returns `EXISTING_RESERVATION` and
+`requires_reconciliation=True` without reading the clock, calling the executor,
+or appending another event. This conservative result applies regardless of the
+stored lifecycle because M9b.4 deliberately does not couple the application
+port to a PostgreSQL projection. A created reservation followed by an invalid
+or failed clock also makes no external call and remains work for the future
+reconciler rather than becoming permission to resubmit.
+
+For a new reservation, the aware observation time is validated before the
+external effect. `OrderService` then invokes its adapter once, and its exact
+`SubmissionReport` is translated to one M8a submission event. The stable event
+identity is `submission-attempt-1` within the client order; a reported
+`venue_status=FILLED` still produces only `SubmissionAcknowledged`, never a
+`ConfirmedFill`. The immutable `JournaledSubmissionResult` independently
+reconstructs the expected event from its report and timestamp, rejects a
+different status or venue identity, requires the stable event ID and a positive
+position version, and reports `RECORDED` only after those facts are returned by
+the journal.
+
+If append fails, if its commit acknowledgement is lost, or if its receipt is
+malformed, `SubmissionObservationNotRecorded` retains the exact report, event,
+stable event ID, and original cause. The service never retries the external
+call. A later exact append can discover an already committed event, while a
+second service invocation discovers the existing reservation and still does not
+resubmit. `requires_reconciliation` on a recorded result retains the narrower
+`SubmissionReport` meaning: it is true for an ambiguous submission; an
+acknowledgement is known submission state but remains distinct from any future
+fill observation.
+
+The PostgreSQL composition test verifies that another connection can see the
+committed reservation before the executor is called. Two simultaneous exact
+service invocations produce one `RECORDED`, one `EXISTING_RESERVATION`, and
+exactly one adapter call. That test exposed a real M9b.3 insertion race: the
+stream insert previously named only its primary-key conflict target while the
+equivalent scoped-identity unique constraint could win concurrently. The insert
+now uses targetless `ON CONFLICT DO NOTHING`; locked replay still verifies the
+winning scope and instruction before any permission to submit.
+
+This remains an unwired safety slice. The application facade re-exports the
+service, so another application submodule import may load it, but an
+import-aware gate finds no reference or invocation from an adapter, composition
+root, startup path, or other runtime module. M8a/M8b consumer gates allow only
+this exact application module and the two exact persistence modules. The gates
+cover direct, facade, relative, aliased, assignment, and literal dynamic import
+forms across all production roots.
+
+Activation remains blocked until the runtime can construct a truthful
+pre-submit `PositionInstruction`, propagate the stable client order ID into the
+actual side-effect owner, query/reconcile by that identity, and expose an
+atomic, durable confirmed-fill observation. It also needs collective
+position-capacity reservation, scope-wide unresolved-order inventory, durable
+quarantine, one database configuration/factory, migrations and reconciliation
+before readiness, bounded replay, and retirement of the executor, inline exit,
+and Balanced Starter position authorities. The current paper executor's
+`FILLED` response is not promoted to a confirmed fill.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_journaled_order_service.py \
+  tests/test_order_position_journal.py \
+  tests/test_journal_codec.py \
+  tests/test_order_service.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  tests/test_domain_contracts.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_journaled_order_service.py \
+  tests/test_order_position_journal.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres \
+  tests/postgres/test_journaled_order_service_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/application/journaled_order_service.py \
+  trading/application/__init__.py \
+  trading/persistence/order_position_journal.py \
+  tests/test_journaled_order_service.py \
+  tests/postgres/test_journaled_order_service_postgres.py \
+  tests/test_order_position_journal.py \
+  tests/test_order_service.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only <same-files>
+.venv/bin/flake8 <same-files> --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/journaled_order_service.py \
+  trading/persistence/order_position_journal.py \
+  tests/test_journaled_order_service.py \
+  tests/postgres/test_journaled_order_service_postgres.py
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN \
+  -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused application, repository, codec, lifecycle, position, and domain
+suite passes 539 tests. The application/repository subset passes 95 tests on
+Python 3.10. The new PostgreSQL 15 composition matrix passes 4 tests, and the
+complete isolated PostgreSQL suite passes 35. The isolated non-PostgreSQL suite
+passes 1,539 tests, skips 49, and deselects 38 under `Pacific/Honolulu`. Black,
+isort, flake8, Python 3.10 compilation, and the diff check pass.
 
 ## Cut-over policy
 

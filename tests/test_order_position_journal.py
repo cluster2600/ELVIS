@@ -404,6 +404,8 @@ def test_reservation_commits_then_exact_retry_is_existing(journal):
 
     assert created.disposition is ReservationDisposition.CREATED
     assert existing.disposition is ReservationDisposition.EXISTING
+    assert created.is_created is True
+    assert existing.is_created is False
     assert existing.order.instruction == instruction
     assert existing.current_stream.stream_version == 0
     assert len(database.state.streams) == len(database.state.orders) == 1

@@ -197,10 +197,10 @@ contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
 runtime. M8b adds pure `PositionInstruction`, `PositionFill`, and `Position`
 transitions without a runtime consumer. M9b.1 prepares the durable journal
 schema, M9b.2 adds its pure, lossless persistence codec, and M9b.3 adds the
-unwired transactional repository and reducer-based replay boundary. The
-runtime `JournaledOrderService`, `PositionService`, pre-trade service, and
-`CycleOutcome` remain later slices; they are not placeholder classes in the
-current package.
+unwired transactional repository and reducer-based replay boundary. M9b.4 adds
+the application-level `JournaledOrderService`, still with no runtime consumer.
+`PositionService`, the pre-trade service, and `CycleOutcome` remain later
+slices; they are not placeholder classes in the current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-
@@ -248,16 +248,34 @@ fallbacks.
 
 ### `JournaledOrderService`
 
-The future durable wrapper accepts one `PositionInstruction`, commits its
-`PENDING` reservation, delegates the embedded `OrderIntent` exactly once to
-`OrderService`, and then appends the transport observation. The runner never
-coordinates those steps itself. A failed registration makes no adapter call;
-an existing unresolved reservation is reconciled and is never automatically
-resubmitted. The transport `SubmissionReport` remains distinct from the
-journal-write disposition, including an unknown commit acknowledgement. M9b.1
-prepares the tables, M9b.2 prepares their typed codec, and M9b.3 provides the
-committed reservation and append operations for this future service. The
-service itself and its runtime consumer do not exist yet.
+M9b.4 supplies the unwired durable wrapper. It accepts one
+`PositionInstruction`, asks a storage-neutral `OrderJournalPort` to commit its
+reservation, and treats an exact boolean `is_created=True` receipt as the only
+permission to call `OrderService`. Any existing reservation returns a
+conservative reconciliation-required result without reading the clock,
+submitting, or appending. A registration failure also makes no adapter call.
+
+After a new reservation is committed, the service reads and validates one
+injected aware timestamp before the external effect, delegates the embedded
+`OrderIntent` exactly once, translates the `SubmissionReport` into the matching
+M8a submission event, and appends it under the stable per-client identity
+`submission-attempt-1`. `SUBMITTED` remains an acknowledgement even if a legacy
+`venue_status` string says `FILLED`; only an independent `ConfirmedFill` may
+advance position quantity. The service returns `RECORDED` only after the event
+receipt confirms the expected identity and a positive position-stream version.
+If append fails or its commit acknowledgement is unknown, the typed
+`SubmissionObservationNotRecorded` preserves the exact report, event, event ID,
+and original cause for reconciliation. It never retries the venue call.
+
+The application module depends only on domain values and structural ports; it
+does not import the PostgreSQL repository. Its package facade re-exports the
+contract, so another `trading.application` import may load the pure module, but
+no runtime, adapter, startup, or composition-root module references or invokes
+it. M9b.1 supplies the tables, M9b.2 the typed codec, and M9b.3 the committed
+reservation and append implementation. Activation still requires a truthful
+pre-submit `PositionInstruction`, stable client-order propagation through the
+side-effect owner, fill observation, unresolved-order inventory,
+reconciliation, durable quarantine, and startup readiness.
 
 ### `PositionService`
 
@@ -370,22 +388,23 @@ confirmed fill is applied to the M8b position reducer in global
 `position_version` order. Corrupt, gapped, or reducer-invalid history fails the
 whole replay with no partial projection.
 
-This remains an unwired persistence boundary. There is no
-register-before-submit application owner, startup readiness gate,
-reconciliation path, or runtime consumer. Failed replay is detected and typed,
-but it is not yet durably quarantined because the schema and operational
-workflow for quarantine are deliberately deferred. Each append currently
-replays the complete stream before validation and again after insertion; that
-cost is acceptable for an unwired correctness slice, but bounded replay or
-snapshots are required before activation. Before any cut-over, the
-execution adapter must guarantee clean Unicode and the schema limits of 255
-characters for every venue order ID and trade ID it emits; detecting an
-unrepresentable identifier only after an external effect is not an acceptable
-activation boundary. The codec rejects NUL characters, isolated Unicode
-surrogates, and over-length domain-sourced identifiers, but this validation
-cannot retroactively make an already accepted venue identifier safe. Later M9b
-slices must add durable quarantine, reconciliation, and the single application
-owner before `PositionService` can own the runtime boundary.
+The concrete repository remains an unwired persistence boundary. M9b.4 now
+provides the single register-before-submit application owner through structural
+ports, but no runtime module composes it and no startup readiness or
+reconciliation path exists. Failed replay is detected and typed, but it is not
+yet durably quarantined because the schema and operational workflow for
+quarantine are deliberately deferred. Each append currently replays the
+complete stream before validation and again after insertion; that cost is
+acceptable for an unwired correctness slice, but bounded replay or snapshots
+are required before activation. Before any cut-over, the execution adapter must
+guarantee clean Unicode and the schema limits of 255 characters for every venue
+order ID and trade ID it emits; detecting an unrepresentable identifier only
+after an external effect is not an acceptable activation boundary. The codec
+rejects NUL characters, isolated Unicode surrogates, and over-length
+domain-sourced identifiers, but this validation cannot retroactively make an
+already accepted venue identifier safe. Later M9b slices must add durable
+quarantine, reconciliation, runtime composition, and the remaining activation
+gates before `PositionService` can own the runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.
