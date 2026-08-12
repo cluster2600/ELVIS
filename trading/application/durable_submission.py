@@ -391,6 +391,36 @@ class SubmissionCommitUnknown(RuntimeError):
         return True
 
 
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class SubmissionReconciliationRequired(RuntimeError):
+    """Preserve an attempt whose existing journal history is not replayable."""
+
+    attempt: SubmissionAttemptContext
+
+    def __post_init__(self) -> None:
+        if type(self.attempt) is not SubmissionAttemptContext:
+            raise TypeError("attempt must be a SubmissionAttemptContext")
+        RuntimeError.__init__(
+            self,
+            "durable submission history requires reconciliation",
+        )
+
+    def __reduce__(self) -> tuple[object, tuple[SubmissionAttemptContext]]:
+        """Reconstruct the typed exception from its attempt, not its message."""
+        return (type(self), (self.attempt,))
+
+    @property
+    def client_order_id(self) -> str:
+        """Expose the stable order identity needed by reconciliation."""
+        return self.attempt.client_order_id
+
+    @property
+    def requires_reconciliation(self) -> bool:
+        """The caller must reconcile instead of planning another submission."""
+        return True
+
+
 __all__ = [
     "DurableLifecycleReceipt",
     "DurableSubmissionDisposition",
@@ -401,4 +431,5 @@ __all__ = [
     "PaperSubmissionPlanner",
     "SubmissionAttemptContext",
     "SubmissionCommitUnknown",
+    "SubmissionReconciliationRequired",
 ]

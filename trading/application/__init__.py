@@ -10,6 +10,7 @@ from trading.application.durable_submission import (
     PaperSubmissionPlanner,
     SubmissionAttemptContext,
     SubmissionCommitUnknown,
+    SubmissionReconciliationRequired,
 )
 from trading.application.journaled_order_service import (
     Clock,
@@ -53,4 +54,5 @@ __all__ = [
     "SubmissionAttemptContext",
     "SubmissionCommitUnknown",
     "SubmissionObservationNotRecorded",
+    "SubmissionReconciliationRequired",
 ]

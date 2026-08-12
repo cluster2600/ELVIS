@@ -212,6 +212,13 @@ transaction owner: one acknowledgement followed by one or more correlated
 fills whose exact quantities sum to the complete order quantity. Candidate
 facts remain non-durable, precomputed inputs; this slice still adds no SQL,
 repository, clock, price source, or runtime composition.
+M9b.10b adds the unwired concrete
+`trading.persistence.atomic_paper_submission_owner.PostgresAtomicPaperSubmissionOwner`.
+For a genuinely new immediate terminal paper order, it commits the instruction,
+acknowledgement, and exact full-fill suffix in one PostgreSQL transaction; an
+exact prior terminal batch is replayed without planning. It uses migration
+`0002_order_position_journal.sql` unchanged and adds no account/economic
+projection or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -297,18 +304,20 @@ not store that field, and the contract does not pretend that it does. A durable
 `SubmissionAcknowledged` remains proof of acceptance only; it is never a fill.
 Only a separate `ConfirmedFill` can change order quantity or position state.
 
-The future concrete owner must validate the stable attempt context, acquire the
-relevant stream ownership, apply the paper execution effect, and persist the
+M9b.10b now implements that transaction boundary for one deliberately narrow
+paper case. It validates the stable attempt context, acquires the relevant
+stream lock, validates the immediate terminal paper effect, and persists the
 canonical submission facts in one transaction before returning `COMMITTED`.
-An exact previously committed attempt returns `REPLAYED`; any mismatch or
-unknown outcome fails closed for reconciliation. M9b.7 itself is intentionally
-unwired and contains no SQL, repository implementation, venue call, or runtime
-activation. It also does not project balances, fees, realised PnL, trades, or
-open positions, establish a sole-writer mechanism, or fence the legacy writers.
-Those economic projections and ownership gates remain mandatory before cut-over.
+An exact previously committed attempt returns `REPLAYED`; any unsupported,
+mismatched, or unresolved history fails closed for reconciliation. M9b.7 itself
+remains a pure contract, while the concrete M9b.10b owner is intentionally
+unwired. Neither slice performs a venue call, projects balances, fees, realised
+PnL, trades, or account/open-position compatibility rows, establishes a
+sole-writer mechanism, or fences the legacy writers. Those economic projections
+and ownership gates remain mandatory before cut-over.
 
-M9b.10a narrows the candidate-fact boundary for the first future atomic paper
-owner. `PaperPlannedFill(event_id, fill)` binds each non-durable
+M9b.10a narrows the candidate-fact boundary consumed by the first atomic paper
+owner in M9b.10b. `PaperPlannedFill(event_id, fill)` binds each non-durable
 `ConfirmedFill` candidate to its future durable event identity.
 `PaperSubmissionPlan(attempt, submission, fills)` accepts the exact
 `SubmissionAttemptContext`, exactly one `SubmissionAcknowledged`, and a
@@ -327,19 +336,70 @@ randomness, network or database state, manufacture a fill price from
 `OrderIntent.reference_price`, or make any fact durable. The protocol alone
 does not prove those operational properties, so the concrete owner and its
 composition tests remain responsible for them. Candidate facts become durable
-only if the future owner commits the reservation, acknowledgement, and all
+only if the M9b.10b owner commits the reservation, acknowledgement, and all
 fills in one PostgreSQL transaction.
 
-M9b.10a remains a pure, unwired contract. It adds no SQL, repository, schema
-migration, transaction owner, paper simulator, venue or price I/O, account
-state, or runtime consumer. Migration `0002_order_position_journal.sql` can
-support only the narrow journal batch later planned for M9b.10b: one new order
-reservation followed by an ACK and its terminal exact full fills at consecutive
-stream versions. It does not encode a batch manifest or any balance, posting,
-margin, instrument-snapshot, or compatibility-projection invariant. Therefore,
-an existing `PENDING`, ACK-only, partial-fill, mismatched, or corrupt history is
-reconciliation work; it is never permission to invoke the planner, append a
-guessed suffix, or resubmit.
+M9b.10a itself remains a pure, unwired contract. It adds no SQL, repository,
+schema migration, transaction owner, paper simulator, venue or price I/O,
+account state, or runtime consumer. Migration
+`0002_order_position_journal.sql` supports only the narrow journal batch now
+implemented by M9b.10b: one new order reservation followed by an ACK and its
+terminal exact full fills at consecutive stream versions. It does not encode a
+batch manifest or any balance, posting, margin, instrument-snapshot, or
+compatibility-projection invariant. Therefore, an existing `PENDING`, ACK-only,
+partial-fill, mismatched, interleaved, or corrupt history is reconciliation
+work; it is never permission to invoke the planner, append a guessed suffix, or
+resubmit.
+
+### Atomic terminal paper-submission owner
+
+M9b.10b adds
+`trading.persistence.atomic_paper_submission_owner.PostgresAtomicPaperSubmissionOwner`.
+Its exact entry point is
+`execute(attempt: SubmissionAttemptContext, /) -> DurableSubmissionReceipt`.
+The constructor receives an injected connection factory and the M9b.10a
+`PaperSubmissionPlanner`; no application or runtime module constructs this
+owner.
+
+Each call obtains one fresh connection, starts one write transaction, inserts
+or locks the position stream, and replays the complete locked stream before it
+can plan or append. For a genuinely new order, every existing sibling must
+already be an exact supported terminal ACK/full-fill batch. Only then does the
+owner reserve the instruction, call the planner once under the same stream
+lock, require the plan to retain the exact attempt object, validate the order
+lifecycle and resulting position transition, assign consecutive stream
+versions to the ACK and every fill, and commit once. It does not compose
+`PostgresOrderPositionJournal.reserve_instruction()` and `append_event()`:
+those public methods each own a separate transaction and cannot provide this
+atomicity.
+
+If the exact instruction and exact attempt already identify a supported
+terminal batch, `execute()` reconstructs a canonical `REPLAYED` receipt from
+the durable rows without calling the planner or changing any row. Existing
+`PENDING`, ACK-only, partial, interleaved, contradictory, gapped, or corrupt
+histories raise a reconciliation or journal error before planning. A commit
+whose acknowledgement is lost raises `SubmissionCommitUnknown(attempt)`; a
+fresh call locks and replays first, so a transaction that actually committed is
+returned as `REPLAYED` without another plan.
+
+Migration `0002` stores no owner generation or batch-provenance marker. The
+owner therefore recognizes replay by exact terminal shape, not by proving that
+the historical rows originated in one earlier atomic-owner transaction. An
+ACK and exact full-fill suffix written by separate legacy journal commits is
+adopted as `REPLAYED` once the complete shape is durable; incomplete or
+contradictory shapes still reconcile. This is safe for the journal-only no-op
+path, but it is not activation provenance. Runtime cut-over still requires a
+durable generation/scope fence that separates eligible atomic-owner history
+from legacy effects and compatibility projections.
+
+This is a journal-only owner for immediate terminal full fills. It writes only
+the unchanged M9b.1 `np.position_streams`, `np.orders`, and `np.order_events`
+contract and required transaction state. It performs no venue execution,
+market or price discovery, clock sampling, FIFO economics, settlement, balance,
+posting, margin, legacy trade/open-position write, telemetry, startup, or
+runtime composition. Migration `0002_order_position_journal.sql` is unchanged;
+the PostgreSQL tests prove the narrow transaction against that existing schema,
+not a new migration or an activation claim.
 
 ### `JournaledOrderService`
 
@@ -580,35 +640,35 @@ Unicode and the schema limit of 255 characters for every trade ID it emits;
 detecting an unrepresentable identifier only after an external effect is not an
 acceptable activation boundary. The codec rejects NUL characters, isolated
 Unicode surrogates, and over-length identifiers, but this validation cannot
-retroactively make an already accepted venue identifier safe. Later M9b slices
-must add an atomic paper execution transaction, an explicit reconciliation
-decision workflow, durable quarantine, runtime composition, and the remaining
-activation gates before `PositionService` can own the runtime boundary. M9b.6's
-query and unresolved-submission inventory make those cases observable but do
-not resolve them or authorize automatic resubmission. M9b.7 fixes the pure
-attempt/result vocabulary for the future transaction owner, but does not
-implement that owner. M9b.8 defines the pure FIFO economic fold over the exact
-existing journal facts and therefore requires no SQL or schema migration of its
-own. M9b.9 defines only exact quote-settled deltas over that fold and likewise
-requires no SQL or schema migration of its own. None of these slices enforces
-sole ownership or fences the legacy writers. M9b.10a supplies only the stable
-candidate ACK/full-fill plan for the future M9b.10b owner; it neither uses nor
-extends migration `0002`, and an existing `PENDING` stream remains mandatory
-reconciliation rather than a planner or append input. The deterministic
-in-memory projections, settlement, and submission plan are not an activation
-claim.
+retroactively make an already accepted venue identifier safe. M9b.10b now
+supplies the atomic PostgreSQL transaction owner only for an immediate terminal
+paper ACK/full-fill batch. New batches are committed atomically; an exact
+terminal shape already present is adopted without claiming provenance. It uses
+migration `0002` without extension, and its rollback, commit-unknown/replay,
+exact-replay, and concurrency behaviours are covered against PostgreSQL 15.
+M9b.6's query and
+unresolved-submission inventory make other cases observable but do not resolve
+them or authorize automatic resubmission. M9b.7 fixes the pure attempt/result
+vocabulary consumed by the owner. M9b.8 defines the pure FIFO economic fold
+over the exact journal facts and requires no SQL or schema migration of its own.
+M9b.9 defines only exact quote-settled deltas over that fold and likewise
+requires no SQL or schema migration of its own. M9b.10a supplies the stable
+candidate ACK/full-fill plan, while M9b.10b makes only that plan durable. An
+existing `PENDING`, ACK-only, partial, interleaved, or otherwise unsupported
+stream remains mandatory reconciliation rather than a planner or append input.
+None of these slices activates runtime ownership or fences the legacy writers.
 
-Cut-over still requires: an exact durable fill ledger and one atomic PostgreSQL
-transaction owner; durable balance/posting semantics and margin/admission
+Cut-over still requires: durable balance/posting ownership and margin/admission
 policy; persisted instrument identity and version plus price, fee, tick, and
 lot-rule snapshot provenance; funding, borrowing, liquidation, and unrealised
 mark-to-market rules; generation and execution-scope provenance; atomic legacy
 compatibility projections where they remain necessary; durable reconciliation
-and quarantine; startup migration/readiness checks and an explicit repository
-factory; bounded replay or snapshots; a proved sole-writer fence over every
-legacy executor and database writer; PostgreSQL rollback,
-commit-unknown/replay, and concurrency tests; and shadow parity followed by an
-explicit cut-over decision.
+and quarantine for unsupported, unresolved, or incompatible pre-atomic
+histories; startup migration/readiness checks and an explicit repository
+factory; bounded replay
+or snapshots; a proved sole-writer fence over every legacy executor and
+database writer; side-effect-free shadow parity; and an explicit cut-over
+decision.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

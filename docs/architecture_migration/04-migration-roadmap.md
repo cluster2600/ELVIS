@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission result contract; M9b.10a terminal paper plan; M9b.10b PostgreSQL owner deferred) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -2065,17 +2065,18 @@ exact `SubmissionAttemptContext`, exactly one `SubmissionAcknowledged`, and a
 non-empty tuple containing only exact `PaperPlannedFill` values. It is a set of
 candidate facts, not a receipt, execution result, or persistence claim.
 
-The plan validates the complete terminal full-fill batch before a future owner
-may write it. The acknowledgement preserves the attempt's client order ID and
-exact observation time. Its event ID and every fill event ID are distinct. Each
-fill preserves the intent's client order ID, symbol, and side, does not predate
-the acknowledgement, and shares one venue order ID with the acknowledgement.
+The plan validates the complete terminal full-fill batch before the M9b.10b
+owner may write it. The acknowledgement preserves the attempt's client order
+ID and exact observation time. Its event ID and every fill event ID are
+distinct. Each fill preserves the intent's client order ID, symbol, and side,
+does not predate the acknowledgement, and shares one venue order ID with the
+acknowledgement.
 Trade IDs are unique. Exact-`Decimal` fill quantities must sum to exactly the
 intent quantity, so an empty, partial, or over-filled candidate batch fails
 closed. An ambiguous or failed submission cannot carry planned fills.
 
 `PaperSubmissionPlanner.plan(attempt, /) -> PaperSubmissionPlan` is the narrow
-future-owner dependency. It supplies already stable, precomputed candidate
+M9b.10b owner dependency. It supplies already stable, precomputed candidate
 facts and promises to retain the exact attempt object. Its data must not depend
 on a hidden clock, random draw, network/database read, mutable market snapshot,
 or a price inferred from `OrderIntent.reference_price`. The protocol cannot by
@@ -2084,25 +2085,25 @@ under the stream lock that the order is genuinely new, require
 `plan.attempt is attempt`, and cover the concrete planner/composition with
 determinism tests. Replay and reconciliation paths must never invoke it.
 
-This slice deliberately implements no SQL, repository method, migration,
+M9b.10a itself deliberately implements no SQL, repository method, migration,
 transaction, paper simulator, venue/market I/O, clock, runtime consumer, or
 composition-root wiring. It does not alter or consume migration
-`0002_order_position_journal.sql`. M9b.10b remains responsible for the first
-narrow PostgreSQL owner: one fresh connection and transaction must lock and
-replay the stream, reserve a genuinely new instruction, append the ACK and all
-terminal full fills at consecutive versions, and commit once. Composing the
-existing public `reserve_instruction` and `append_event` methods is invalid
+`0002_order_position_journal.sql`. M9b.10b now implements the first narrow
+PostgreSQL owner with one fresh connection and transaction that locks and
+replays the stream, reserves a genuinely new instruction, appends the ACK and
+all terminal full fills at consecutive versions, and commits once. It does not
+compose the existing public `reserve_instruction` and `append_event` methods,
 because each owns a separate transaction. An exact already-terminal batch may
 return `REPLAYED` without planning; an existing `PENDING`, ACK-only, partial,
-mismatched, gapped, or corrupt history requires reconciliation with no planner
-call, guessed suffix, append, or resubmission. A lost commit acknowledgement
-must preserve `SubmissionCommitUnknown`, and a fresh retry must replay before
-any possible plan.
+interleaved, mismatched, gapped, or corrupt history requires reconciliation or
+fails closed with no planner call, guessed suffix, append, or resubmission. A
+lost commit acknowledgement preserves `SubmissionCommitUnknown`, and a fresh
+retry replays before any possible plan.
 
 Migration `0002` is sufficient only for that journal-only ACK/full-fill batch.
 It has no batch manifest and proves no durable balance, posting, margin,
-instrument-snapshot, or legacy-projection invariant. Even after M9b.10b,
-activation remains blocked on all of the following:
+instrument-snapshot, or legacy-projection invariant. M9b.10b does not change
+that migration. Activation remains blocked on all of the following:
 
 - durable balance/posting ownership and margin/admission policy;
 - persisted instrument identity/version and explicit price, fee, tick, and
@@ -2163,6 +2164,164 @@ submission contract itself passes 135 tests under both supported Python
 interpreters. Black, isort, flake8, Python 3.10 compilation, and the diff check
 pass. The complete non-PostgreSQL suite passes 1,823 tests, skips 50, deselects
 43, and passes 7 subtests under `Pacific/Honolulu`.
+
+### M9b.10b unwired atomic terminal paper-submission owner
+
+M9b.10b adds the concrete
+`trading.persistence.atomic_paper_submission_owner.PostgresAtomicPaperSubmissionOwner`
+without wiring it into startup or the trading runtime. Its exact entry point is
+`execute(attempt: SubmissionAttemptContext, /) -> DurableSubmissionReceipt`.
+The constructor receives an injected connection factory and the M9b.10a
+`PaperSubmissionPlanner`.
+
+The owner supports one deliberately narrow paper path: a genuinely new
+instruction whose stable precomputed plan contains exactly one ACK followed by
+one or more `ConfirmedFill` facts that fully fill the order immediately. Every
+fill is persisted; the exact quantities must sum to the intent quantity. It
+does not admit an ambiguous, failed, ACK-only, partial, delayed, cancelled, or
+externally submitted order, and it never manufactures a missing suffix.
+
+`execute()` obtains one fresh connection, establishes one write transaction,
+inserts or locks the position stream, and replays the complete locked stream.
+Before a new reservation can be created, every existing sibling order on that
+stream must itself be an exact supported terminal ACK/full-fill batch. The
+owner then inserts the instruction reservation, invokes the planner exactly
+once under the same stream lock, requires the returned plan to retain the exact
+attempt object, validates the lifecycle and position transition, records the
+venue correlation, advances the stream version for the complete batch, inserts
+the ACK and fills at consecutive versions, replays the resulting stream, and
+commits once. It does not compose
+`PostgresOrderPositionJournal.reserve_instruction()` with `append_event()`;
+those public operations commit independently and cannot provide this invariant.
+
+When the exact durable instruction and exact attempt already identify a
+supported terminal batch, the owner reconstructs a canonical `REPLAYED`
+receipt directly from journal order, without calling the planner or changing
+row contents or metadata. This remains true when a later terminal sibling batch
+exists on the position stream. An instruction mismatch, including a changed
+`Decimal` quantum, is a journal identity conflict. A `PENDING`, ACK-only,
+partial, interleaved, contradictory, unresolved-sibling, gapped, or corrupt
+history fails closed before planning as reconciliation work or a typed journal
+error. It is never permission to append, infer a fill, or resubmit.
+
+This replay recognition is deliberately shape-based. Migration `0002` has no
+atomic-owner generation or batch-provenance marker, so a complete ACK and exact
+full-fill suffix previously written by separate journal commits is also
+adopted as `REPLAYED`; the owner does not falsely claim to prove its origin.
+That adoption is only a journal no-op. It cannot authorize runtime activation,
+legacy compatibility state, or economic/accounting effects. A later durable
+generation and execution-scope fence must distinguish eligible atomic-owner
+history before cut-over.
+
+The receipt is returned as `COMMITTED` only after PostgreSQL acknowledges the
+single commit. If that acknowledgement is lost, the owner raises
+`SubmissionCommitUnknown(attempt)` without claiming rollback or success. A
+fresh call locks and replays before any possible planner invocation, so a
+transaction that actually committed is recovered as `REPLAYED` and is not
+duplicated. Failures before commit roll back the new stream, reservation,
+venue correlation, stream-version advance, and every event together.
+
+This slice reuses `0002_order_position_journal.sql` unchanged; there is no new
+migration. Its SQL is limited to transaction state and the M9b.1
+`np.position_streams`, `np.orders`, and `np.order_events` journal. It does not
+call a venue, discover or infer a price, sample a clock, run FIFO economics or
+settlement, write balances/postings/margin, update legacy trades or open
+positions, publish telemetry, construct a production repository, or activate a
+runtime consumer. The module is protected by a zero-consumer gate. Rolling it
+back therefore removes only the unused owner and its tests; the additive
+unchanged journal schema remains available to the earlier repository.
+
+PostgreSQL 15 tests cover exact two-fill quantity and version preservation, one
+connection and one commit, read-only exact replay, same-attempt and distinct-
+batch concurrency, non-interleaving stream blocks, failure injection after
+each SQL mutation, planner failure, lost commit acknowledgement, incomplete or
+contradictory histories, shape-based adoption of an exact terminal history,
+corrupt/gapped streams, exact `Decimal` identity, and a
+statement trace proving zero legacy/account-table access.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_durable_submission.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_order_position_journal.py \
+  tests/test_journal_codec.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  tests/test_domain_contracts.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_durable_submission.py \
+  tests/test_atomic_paper_submission_owner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q -ra \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/application/__init__.py \
+  trading/application/durable_submission.py \
+  trading/domain/order_lifecycle.py \
+  trading/persistence/atomic_paper_submission_owner.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/application/__init__.py \
+  trading/application/durable_submission.py \
+  trading/domain/order_lifecycle.py \
+  trading/persistence/atomic_paper_submission_owner.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_position_lifecycle.py
+.venv/bin/flake8 \
+  trading/application/__init__.py \
+  trading/application/durable_submission.py \
+  trading/domain/order_lifecycle.py \
+  trading/persistence/atomic_paper_submission_owner.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_position_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/__init__.py \
+  trading/application/durable_submission.py \
+  trading/domain/order_lifecycle.py \
+  trading/persistence/atomic_paper_submission_owner.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/postgres/test_atomic_paper_submission_owner_postgres.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_position_lifecycle.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused application, owner, repository, codec, lifecycle, position, and
+domain suite passes 626 tests. The application/owner subset passes 159 tests on
+Python 3.10. The isolated atomic-owner PostgreSQL 15 matrix passes 23 tests
+under each supported Python interpreter, and the complete isolated PostgreSQL
+15 suite passes 63 tests in the project environment. Black, isort, flake8,
+Python 3.10 compilation, and the diff check pass. The complete non-PostgreSQL
+suite passes 1,847 tests, skips 50, deselects 66, and passes 7 subtests under
+`Pacific/Honolulu`.
 
 ## Cut-over policy
 

@@ -23,6 +23,7 @@ from trading.application.durable_submission import (
     PaperSubmissionPlanner,
     SubmissionAttemptContext,
     SubmissionCommitUnknown,
+    SubmissionReconciliationRequired,
 )
 from trading.domain.order_lifecycle import (
     CancellationRequested,
@@ -59,6 +60,7 @@ PUBLIC_EXPORTS = {
     "PaperSubmissionPlanner",
     "SubmissionAttemptContext",
     "SubmissionCommitUnknown",
+    "SubmissionReconciliationRequired",
 }
 
 
@@ -1076,6 +1078,28 @@ def test_commit_unknown_requires_an_exact_attempt_context() -> None:
         SubmissionCommitUnknown(object())
 
 
+def test_reconciliation_required_preserves_attempt_and_round_trips() -> None:
+    attempt = make_attempt()
+    failure = SubmissionReconciliationRequired(attempt)
+
+    assert isinstance(failure, RuntimeError)
+    assert failure.client_order_id == "order-1"
+    assert failure.attempt is attempt
+    assert failure.requires_reconciliation is True
+    for restored in (
+        copy.copy(failure),
+        copy.deepcopy(failure),
+        pickle.loads(pickle.dumps(failure)),
+    ):
+        assert type(restored) is SubmissionReconciliationRequired
+        assert restored.attempt == attempt
+
+
+def test_reconciliation_required_requires_an_exact_attempt_context() -> None:
+    with pytest.raises(TypeError):
+        SubmissionReconciliationRequired(object())
+
+
 def _literal_dynamic_import(
     node: ast.Call,
     *,
@@ -1300,7 +1324,7 @@ def test_consumer_detector_allows_unrelated_imports(source) -> None:
     assert not _uses_durable_submission(source)
 
 
-def test_durable_submission_is_unwired_and_imports_only_stdlib_and_domain() -> None:
+def test_durable_submission_has_one_persistence_consumer_and_stays_pure() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "application" / "durable_submission.py"
     facade_path = root / "trading" / "application" / "__init__.py"
@@ -1321,7 +1345,9 @@ def test_durable_submission_is_unwired_and_imports_only_stdlib_and_domain() -> N
         if _uses_durable_submission(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == []
+    assert consumers == [
+        Path("trading/persistence/atomic_paper_submission_owner.py"),
+    ]
     assert {Path("main.py"), Path("core/bootstrap.py")} <= set(scanned)
 
     tree = ast.parse(module_path.read_text(encoding="utf-8"))

@@ -1247,7 +1247,7 @@ def test_repository_consumer_detector_allows_unrelated_imports(source):
     assert not _uses_order_position_journal(source)
 
 
-def test_repository_is_unwired_and_imports_only_approved_boundaries():
+def test_repository_has_one_persistence_consumer_and_stays_unwired():
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "persistence" / "order_position_journal.py"
     consumers = []
@@ -1265,7 +1265,9 @@ def test_repository_is_unwired_and_imports_only_approved_boundaries():
         scanned.append(source_path.relative_to(root))
         if _uses_order_position_journal(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
-    assert consumers == []
+    assert consumers == [
+        Path("trading/persistence/atomic_paper_submission_owner.py"),
+    ]
     assert {
         Path("main.py"),
         Path("core/bootstrap.py"),
