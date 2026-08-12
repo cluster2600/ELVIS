@@ -184,6 +184,14 @@ RUNTIME_GENERATION_TRIGGER = (
     58,
     "np",
     readiness_module._RUNTIME_GENERATION_FUNCTION,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
 )
 RUNTIME_CONTROL_TRIGGERS = tuple(
     sorted(
@@ -196,6 +204,14 @@ RUNTIME_CONTROL_TRIGGERS = tuple(
                 62,
                 "np",
                 readiness_module._RUNTIME_CONTROL_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
             )
             for relation in readiness_module._LEGACY_RELATIONS
         )
@@ -1169,6 +1185,75 @@ def test_runtime_catalog_or_control_row_tamper_is_early_drift(
     assert position_calls == []
 
 
+@pytest.mark.parametrize(
+    "trigger_index",
+    range(len(RUNTIME_CONTROL_TRIGGERS)),
+    ids=lambda index: RUNTIME_CONTROL_TRIGGERS[index][0],
+)
+def test_each_runtime_trigger_condition_is_attested(
+    monkeypatch,
+    trigger_index,
+) -> None:
+    triggers = list(RUNTIME_CONTROL_TRIGGERS)
+    trigger = list(triggers[trigger_index])
+    trigger[6] = False
+    triggers[trigger_index] = tuple(trigger)
+    database = ScriptedDatabase(
+        snapshot_responder(runtime_control_triggers=tuple(triggers))
+    )
+    account_calls, position_calls = install_replayers(monkeypatch)
+
+    result = PostgresPaperAccountReadiness(database.connect).assess(context())
+
+    assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
+    assert result.account_version is None
+    assert result.legacy_watermarks == ()
+    assert account_calls == []
+    assert position_calls == []
+
+
+@pytest.mark.parametrize(
+    "semantic_index",
+    range(7, 14),
+    ids=(
+        "no-arguments",
+        "no-column-list",
+        "not-constraint-backed",
+        "not-deferrable",
+        "not-initially-deferred",
+        "no-old-transition-table",
+        "no-new-transition-table",
+    ),
+)
+@pytest.mark.parametrize("trigger_family", ("control", "generation"))
+def test_runtime_trigger_semantics_are_exactly_attested(
+    monkeypatch,
+    trigger_family,
+    semantic_index,
+) -> None:
+    trigger = list(
+        RUNTIME_CONTROL_TRIGGERS[0]
+        if trigger_family == "control"
+        else RUNTIME_GENERATION_TRIGGER
+    )
+    trigger[semantic_index] = False
+    changes = (
+        {"runtime_control_triggers": (tuple(trigger), *RUNTIME_CONTROL_TRIGGERS[1:])}
+        if trigger_family == "control"
+        else {"runtime_generation_trigger": (tuple(trigger),)}
+    )
+    database = ScriptedDatabase(snapshot_responder(**changes))
+    account_calls, position_calls = install_replayers(monkeypatch)
+
+    result = PostgresPaperAccountReadiness(database.connect).assess(context())
+
+    assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
+    assert result.account_version is None
+    assert result.legacy_watermarks == ()
+    assert account_calls == []
+    assert position_calls == []
+
+
 def test_extra_activation_execute_grantee_is_early_catalog_drift(monkeypatch) -> None:
     extra_grantee_rows = tuple(
         (*row[:15], False, *row[16:]) for row in RUNTIME_ACTIVATION_FUNCTIONS
@@ -2092,6 +2177,7 @@ def test_readiness_repository_is_unwired_and_not_facade_exported() -> None:
             consumers.append(source_path.relative_to(root))
 
     assert consumers == [
+        Path("trading/persistence/postgres_bootstrap.py"),
         Path("trading/persistence/paper_runtime_activation.py"),
     ]
     assert not _uses_readiness_repository(facade_path.read_text(encoding="utf-8"))

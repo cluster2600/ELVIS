@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c1 dormant activation capabilities implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c2 dormant role/catalog bootstrap implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4075,12 +4075,12 @@ has the required effective privileges.
 The mutation function is an offline trusted capability, not a general runtime
 API. Its owner can invoke the exact CAS directly and thereby bypass the Python
 readiness replay. M9b.14c1 intentionally creates no third-party grant and
-remains dormant and unwired. M9b.14c2 must either transfer both function
-ownerships to one isolated offline activation authority while retaining the
-owner-only ACL, or explicitly version the catalog contract for one exact
-activator grantee. It must also remove DDL and broad authority from ordinary
-runtime roles, compose startup fail-closed, and rotate affected credentials.
-Until those role, composition, and rotation gates exist—and the remaining
+remains dormant and unwired. At a successful offline M9b.14c2 `COMPLETE`, both
+function ownerships belong to one isolated activation authority and retain the
+owner-only ACL in the reconciled catalog. Removing the currently composed
+runtime DDL path, deployment, fail-closed composition, and operator-owned
+credential rotation remain later gates. Until those gates exist—and the
+remaining
 reconciliation, bounded-replay, stale-writer, rollback, shadow-soak, and
 operator-approval gates pass—entering `ACTIVE` remains an explicit **NO-GO**.
 
@@ -4092,6 +4092,106 @@ each interpreter. The complete PostgreSQL 15 suite passed 352 tests under
 with 50 skipped, 352 deselected, 293 warnings, and 7 subtests. Black targeting
 Python 3.10, isort, flake8 with an 88-character limit, Python 3.10 compilation,
 and `git diff --check` were green on the final slice.
+
+### M9b.14c2 dormant role and catalog bootstrap
+
+M9b.14c2 adds the operator-driven
+`trading.persistence.postgres_bootstrap` boundary. Its context, receipts, and
+typed errors are secret-free; connection factories may close over credentials
+but are excluded from value repr and error graphs. The context fixes one
+database, an independent authenticated superuser admin, seven pairwise-distinct
+managed roles, and an optional explicit existing-volume adoption authority.
+The roles are a `NOLOGIN` schema owner and six separately authenticated login
+identities: migrator, legacy runtime, atomic runtime, offline activation,
+readiness, and trainer. All are least-privilege, `NOINHERIT`, marker-bound to
+the target database, and free of role/database settings. Migrator is the only
+member of schema owner and must use explicit `SET ROLE`.
+
+The bootstrap is resumable and fails closed. A fresh first pass creates the
+seven roles with null passwords and no login capability, commits that exact
+staging state, and returns `CREDENTIALS_REQUIRED`; it neither creates the
+schema nor deploys credentials. After an external operator provisions six
+credentials, a later pass proves each fresh connection's authenticated backend
+identity plus a non-null, non-expired catalog password state before using
+migrator to apply packaged migrations `0001` through `0006`. SCRAM and HBA
+enforcement remain c3 deployment responsibilities. Existing-volume adoption
+requires the exact
+checksummed ledger and one declared migration authority owning the complete
+historical catalog. Partial history, unledgered legacy relations, mixed owners,
+unexpected schemas, public routines, large objects, or surplus grants are
+drift and are not repaired.
+
+Old shared-runtime retirement is a separate durable barrier. With explicit
+demotion intent, memberships must already be absent; one pass proves the
+adoption candidate, removes login, password, inheritance, and every
+cluster-level privilege, then returns `DEMOTION_REQUIRED`. The catalog cut-over
+occurs only on a later pass after old sessions have drained and the role remains
+exactly inert. Without
+explicit demotion intent, the same status is returned after read-only
+preflight. The terminal `COMPLETE` receipt is emitted only after database,
+schema, object, function, role, membership, migration, shape, ownership, and
+ACL evidence all match the final allowlist.
+
+Final ownership separates administration from execution: the independent
+admin owns the database, schema owner owns `np` and its relations/sequences,
+and offline activation owns and alone executes the two c1 capabilities. Legacy
+runtime, atomic runtime, readiness, and trainer receive only their exact table,
+sequence, column, and function matrices. Each roles, migrations, demotion, and
+catalog commit has a dedicated phase-specific readback. A failed commit is
+accepted only when that readback proves that phase's durable target; otherwise
+the phase is reported as commit-unknown. After the role and credential probes,
+an exact terminal readback returns repeated `COMPLETE` without entering the
+migration or catalog write paths.
+
+This slice is intentionally dormant: the new module has no CLI, Compose or
+Ansible hook, environment parsing, secret writer, session terminator, startup
+consumer, activation call, or new runtime DDL path. The existing composed
+runtime DDL path remains present and is an explicit later blocker. M9b.14c3
+must provide the offline
+orchestration, SCRAM credential provisioning and rotation, restrictive HBA and
+network policy, real existing-volume rehearsal, and removal of DDL/migration
+authority from runtime services. M9b.14d must compose the dedicated runtime
+roles behind fail-closed startup and health checks. Bounded replay,
+reconciliation/quarantine, side-effect-free shadow comparison, stale-writer
+removal, tested pause/rollback, soak evidence, and explicit operator approval
+remain cut-over blockers. No credential has been deployed and no production
+volume has been migrated; `ACTIVE` remains an explicit **NO-GO**.
+
+Literal M9b.14c2 verification commands:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_postgres_bootstrap.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_postgres_bootstrap.py
+.venv/bin/python -m pytest -q \
+  tests/test_postgres_bootstrap.py \
+  tests/test_paper_account_readiness_repository.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_postgres_bootstrap.py \
+  tests/test_paper_account_readiness_repository.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_postgres_bootstrap_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_postgres_bootstrap_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q -m 'not postgres'
+git diff --check
+```
+
+The focused bootstrap suite passed 77 tests under each Python 3.14 and Python
+3.10 interpreter. The adjacent bootstrap/readiness-catalog command passed 191
+tests under each interpreter. The dedicated PostgreSQL 15 bootstrap suite
+passed 86 tests under each interpreter. Separately, the
+PostgreSQL 15 readiness-trigger suite passed 33 tests; that is an adjacent
+trigger-integrity regression result, not part of the 86-test c2 total. The
+complete PostgreSQL 15 suite passed 439 tests. The full non-PostgreSQL
+Honolulu run passed 2,552 tests, with 50 skipped, 439 deselected, 284 warnings,
+and 7 subtests.
 
 ## Cut-over policy
 

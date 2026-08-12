@@ -248,7 +248,8 @@ manifest stamping, backward-compatible replay, and exact readiness evidence;
 it still exposes no owner, transition, or runtime path. M9b.14b2 makes the
 dormant atomic owner generation-aware, M9b.14b3 adds the dormant activation
 contract, and M9b.14c1 moves that adapter behind two narrowly callable database
-capabilities without wiring any of them into production.
+capabilities. M9b.14c2 adds the dormant, operator-driven role and catalog
+bootstrap around those capabilities; neither slice is wired into production.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1343,16 +1344,79 @@ distinct-owner upgrade is not classified as drift.
 This owner-only capability is deliberately offline and trusted. Its mutation
 function performs the exact database transition but cannot itself reproduce
 the Python readiness replay; invoking it directly can therefore bypass that
-application policy. M9b.14c2 must either transfer both function ownerships to
-one isolated offline activation authority while retaining the owner-only ACL,
-or explicitly version the catalog contract for one exact activator grantee. It
-must keep ordinary runtime credentials unable to execute the capability or
-perform DDL and rotate affected credentials before composition. M9b.14c1
-itself adds no role, bootstrap entrypoint, credential, startup or health gate,
+application policy. At a successful M9b.14c2 `COMPLETE`, both function
+ownerships belong to one isolated offline activation authority and retain the
+owner-only ACL in the reconciled catalog. Credential values, rotation, and
+removal of the currently composed runtime DDL paths remain later operator work.
+M9b.14c1 itself
+still adds no role, bootstrap entrypoint, credential, startup or health gate,
 operator command, runtime composition, pause/rollback workflow, or shadow
-execution. `ACTIVE` remains an explicit **NO-GO** until role separation,
+execution. `ACTIVE` remains an explicit **NO-GO** until deployment and
 composition, credential rotation, reconciliation, bounded replay, stale-writer
 removal, rollback, soak, and operator-approval gates are complete.
+
+M9b.14c2 adds the dormant `trading.persistence.postgres_bootstrap` operator
+boundary. Its context, receipts, and typed errors are secret-free values: one
+expected database, an independently authenticated admin, an exact seven-role
+manifest, and an optional explicit adoption manifest. Connection factories may
+close over operator-provided credentials but are excluded from value repr and
+error graphs. The managed roles are one
+`NOLOGIN` schema owner plus separate migrator, legacy-runtime, atomic-runtime,
+activation, readiness, and trainer login identities. Every role is marked for
+that database, has no role or database settings, and has no superuser,
+`CREATEROLE`, `CREATEDB`, replication, or row-security-bypass authority. The
+only membership is migrator to schema owner, used through explicit `SET ROLE`;
+ordinary runtime roles cannot inherit migration ownership.
+
+Reconciliation is intentionally resumable across operator passes. On a fresh
+database, the first pass creates all seven roles as `NOLOGIN` with null
+passwords and returns `CREDENTIALS_REQUIRED` without creating `np` or applying
+a migration. Credentials and `LOGIN` are provisioned outside this component.
+The next pass authenticates six fresh, idle connections as the declared
+backend identities, requires a non-null and non-expired PostgreSQL password
+state, applies the exact packaged migration ledger through the
+migrator/schema-owner boundary, and then
+installs the final catalog. Existing-volume adoption accepts only the complete,
+checksummed migration history owned by the one declared migration authority;
+unledgered legacy objects, mixed ownership, or surplus authority are drift.
+When an old shared runtime must be retired, its memberships must already be
+absent. One pass removes `LOGIN`, password, inheritance, and every cluster-level
+privilege and returns `DEMOTION_REQUIRED`. A later pass may transfer authority
+only after all old backends have drained and the role remains membership-free
+and exactly inert.
+`COMPLETE` is therefore evidence of the terminal catalog, never a request to
+provision credentials or to terminate sessions.
+
+The terminal authority and structural core use an exact allowlist, not a
+best-effort grant script; additional ordinary non-unique B-tree indexes are
+allowed only under a narrow safe-shape policy. The final catalog binds the
+database to the independent admin; `np`, its relations and sequences to the
+schema owner; and the two activation functions to the isolated activation
+role. It checks the migration ledger and schema marker, relation columns
+including typmods and collations, constraints, canonical indexes and their
+security-relevant properties, owned sequences, functions, owners, grants,
+column/default ACLs, database/schema ACLs, unexpected schemas or public
+routines, and large objects. In the reconciled catalog, legacy runtime receives
+only the legacy-table matrix. Atomic runtime receives the journal/account
+matrix plus the narrow runtime-control/generation read and row-lock column
+privileges required by its transaction protocol. Readiness has read-only
+authority, trainer has `SELECT` on `trades`, and activation alone owns and can
+execute the two c1 capabilities. Every durable phase—roles, migration
+authority, packaged migrations, old-role demotion, and final catalog—resolves a
+failed commit through an independent phase-specific readback. Any non-exact or
+unreadable result is a typed commit-unknown or drift failure, never an inferred
+success.
+
+This bootstrap has no CLI, environment lookup, startup hook, container wiring,
+credential writer, session terminator, activation call, or runtime consumer.
+M9b.14c3 must supply the offline deployment workflow: Compose/Ansible role and
+SCRAM-secret provisioning, restrictive HBA/network policy, credential rotation,
+real-volume rehearsal, and removal of migration or other DDL authority from
+runtime processes. M9b.14d must then compose the dedicated runtime identities
+with fail-closed startup and health gates while keeping bootstrap and activation
+offline. Reconciliation, bounded replay, side-effect-free shadow comparison,
+stale-writer removal, tested pause/rollback, soak evidence, and explicit
+operator approval still block cut-over. `ACTIVE` remains a **NO-GO**.
 
 ## Runtime and configuration
 

@@ -409,7 +409,15 @@ SELECT
     trigger_row.tgenabled,
     trigger_row.tgtype,
     routine_namespace.nspname,
-    routine_row.proname
+    routine_row.proname,
+    trigger_row.tgqual IS NULL,
+    trigger_row.tgnargs = 0,
+    trigger_row.tgattr = ''::int2vector,
+    trigger_row.tgconstraint = 0,
+    NOT trigger_row.tgdeferrable,
+    NOT trigger_row.tginitdeferred,
+    trigger_row.tgoldtable IS NULL,
+    trigger_row.tgnewtable IS NULL
 FROM pg_trigger trigger_row
 JOIN pg_class table_row
   ON table_row.oid = trigger_row.tgrelid
@@ -641,7 +649,15 @@ SELECT
     trigger_row.tgenabled,
     trigger_row.tgtype,
     routine_namespace.nspname,
-    routine_row.proname
+    routine_row.proname,
+    trigger_row.tgqual IS NULL,
+    trigger_row.tgnargs = 0,
+    trigger_row.tgattr = ''::int2vector,
+    trigger_row.tgconstraint = 0,
+    NOT trigger_row.tgdeferrable,
+    NOT trigger_row.tginitdeferred,
+    trigger_row.tgoldtable IS NULL,
+    trigger_row.tgnewtable IS NULL
 FROM pg_trigger trigger_row
 JOIN pg_class table_row
   ON table_row.oid = trigger_row.tgrelid
@@ -1027,6 +1043,14 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
                         62,
                         "np",
                         _RUNTIME_CONTROL_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
                     )
                     for relation in _LEGACY_RELATIONS
                 )
@@ -1038,6 +1062,14 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
                         58,
                         "np",
                         _RUNTIME_GENERATION_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
                     ),
                 )
             )
@@ -1224,6 +1256,14 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
                 58,
                 "np",
                 _RUNTIME_GENERATION_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
             ),
         ):
             return False

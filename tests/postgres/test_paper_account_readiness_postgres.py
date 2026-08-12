@@ -361,11 +361,13 @@ def test_exact_migration_rows_exposed_by_a_view_are_drift_and_short_circuit(
             cursor.execute(
                 "ALTER TABLE np.schema_migrations RENAME TO schema_migrations_backing"
             )
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE VIEW np.schema_migrations AS
                 SELECT version, name, checksum, applied_at
                 FROM np.schema_migrations_backing
-                """)
+                """
+            )
         connection.commit()
     finally:
         connection.close()
@@ -525,6 +527,52 @@ def test_runtime_control_generation_or_fence_tamper_is_early_schema_drift(
     try:
         with connection.cursor() as cursor:
             cursor.execute(tamper)
+        connection.commit()
+    finally:
+        connection.close()
+    trace = _TracingFactory(migrated_postgres_dsn)
+
+    result = _assess(
+        migrated_postgres_dsn,
+        _context(encoded),
+        factory=trace,
+    )
+
+    assert _finding_kinds(result) == {PaperAccountReadinessFindingKind.MIGRATION_DRIFT}
+    assert result.account_version is None
+    assert result.legacy_watermarks == ()
+    sql = "\n".join(command for command, _ in trace.connections[0].commands)
+    assert "FROM np.orders" not in sql
+    assert "paper_account_streams ORDER BY account_key" not in sql
+    assert "position_streams ORDER BY position_key" not in sql
+
+
+def test_conditional_runtime_fence_trigger_is_early_schema_drift(
+    migrated_postgres_dsn,
+):
+    encoded = _provision(migrated_postgres_dsn)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DROP TRIGGER legacy_paper_runtime_fence_trades ON np.trades"
+            )
+            cursor.execute(
+                """
+                CREATE TRIGGER legacy_paper_runtime_fence_trades
+                BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE
+                ON np.trades
+                FOR EACH STATEMENT
+                WHEN (false)
+                EXECUTE FUNCTION np.enforce_legacy_paper_runtime_fence()
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE np.trades
+                ENABLE ALWAYS TRIGGER legacy_paper_runtime_fence_trades
+                """
+            )
         connection.commit()
     finally:
         connection.close()
@@ -812,12 +860,14 @@ def test_legacy_open_position_is_visible_in_watermark_and_blocks(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.open_positions (
                     symbol, side, entry_price, quantity, leverage
                 ) VALUES ('BTCUSDT', 'BUY', 10, 1, 2)
                 RETURNING id
-                """)
+                """
+            )
             position_id = cursor.fetchone()[0]
         connection.commit()
     finally:
@@ -849,11 +899,13 @@ def test_repeatable_read_snapshot_is_stale_after_concurrent_legacy_commit(
         writer = _connect(migrated_postgres_dsn)
         try:
             with writer.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO np.open_positions (
                         symbol, side, entry_price, quantity, leverage
                     ) VALUES ('BTCUSDT', 'BUY', 10, 1, 2)
-                    """)
+                    """
+                )
             writer.commit()
             committed = True
         finally:
