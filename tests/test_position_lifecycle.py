@@ -997,7 +997,11 @@ def test_position_only_approved_modules_consume_contract() -> None:
     } == set()
 
     consumers = []
-    excluded = {module_path, domain_root / "__init__.py"}
+    excluded = {
+        module_path,
+        domain_root / "__init__.py",
+        domain_root / "paper_economics.py",
+    }
     for source_path in root.rglob("*.py"):
         if (
             source_path in excluded

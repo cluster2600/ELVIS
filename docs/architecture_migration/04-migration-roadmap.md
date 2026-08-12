@@ -30,8 +30,8 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 pure durable-submission owner contract) |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission contract; M9b.8 FIFO economics without SQL) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1829,6 +1829,113 @@ passes 109 tests under Python 3.10. Black, isort, flake8, Python 3.10
 compilation, and the diff check pass. The complete non-PostgreSQL suite passes
 1,672 tests, skips 50, deselects 43, and passes 7 subtests under
 `Pacific/Honolulu`.
+
+### M9b.8 pure FIFO paper economics
+
+M9b.8 adds `trading.domain.paper_economics`, extends the shared exact-Decimal
+helper with exact multiplication, re-exports the new values through the domain
+facade, and adds pure unit and no-runtime-consumer gates. It does not add SQL, a
+repository, a schema migration, a clock, environment reads, or runtime wiring.
+A `PaperFillRecord` couples one validated `PositionFill` to its durable
+`position_version` and per-order `(client_order_id, event_id)` identity;
+`PaperEconomics` folds those records into immutable FIFO cost lots, exact open
+quantity and cost, cumulative gross realised PnL, and exact fee totals grouped
+by asset.
+
+`position_version` is the only causal ordering input. Fill-record versions must
+increase strictly, but need not be consecutive: submission and other non-fill
+lifecycle events may occupy the intervening versions. The full journal replay,
+not this fill-only reducer, must prove that the complete position stream has no
+gap. An exact replay of the same record returns the existing projection. A
+conflicting composite event identity, fill identity, or position version, or a
+new fill whose version does not advance, fails closed; the same bare `event_id`
+may recur under a different client order. Identity ordering inside
+`Position.fills`, event timestamps, legacy row IDs, and database collation are
+not substitutes for causal version order.
+
+`PaperLotMethod` admits only `FIFO`. Every `OPEN` confirmed fill creates one lot
+using its exact price and quantity; a scale-in appends a later lot.
+`REDUCE_ONLY` consumes the oldest remaining lots first, leaves an exact
+partial-lot remainder when necessary, and closes the projection only when no
+quantity remains. Open cost is the exact sum of each
+surviving lot's `remaining_quantity * entry_price`. Gross realised PnL is
+`(exit_price - entry_price) * matched_quantity` for a long and
+`(entry_price - exit_price) * matched_quantity` for a short. Leverage does not
+multiply notional, fee, or gross PnL for an already fixed contract/base
+quantity. The reducer uses confirmed fill price, quantity, and fee facts only;
+it does not use intent reference prices, hardcoded mock prices, epsilon
+tolerances, or binary floats.
+
+FIFO is a deliberate target policy, not a claim of behavioural parity with the
+legacy paper path. The current executor and database helpers mix incompatible
+models: opens insert independent rows, Balanced Starter and the inline exit path
+close one row by ID, while executor netting selects an unordered first opposite
+row and then deletes every row for that symbol and side. Its helpers also use
+separate transactions and `REAL` columns. That history cannot define stable lot
+allocation, exact cost basis, or replay semantics for the new reducer.
+
+Positive confirmed fees remain separate exact totals for each `fee_asset`, and
+zero fees are omitted; fees are not converted or subtracted from gross PnL.
+Balance and cash accounting, margin reservation, net PnL, fee-asset conversion,
+funding, borrowing, liquidation, unrealised mark-to-market PnL, price/fill
+simulation, tick and lot quantisation, exit selection, legacy-table projection,
+and historical legacy adoption are explicitly deferred. M9b.8 also does not
+make the future owner the sole writer or fence `BinanceExecutor`, Balanced
+Starter, the inline main exits, or any other legacy database writer.
+
+Activation therefore still requires an exact durable fill ledger, atomic
+economic and compatibility projections where those projections remain needed,
+one PostgreSQL transaction owner, deterministic stream locking and replay,
+commit-unknown recovery, startup readiness that proves legacy writers are
+fenced, and reconciliation/quarantine of unsupported legacy state. The pure
+reducer establishes arithmetic and allocation semantics only.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py \
+  tests/test_domain_contracts.py \
+  tests/test_durable_submission.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_paper_economics.py
+.venv/bin/black --target-version py310 --check \
+  trading/domain/_decimal.py \
+  trading/domain/paper_economics.py \
+  trading/domain/__init__.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/domain/_decimal.py \
+  trading/domain/paper_economics.py \
+  trading/domain/__init__.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py
+.venv/bin/flake8 \
+  trading/domain/_decimal.py \
+  trading/domain/paper_economics.py \
+  trading/domain/__init__.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/domain/_decimal.py \
+  trading/domain/paper_economics.py \
+  trading/domain/__init__.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The pure paper-economics suite passes 75 tests under both supported Python
+interpreters, and the focused domain/application/persistence regression suite
+passes 556 tests. Black, isort, flake8, Python 3.10 compilation, and the diff
+check pass. The complete non-PostgreSQL suite passes 1,747 tests, skips 50,
+deselects 43, and passes 7 subtests under `Pacific/Honolulu`.
 
 ## Cut-over policy
 

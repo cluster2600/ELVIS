@@ -25,6 +25,16 @@ from trading.domain.orders import (
     SubmissionReport,
     SubmissionStatus,
 )
+from trading.domain.paper_economics import (
+    InvalidPaperEconomicTransition,
+    PaperCostLot,
+    PaperEconomics,
+    PaperFeeTotal,
+    PaperFillRecord,
+    PaperLotMethod,
+    new_paper_economics,
+    reduce_paper_economics,
+)
 from trading.domain.positions import (
     InvalidPositionTransition,
     Position,
@@ -48,6 +58,7 @@ __all__ = [
     "CancellationRequested",
     "ConfirmedFill",
     "InvalidOrderTransition",
+    "InvalidPaperEconomicTransition",
     "InvalidPositionTransition",
     "OrderIntent",
     "OrderLifecycle",
@@ -55,6 +66,11 @@ __all__ = [
     "OrderLifecycleState",
     "OrderSide",
     "OrderType",
+    "PaperCostLot",
+    "PaperEconomics",
+    "PaperFeeTotal",
+    "PaperFillRecord",
+    "PaperLotMethod",
     "Position",
     "PositionEffect",
     "PositionExitContext",
@@ -74,9 +90,11 @@ __all__ = [
     "SubmissionStatus",
     "TakeProfitProfile",
     "new_order_lifecycle",
+    "new_paper_economics",
     "new_position",
     "position_fill_from_lifecycle",
     "reduce_order_lifecycle",
+    "reduce_paper_economics",
     "reduce_position",
     "submission_event_from_report",
 ]

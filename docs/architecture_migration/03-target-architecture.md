@@ -201,6 +201,9 @@ unwired transactional repository and reducer-based replay boundary. M9b.4 adds
 the application-level `JournaledOrderService`, still with no runtime consumer.
 M9b.7 adds a pure durable-submission owner contract for the next transaction
 boundary, without implementing SQL, a repository, or runtime composition.
+M9b.8 adds the pure FIFO paper-economics slice: exact lot, open-cost,
+gross-realised-PnL, and per-fee-asset projections from causally versioned
+confirmed fills, still without SQL or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -339,6 +342,47 @@ does not yet constitute this service, select an exit, calculate cost basis or
 PnL, or perform runtime I/O. The persistence codec and repository replay these
 instruction and event values, but no runtime module applies the reducer yet.
 
+M9b.8 adds the smallest missing economic reducer under
+`trading.domain.paper_economics`. `PaperFillRecord` couples one already
+validated `PositionFill` to its positive durable `position_version` and exact
+per-order `(client_order_id, event_id)` identity; `PaperEconomics` retains those
+records and the corresponding
+`Position`, `PaperCostLot`, exact open quantity and cost, gross-PnL, and
+`PaperFeeTotal` projections. The reducer must not use the identity-sorted
+`Position.fills` tuple, fill timestamp, database row ID, or query return order
+as a substitute for causality. Economic fill versions increase strictly. Gaps
+between economic fills are valid because submission and other non-fill
+lifecycle events occupy versions in the complete position stream; the
+repository remains responsible for proving that complete stream is the exact
+contiguous prefix `1..stream_version`. Reapplying the exact same
+`PaperFillRecord` is an idempotent no-op. A changed payload at an existing
+version or composite event identity, a fill identity at another version, or a
+regressed new version fails closed. The same bare `event_id` may validly recur
+under another client order.
+
+`PaperLotMethod` admits only `FIFO`. Each `OPEN` fill creates one immutable lot
+at the exact confirmed fill price and quantity. A scale-in appends another lot
+instead of manufacturing an average entry. `REDUCE_ONLY` consumes lots in
+ascending `position_version`; a partial reduction leaves an exact remainder on
+the partially consumed lot, and an exact reduction of all remaining quantity
+closes the projection. Open cost is the exact sum of `remaining_quantity *
+entry_price` for the surviving lots. Gross realised PnL is the exact sum of
+`(exit_price - entry_price) * matched_quantity` for a long and
+`(entry_price - exit_price) * matched_quantity` for a short. The calculation
+uses `ConfirmedFill.price`, `ConfirmedFill.quantity`, and exact `Decimal`
+arithmetic. `OrderIntent.reference_price`, mock/current prices, tolerances, and
+binary floats are not economic facts. Leverage remains position metadata: for a
+fixed base/contract quantity it changes margin, not fill notional, exchange fee,
+or gross PnL.
+
+The projection preserves positive confirmed fees as exact totals grouped by
+their explicit `fee_asset`; zero fees are omitted. It does not convert fee
+assets or subtract them from gross PnL, so it exposes no synthetic cross-asset
+net PnL. Balance, cash, margin reservation, liquidation, funding, borrowing,
+mark-to-market PnL, exit selection, price simulation,
+tick/lot quantisation, and legacy table shapes remain outside this reducer.
+Those require separate policies rather than hidden defaults in arithmetic.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -459,9 +503,14 @@ decision workflow, durable quarantine, runtime composition, and the remaining
 activation gates before `PositionService` can own the runtime boundary. M9b.6's
 query and unresolved-submission inventory make those cases observable but do
 not resolve them or authorize automatic resubmission. M9b.7 fixes the pure
-attempt/result vocabulary for the future transaction owner, but does not yet
-implement that owner, its economic projections, sole-writer enforcement, or
-the required legacy-writer fence.
+attempt/result vocabulary for the future transaction owner, but does not
+implement that owner. M9b.8 defines the pure FIFO economic fold over the exact
+existing journal facts and therefore requires no SQL or schema migration of its
+own. Neither slice enforces sole ownership or fences the legacy writers. The
+deterministic in-memory projection is not an activation claim. Cut-over still
+requires the exact durable fill ledger, atomic compatibility projections where
+they remain necessary, one transaction owner, startup verification that legacy
+writers are fenced, and PostgreSQL commit-unknown/replay tests.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.
