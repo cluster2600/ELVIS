@@ -17,6 +17,7 @@ from trading.application import (
     PaperAccountSubmissionReconciliationRequired,
     PaperAccountSubmissionRejected,
     PaperAccountSubmissionResult,
+    PaperAccountSubmissionRuntimeUnavailable,
 )
 from trading.application.durable_submission import (
     DurableLifecycleReceipt,
@@ -69,12 +70,15 @@ def _attempt(*, quantity: Decimal = Decimal("1.00")) -> SubmissionAttemptContext
 
 
 def _context(
-    *, attempt: SubmissionAttemptContext | None = None
+    *,
+    attempt: SubmissionAttemptContext | None = None,
+    runtime_generation: int = 1,
 ) -> PaperAccountSubmissionContext:
     return PaperAccountSubmissionContext(
         attempt=attempt or _attempt(),
         account_key="account-1",
         instrument=PaperLinearInstrument("BTCUSDT", "BTC", "USDT"),
+        runtime_generation=runtime_generation,
     )
 
 
@@ -122,10 +126,11 @@ def test_context_retains_exact_attempt_and_instrument_snapshot() -> None:
     attempt = _attempt()
     instrument = PaperLinearInstrument("BTCUSDT", "BTC", "USDT")
 
-    context = PaperAccountSubmissionContext(attempt, "account-1", instrument)
+    context = PaperAccountSubmissionContext(attempt, "account-1", instrument, 17)
 
     assert context.attempt is attempt
     assert context.instrument is instrument
+    assert context.runtime_generation == 17
     assert context.execution_scope == "paper:test"
     assert context.client_order_id == "order-1"
     assert not hasattr(context, "__dict__")
@@ -155,6 +160,13 @@ def test_context_retains_exact_attempt_and_instrument_snapshot() -> None:
             },
             ValueError,
         ),
+        ({"runtime_generation": True}, TypeError),
+        ({"runtime_generation": 0}, ValueError),
+        ({"runtime_generation": -1}, ValueError),
+        ({"runtime_generation": 1 << 63}, ValueError),
+        ({"runtime_generation": 1.0}, TypeError),
+        ({"runtime_generation": "1"}, TypeError),
+        ({"runtime_generation": None}, TypeError),
     ],
 )
 def test_context_rejects_invalid_durable_identity(values, error) -> None:
@@ -162,6 +174,7 @@ def test_context_rejects_invalid_durable_identity(values, error) -> None:
         "attempt": _attempt(),
         "account_key": "account-1",
         "instrument": PaperLinearInstrument("BTCUSDT", "BTC", "USDT"),
+        "runtime_generation": 1,
     }
     arguments.update(values)
 
@@ -179,6 +192,15 @@ def test_receipt_retains_exact_context_and_consecutive_account_versions() -> Non
     assert receipt.submission is submission
     assert receipt.account_versions == (7,)
     assert receipt.disposition is DurableSubmissionDisposition.COMMITTED
+
+
+def test_context_runtime_generation_is_required() -> None:
+    with pytest.raises(TypeError, match="runtime_generation"):
+        PaperAccountSubmissionContext(
+            _attempt(),
+            "account-1",
+            PaperLinearInstrument("BTCUSDT", "BTC", "USDT"),
+        )
 
 
 def test_receipt_rejects_numerically_equal_but_distinct_attempt_envelope() -> None:
@@ -257,6 +279,22 @@ def test_reconciliation_exceptions_preserve_full_context(error_type) -> None:
         assert restored.context == context
 
 
+def test_runtime_unavailable_preserves_generation_context_without_retry_claim() -> None:
+    context = _context(runtime_generation=19)
+    error = PaperAccountSubmissionRuntimeUnavailable(context)
+
+    assert str(error) == "durable paper-account submission runtime is unavailable"
+    assert error.context is context
+    assert error.context.runtime_generation == 19
+    assert error.client_order_id == context.client_order_id
+    assert error.requires_reconciliation is False
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        restored = pickle.loads(pickle.dumps(error, protocol=protocol))
+        assert type(restored) is PaperAccountSubmissionRuntimeUnavailable
+        assert restored.context == context
+        assert restored.context.runtime_generation == 19
+
+
 def test_account_owner_protocol_is_positional_only_and_result_union_is_public() -> None:
     parameters = inspect.signature(PaperAccountSubmissionOwner.execute).parameters
     assert parameters["context"].kind is inspect.Parameter.POSITIONAL_ONLY
@@ -276,6 +314,7 @@ def test_account_submission_contracts_are_exported_by_application_facade() -> No
         "PaperAccountSubmissionReconciliationRequired",
         "PaperAccountSubmissionRejected",
         "PaperAccountSubmissionResult",
+        "PaperAccountSubmissionRuntimeUnavailable",
     }
     assert expected <= set(application.__all__)
     assert all(getattr(application, name) is globals()[name] for name in expected)

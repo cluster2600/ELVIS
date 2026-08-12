@@ -373,6 +373,7 @@ class PaperAccountSubmissionContext:
     attempt: SubmissionAttemptContext
     account_key: str
     instrument: PaperLinearInstrument
+    runtime_generation: int
 
     def __post_init__(self) -> None:
         if type(self.attempt) is not SubmissionAttemptContext:
@@ -380,6 +381,12 @@ class PaperAccountSubmissionContext:
         _require_identifier("account_key", self.account_key)
         if type(self.instrument) is not PaperLinearInstrument:
             raise TypeError("instrument must be a PaperLinearInstrument")
+        if type(self.runtime_generation) is not int:
+            raise TypeError("runtime_generation must be an integer")
+        if self.runtime_generation < 1:
+            raise ValueError("runtime_generation must be positive")
+        if self.runtime_generation > _POSTGRES_BIGINT_MAX:
+            raise ValueError("runtime_generation exceeds the durable storage limit")
         _require_identifier(
             "instrument.base_asset",
             self.instrument.base_asset,
@@ -481,6 +488,36 @@ class PaperAccountSubmissionOwner(Protocol):
     ) -> PaperAccountSubmissionResult:
         """Commit, replay, or reject one fully derived paper-account batch."""
         ...
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperAccountSubmissionRuntimeUnavailable(RuntimeError):
+    """Preserve a submission whose pinned active runtime is unavailable."""
+
+    context: PaperAccountSubmissionContext
+
+    def __post_init__(self) -> None:
+        if type(self.context) is not PaperAccountSubmissionContext:
+            raise TypeError("context must be a PaperAccountSubmissionContext")
+        RuntimeError.__init__(
+            self,
+            "durable paper-account submission runtime is unavailable",
+        )
+
+    def __reduce__(self) -> tuple[object, tuple[PaperAccountSubmissionContext]]:
+        """Reconstruct the typed exception from its full context."""
+        return (type(self), (self.context,))
+
+    @property
+    def client_order_id(self) -> str:
+        """Expose the stable order identity without implying durable mutation."""
+        return self.context.client_order_id
+
+    @property
+    def requires_reconciliation(self) -> bool:
+        """Runtime unavailability is known to precede any durable owner write."""
+        return False
 
 
 @protect_frozen_dataclass_state
@@ -613,6 +650,7 @@ __all__ = [
     "PaperAccountSubmissionReconciliationRequired",
     "PaperAccountSubmissionRejected",
     "PaperAccountSubmissionResult",
+    "PaperAccountSubmissionRuntimeUnavailable",
     "PaperSubmissionPlan",
     "PaperSubmissionPlanner",
     "SubmissionAttemptContext",

@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b1 dormant runtime-generation provenance implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b2 dormant generation-aware owner implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -3679,6 +3679,126 @@ complete PostgreSQL 15 suite passed 304 tests under `.venv/bin/python`. The full
 non-PostgreSQL Honolulu run passed 2,377 tests, with 50 skipped, 307 deselected,
 and 7 subtests. Black, isort, flake8, Python 3.10 compilation, and
 `git diff --check` were green.
+
+### M9b.14b2 dormant generation-aware atomic owner
+
+M9b.14b2 consumes the M9b.14b1 provenance format only inside the still-unwired
+`PostgresAtomicPaperAccountOwner`. The application contract adds required
+positive-bigint `runtime_generation` to `PaperAccountSubmissionContext`; the
+owner constructor independently requires the positive generation it is pinned
+to for its lifetime. A future context generation is rejected before encoding,
+connection creation, planner invocation, or DML by the exported frozen
+`PaperAccountSubmissionRuntimeUnavailable(context)`. The exception preserves
+the client identity and full generation-bearing context and deliberately has
+`requires_reconciliation == False`, because no owner write could have occurred.
+
+Within a fresh transaction, the exact lock and validation order is:
+
+1. `SET TRANSACTION ISOLATION LEVEL READ COMMITTED`;
+2. select the singleton `np.paper_runtime_control` `FOR SHARE` and require
+   `ACTIVE` with generation equal to the constructor pin;
+3. select that exact `np.paper_runtime_generations` row `FOR SHARE`;
+4. lock and strictly replay the requested account, then match the pinned epoch
+   to its scope, key, immutable `owner_generation`, opening version, and opening
+   payload SHA-256;
+5. require every existing account manifest to be V2 with a generation no later
+   than the pin, resolve the target manifest and its exact context generation;
+   and
+6. only then lock or create the position stream and continue the prior atomic
+   replay, rejection, or commit path.
+
+The shared control lock prevents a concurrent generation transition from
+committing until the owner transaction finishes. Missing, malformed,
+non-`ACTIVE`, stale, or provenance-incompatible runtime state is typed runtime
+unavailability. V1 history, future-stamped account history, or a target
+manifest whose generation differs from the submission context is instead
+`PaperAccountSubmissionReconciliationRequired`; the owner never upgrades or
+adopts those facts.
+
+A genuinely new batch requires context generation equal to the constructor
+pin. Its manifest is V2 and includes the generation in both the indexed column
+and canonical hashed payload. All journal, settlement, posting, balance,
+reservation, and stream facts retain the prior one-transaction invariant. A
+derived account rejection still produces zero durable batch mutations.
+
+Rollover permits one narrower case. An owner pinned to generation `N+1` may
+resolve an exact existing V2 manifest whose retained context is generation `N`.
+The complete account and position replay must agree, the result keeps that
+generation-`N` context, the planner does not run, and no DML occurs. This makes
+a generation-`N` `PaperAccountSubmissionCommitUnknown` resolvable after a
+rollover. It does not authorize a new old-generation batch: an absent target
+with context `N` returns runtime-unavailable before planner or DML. Conversely,
+an owner pinned to `N` is unavailable after control advances to `N+1`.
+
+This is still a dormant proof boundary. No production module constructs the
+owner or its context, and the slice adds no transition API, epoch insertion,
+mode mutation, readiness lock, startup/runtime/health wiring, shadow executor,
+role or grant change, secret rotation, legacy compatibility projection,
+reconciliation mutation, or cut-over authority. M9b.14b3 remains the locked
+same-cursor transition slice; M9b.14c remains bootstrap and database-role
+separation; M9b.14d remains fail-closed composition and shadow operation.
+
+Literal focused verification commands for M9b.14b2:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+.venv/bin/black --target-version py310 --check \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+.venv/bin/isort --check-only \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+.venv/bin/flake8 \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+git diff --check
+```
+
+The focused contract and owner command passed 53 tests under each Python
+interpreter. The focused PostgreSQL 15 owner command passed 24 tests under each
+interpreter, including proof that its control `FOR SHARE` lock blocks a
+concurrent control update until commit. The complete PostgreSQL 15 suite passed
+315 tests. The non-PostgreSQL Honolulu run passed 2,396 tests, with 50 skipped,
+318 deselected, and 7 subtests. Black, isort, flake8, Python 3.10 compilation,
+and `git diff --check` were green.
 
 ## Cut-over policy
 

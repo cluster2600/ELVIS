@@ -1144,6 +1144,56 @@ side-effect-free shadow operation. Only after those slices and the remaining
 reconciliation, bounded-replay, compatibility, stale-writer, rollback, and soak
 gates may an explicit cut-over make `ACTIVE` reachable.
 
+M9b.14b2 makes only the dormant `PostgresAtomicPaperAccountOwner` generation
+aware. `PaperAccountSubmissionContext` now requires a positive PostgreSQL
+bigint `runtime_generation`, and the owner's constructor requires its own
+positive pinned generation. A context generation later than that pin fails
+before encoding or connection I/O with the typed
+`PaperAccountSubmissionRuntimeUnavailable(context)`. This exception preserves
+the complete context and stable client identity but reports
+`requires_reconciliation == False`: the owner knows it has performed no
+durable mutation. A lost commit acknowledgement continues to raise
+`PaperAccountSubmissionCommitUnknown`; its retained context now also carries
+the exact generation needed to resolve that batch.
+
+Once a fresh transaction starts, the lock order is exact: runtime control,
+current pinned epoch, account, then position. The first query after `SET
+TRANSACTION` selects the singleton control `FOR SHARE` and requires `ACTIVE`
+at the constructor pin. The next query selects that pin's epoch `FOR SHARE`.
+Only then does the owner lock and replay the account, prove the epoch's exact
+scope, account key, immutable provisioning generation, opening version and
+opening hash, and inspect its manifests. Every existing account manifest must
+be V2 with a non-null generation no later than the pin; V1 or future-stamped
+history requires reconciliation. This order prevents a concurrent transition
+from changing the active generation until the owner transaction finishes.
+
+A new order is admissible only when its context generation equals the pinned
+generation. The owner then plans as before and inserts a V2 manifest whose
+indexed `runtime_generation` is also inside its canonical payload and hash.
+Admission rejection still rolls back without writing any batch fact. Missing,
+non-`ACTIVE`, stale, malformed, or provenance-incompatible runtime state raises
+`PaperAccountSubmissionRuntimeUnavailable` before planner or durable-owner DML.
+An existing target must instead have exactly the context generation; V1 or a
+different generation is reconciliation evidence, never an adoptable retry.
+
+The one deliberate rollover rule is exact replay of an older batch. An owner
+pinned to `N+1` may accept a context for `N` only if the matching V2 manifest
+already exists at `N` and the full journal/account replay agrees. It returns
+the original context in the replay receipt and performs no DML. This resolves a
+generation-`N` commit-unknown outcome after the runtime has advanced without
+allowing a new generation-`N` write. If that older target is absent, the owner
+returns runtime-unavailable before planner, position creation, or other DML. An
+owner still pinned to `N` becomes unavailable once control advances to `N+1`.
+
+M9b.14b2 remains unreachable from production composition. It creates no epoch,
+changes no control mode, exposes no activation or pause API, wires no startup,
+health, executor, CLI, or shadow path, and changes no role, grant, credential,
+legacy projection, or readiness authority. The database remains at `LEGACY/0`
+unless an external test or future transition boundary changes it. M9b.14b3 must
+still own the locked same-cursor readiness and transition contract; M9b.14c
+must install role-separated bootstrap and grants; M9b.14d must compose
+fail-closed startup and shadow operation before any cut-over is considered.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -1294,16 +1344,18 @@ listing returns. It does not append those settlement facts. M9b.12d adds the
 dormant integrated writer contract and concrete `PostgresAtomicPaperAccountOwner`:
 one account-first/position-second transaction can replay an exact manifest,
 return a zero-mutation account rejection, or commit journal, manifest,
-settlement, posting, and materialized account facts together. It still does not
-establish active runtime ownership, a rotating generation, readiness gate, or
-legacy fence.
+settlement, posting, and materialized account facts together. M9b.14b2 adds the
+dormant constructor pin, transaction control/epoch locks, V2 generation stamps,
+and exact older-generation replay described above. It still does not establish
+active runtime authority, create or advance an epoch, transition control, wire
+startup, or change the legacy fence.
 
 Cut-over still requires: completion and soak evidence for the dormant integrated
 owner; persisted instrument identity and version plus price, fee, tick, lot, and
 opening-capital provenance;
 funding, borrowing, liquidation, and unrealised mark-to-market rules;
-the M9b.14b1 dormant epoch registry and manifest format must be consumed by a
-generation-aware owner and locked transition; atomic legacy compatibility
+the dormant generation-aware owner must be composed only behind the future
+locked transition; atomic legacy compatibility
 projections where they remain necessary; durable reconciliation and quarantine
 for unsupported, unresolved, or incompatible pre-atomic histories; startup
 composition of the non-authoritative assessment plus its same-cursor locked

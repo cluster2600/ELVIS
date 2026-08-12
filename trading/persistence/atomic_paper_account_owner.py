@@ -1,8 +1,9 @@
 """Unwired atomic PostgreSQL owner for journaled paper-account batches.
 
-One fresh transaction locks the preprovisioned account before its target
-position, derives every journal and account fact in memory, and either rolls
-back a typed admission rejection or commits the complete batch once.
+One fresh transaction locks the active runtime control and pinned epoch before
+the preprovisioned account and its target position, derives every journal and
+account fact in memory, and either rolls back a typed admission rejection or
+commits the complete generation-stamped batch once.
 """
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from trading.application.durable_submission import (
     PaperAccountSubmissionReconciliationRequired,
     PaperAccountSubmissionRejected,
     PaperAccountSubmissionResult,
+    PaperAccountSubmissionRuntimeUnavailable,
     PaperSubmissionPlan,
     PaperSubmissionPlanner,
 )
@@ -95,6 +97,26 @@ from trading.persistence.paper_account_journal_codec import (
     encode_paper_account_batch,
     encode_paper_account_settlement,
 )
+
+_SELECT_RUNTIME_CONTROL_FOR_SHARE_SQL = """
+SELECT mode, runtime_generation
+FROM np.paper_runtime_control
+WHERE control_key = TRUE
+FOR SHARE
+"""
+
+_SELECT_RUNTIME_GENERATION_FOR_SHARE_SQL = """
+SELECT
+    runtime_generation,
+    execution_scope,
+    account_key,
+    owner_generation,
+    opening_version,
+    opening_payload_sha256
+FROM np.paper_runtime_generations
+WHERE runtime_generation = %s
+FOR SHARE
+"""
 
 _INSERT_ACCOUNT_SETTLEMENT_SQL = """
 INSERT INTO np.paper_account_settlements (
@@ -199,10 +221,11 @@ INSERT INTO np.paper_account_batch_manifests (
     fill_count,
     batch_version,
     batch_payload,
-    batch_payload_sha256
+    batch_payload_sha256,
+    runtime_generation
 ) VALUES (
     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-    %s, %s, %s::jsonb, %s
+    %s, %s, %s::jsonb, %s, %s
 )
 RETURNING client_order_id
 """
@@ -224,17 +247,25 @@ class _DerivedAccountBatch:
 
 
 class PostgresAtomicPaperAccountOwner:
-    """Commit, replay, or reject one journal and account batch atomically."""
+    """Commit, replay, or reject one pinned-generation account batch atomically."""
 
     def __init__(
         self,
         connection_factory: Callable[[], object],
         planner: PaperSubmissionPlanner,
+        runtime_generation: int,
     ) -> None:
+        if type(runtime_generation) is not int:
+            raise TypeError("runtime_generation must be an integer")
+        if runtime_generation < 1:
+            raise ValueError("runtime_generation must be positive")
+        if runtime_generation > _BIGINT_MAX:
+            raise ValueError("runtime_generation exceeds the durable storage limit")
         self._journal_boundary = PostgresOrderPositionJournal(connection_factory)
         if not callable(getattr(planner, "plan", None)):
             raise TypeError("planner must provide plan(attempt)")
         self._planner = planner
+        self._runtime_generation = runtime_generation
 
     def execute(
         self,
@@ -244,6 +275,8 @@ class PostgresAtomicPaperAccountOwner:
         """Own the complete account-first transaction for one paper batch."""
         if type(context) is not PaperAccountSubmissionContext:
             raise TypeError("context must be a PaperAccountSubmissionContext")
+        if context.runtime_generation > self._runtime_generation:
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
         try:
             encoded_instruction = encode_position_instruction(
                 context.attempt.instruction
@@ -263,6 +296,7 @@ class PostgresAtomicPaperAccountOwner:
             try:
                 with connection.cursor() as cursor:
                     cursor.execute(_WRITE_TRANSACTION_SQL)
+                    self._lock_runtime_control(cursor, context)
                     result = self._execute_locked(
                         cursor,
                         context=context,
@@ -271,6 +305,7 @@ class PostgresAtomicPaperAccountOwner:
             except (
                 JournalConflictError,
                 PaperAccountSubmissionReconciliationRequired,
+                PaperAccountSubmissionRuntimeUnavailable,
             ):
                 raise
             except psycopg2.Error as exc:
@@ -312,7 +347,19 @@ class PostgresAtomicPaperAccountOwner:
         context: PaperAccountSubmissionContext,
         encoded_instruction: object,
     ) -> PaperAccountSubmissionResult:
+        runtime_generation = self._locked_runtime_generation(cursor, context)
         account = self._locked_account(cursor, context)
+        self._require_runtime_generation(
+            runtime_generation,
+            context=context,
+            account=account,
+        )
+        if any(
+            manifest.runtime_generation is None
+            or manifest.runtime_generation > self._runtime_generation
+            for manifest in account.batches
+        ):
+            raise PaperAccountSubmissionReconciliationRequired(context)
         target_manifest = next(
             (
                 manifest
@@ -321,6 +368,16 @@ class PostgresAtomicPaperAccountOwner:
             ),
             None,
         )
+        if (
+            target_manifest is not None
+            and target_manifest.runtime_generation != context.runtime_generation
+        ):
+            raise PaperAccountSubmissionReconciliationRequired(context)
+        if (
+            target_manifest is None
+            and context.runtime_generation != self._runtime_generation
+        ):
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
         replay, existing = self._locked_position(
             cursor,
             context=context,
@@ -404,6 +461,68 @@ class PostgresAtomicPaperAccountOwner:
             encoded_instruction=encoded_instruction,
             disposition=DurableSubmissionDisposition.COMMITTED,
         )
+
+    def _lock_runtime_control(
+        self,
+        cursor: object,
+        context: PaperAccountSubmissionContext,
+    ) -> None:
+        cursor.execute(_SELECT_RUNTIME_CONTROL_FOR_SHARE_SQL)
+        raw = cursor.fetchone()
+        if raw is None:
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
+        try:
+            row = _row(raw, 2, "paper runtime control")
+        except JournalRepositoryError as exc:
+            raise PaperAccountSubmissionRuntimeUnavailable(context) from exc
+        if (
+            type(row[0]) is not str
+            or row[0] != "ACTIVE"
+            or type(row[1]) is not int
+            or row[1] != self._runtime_generation
+        ):
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
+
+    def _locked_runtime_generation(
+        self,
+        cursor: object,
+        context: PaperAccountSubmissionContext,
+    ) -> tuple[object, ...]:
+        cursor.execute(
+            _SELECT_RUNTIME_GENERATION_FOR_SHARE_SQL,
+            (self._runtime_generation,),
+        )
+        raw = cursor.fetchone()
+        if raw is None:
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
+        try:
+            row = _row(raw, 6, "paper runtime generation")
+        except JournalRepositoryError as exc:
+            raise PaperAccountSubmissionRuntimeUnavailable(context) from exc
+        return row
+
+    def _require_runtime_generation(
+        self,
+        row: tuple[object, ...],
+        *,
+        context: PaperAccountSubmissionContext,
+        account: ReplayedPaperAccount,
+    ) -> None:
+        if (
+            type(row[0]) is not int
+            or row[0] != self._runtime_generation
+            or type(row[1]) is not str
+            or row[1] != context.execution_scope
+            or type(row[2]) is not str
+            or row[2] != context.account_key
+            or type(row[3]) is not int
+            or row[3] != account.owner_generation
+            or type(row[4]) is not int
+            or row[4] != 1
+            or type(row[5]) is not str
+            or row[5] != account.opening_payload_sha256
+        ):
+            raise PaperAccountSubmissionRuntimeUnavailable(context)
 
     @staticmethod
     def _locked_account(
@@ -616,6 +735,7 @@ class PostgresAtomicPaperAccountOwner:
             submission_observed_at=plan.submission.observed_at,
             submission_event_payload_sha256=(encoded_events[0][1].event_payload_sha256),
             fills=tuple(batch_fills),
+            runtime_generation=context.runtime_generation,
         )
         return _DerivedAccountBatch(
             plan=plan,
@@ -767,6 +887,7 @@ class PostgresAtomicPaperAccountOwner:
                 encoded_batch.batch_version,
                 encoded_batch.batch_payload,
                 encoded_batch.batch_payload_sha256,
+                encoded_batch.runtime_generation,
             ),
         )
         inserted_batch = cursor.fetchone()
@@ -961,6 +1082,7 @@ class PostgresAtomicPaperAccountOwner:
         if (
             manifest.execution_scope != context.execution_scope
             or manifest.account_key != context.account_key
+            or manifest.runtime_generation != context.runtime_generation
             or manifest.position_key != encoded_instruction.position_key
             or manifest.instruction_payload_sha256
             != encoded_instruction.instruction_payload_sha256

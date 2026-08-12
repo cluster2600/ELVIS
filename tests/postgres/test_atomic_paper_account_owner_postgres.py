@@ -1,9 +1,11 @@
 """PostgreSQL 15 proofs for the atomic paper-account submission owner."""
 
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 
 import psycopg2
 import pytest
@@ -14,6 +16,7 @@ from trading.application.durable_submission import (
     PaperAccountSubmissionContext,
     PaperAccountSubmissionReconciliationRequired,
     PaperAccountSubmissionRejected,
+    PaperAccountSubmissionRuntimeUnavailable,
     PaperPlannedFill,
     PaperSubmissionPlan,
     SubmissionAttemptContext,
@@ -49,6 +52,7 @@ NOW = datetime(2026, 8, 12, 12, 0, 0, 123456, tzinfo=timezone.utc)
 FIRST_QUANTITY = Decimal("0.40000000000000000001")
 SECOND_QUANTITY = Decimal("0.59999999999999999999")
 INSTRUMENT = PaperLinearInstrument("BTCUSDT", "BTC", "USDT")
+RUNTIME_GENERATION = 1
 
 _SNAPSHOT_TABLES = (
     "position_streams",
@@ -60,6 +64,8 @@ _SNAPSHOT_TABLES = (
     "paper_account_batch_manifests",
     "paper_account_settlements",
     "paper_account_postings",
+    "paper_runtime_control",
+    "paper_runtime_generations",
     "trades",
     "open_positions",
     "liquidations",
@@ -105,13 +111,23 @@ def _instruction(
     )
 
 
-def _context(*, account_key=ACCOUNT_KEY, instruction=None):
+def _context(
+    *,
+    account_key=ACCOUNT_KEY,
+    instruction=None,
+    runtime_generation=RUNTIME_GENERATION,
+):
     attempt = SubmissionAttemptContext.first(
         instruction or _instruction(),
         SCOPE,
         NOW,
     )
-    return PaperAccountSubmissionContext(attempt, account_key, INSTRUMENT)
+    return PaperAccountSubmissionContext(
+        attempt,
+        account_key,
+        INSTRUMENT,
+        runtime_generation,
+    )
 
 
 def _fill(attempt, *, trade_id, quantity, seconds):
@@ -181,6 +197,20 @@ class _ExplodingPlanner:
         raise AssertionError("planner must not run")
 
 
+class _BlockingPlanner(_CountingPlanner):
+    def __init__(self):
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+
+    def plan(self, attempt, /):
+        with self._lock:
+            self.calls.append(attempt)
+        self.entered.set()
+        assert self.release.wait(timeout=10)
+        return _plan(attempt)
+
+
 def _opening(account_key=ACCOUNT_KEY, *, available=Decimal("100.00")):
     return new_paper_account(
         PaperAccountPolicy(account_key, "USDT", Decimal("0.01")),
@@ -188,12 +218,60 @@ def _opening(account_key=ACCOUNT_KEY, *, available=Decimal("100.00")):
     )
 
 
-def _provision(dsn, account_key=ACCOUNT_KEY, *, available=Decimal("100.00")):
-    return PostgresPaperAccountJournal(lambda: _connect(dsn)).provision_account(
+def _activate(dsn, opening, runtime_generation=RUNTIME_GENERATION):
+    connection = _connect(dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO np.paper_runtime_generations (
+                    runtime_generation,
+                    activation_id,
+                    execution_scope,
+                    account_key,
+                    owner_generation,
+                    opening_version,
+                    opening_payload_sha256
+                ) VALUES (%s, %s, %s, %s, %s, 1, %s)
+                """,
+                (
+                    runtime_generation,
+                    f"atomic-activation-{runtime_generation}",
+                    opening.execution_scope,
+                    opening.account.policy.account_key,
+                    opening.owner_generation,
+                    opening.current.opening_payload_sha256,
+                ),
+            )
+            cursor.execute(
+                """
+                UPDATE np.paper_runtime_control
+                SET mode = 'ACTIVE', runtime_generation = %s
+                WHERE control_key
+                """,
+                (runtime_generation,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _provision(
+    dsn,
+    account_key=ACCOUNT_KEY,
+    *,
+    available=Decimal("100.00"),
+    runtime_generation=RUNTIME_GENERATION,
+    activate=True,
+):
+    opening = PostgresPaperAccountJournal(lambda: _connect(dsn)).provision_account(
         execution_scope=SCOPE,
         owner_generation=7,
         account=_opening(account_key, available=available),
     )
+    if activate:
+        _activate(dsn, opening, runtime_generation)
+    return opening
 
 
 class _TracingCursor:
@@ -322,10 +400,17 @@ class _MutationFailureFactory:
         return self.connection
 
 
-def _owner(dsn, planner, factory=None):
+def _owner(
+    dsn,
+    planner,
+    factory=None,
+    *,
+    runtime_generation=RUNTIME_GENERATION,
+):
     return PostgresAtomicPaperAccountOwner(
         factory or (lambda: _connect(dsn)),
         planner,
+        runtime_generation,
     )
 
 
@@ -352,6 +437,62 @@ def _relation_count(dsn, relation):
         with connection.cursor() as cursor:
             cursor.execute(f"SELECT count(*) FROM np.{relation}")
             return cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+
+def _has_dml(statements):
+    return any(
+        statement.upper().startswith(("INSERT ", "UPDATE ", "DELETE "))
+        for statement in statements
+    )
+
+
+def _rewrite_manifest_generation(dsn, runtime_generation):
+    connection = _connect(dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT batch_payload
+                FROM np.paper_account_batch_manifests
+                WHERE account_key = %s
+                """,
+                (ACCOUNT_KEY,),
+            )
+            payload = cursor.fetchone()[0]
+            if runtime_generation is None:
+                payload.pop("runtime_generation")
+                batch_version = 1
+            else:
+                payload["runtime_generation"] = runtime_generation
+                batch_version = 2
+            payload_text = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+            payload_sha = hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+            cursor.execute(
+                """
+                UPDATE np.paper_account_batch_manifests
+                SET batch_version = %s,
+                    batch_payload = %s::jsonb,
+                    batch_payload_sha256 = %s,
+                    runtime_generation = %s
+                WHERE account_key = %s
+                """,
+                (
+                    batch_version,
+                    payload_text,
+                    payload_sha,
+                    runtime_generation,
+                    ACCOUNT_KEY,
+                ),
+            )
+        connection.commit()
     finally:
         connection.close()
 
@@ -406,12 +547,43 @@ def test_two_fill_batch_commits_every_account_and_position_fact_then_replays(
         lambda: _connect(migrated_postgres_dsn)
     ).replay_account(execution_scope=SCOPE, account_key=ACCOUNT_KEY)
     assert len(account.batches) == 1
+    assert account.batches[0].runtime_generation == RUNTIME_GENERATION
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT batch_version, runtime_generation,
+                       batch_payload ->> 'runtime_generation'
+                FROM np.paper_account_batch_manifests
+                WHERE account_key = %s AND client_order_id = %s
+                """,
+                (ACCOUNT_KEY, context.client_order_id),
+            )
+            assert cursor.fetchone() == (2, RUNTIME_GENERATION, "1")
+    finally:
+        connection.close()
     assert tuple(record.account_version for record in account.account.records) == (1, 2)
     assert tuple(
         record.settlement.record.position_version for record in account.account.records
     ) == (2, 3)
 
     normalized = tuple(statement.upper() for statement in statements)
+    transaction_start = next(
+        index
+        for index, statement in enumerate(normalized)
+        if statement.startswith("SET TRANSACTION")
+    )
+    runtime_control_lock = next(
+        index
+        for index, statement in enumerate(normalized)
+        if "FROM NP.PAPER_RUNTIME_CONTROL" in statement and "FOR SHARE" in statement
+    )
+    runtime_generation_lock = next(
+        index
+        for index, statement in enumerate(normalized)
+        if "FROM NP.PAPER_RUNTIME_GENERATIONS" in statement and "FOR SHARE" in statement
+    )
     account_lock = next(
         index
         for index, statement in enumerate(normalized)
@@ -422,7 +594,13 @@ def test_two_fill_batch_commits_every_account_and_position_fact_then_replays(
         for index, statement in enumerate(normalized)
         if "NP.POSITION_STREAMS" in statement
     )
-    assert account_lock < position_touch
+    assert (
+        transaction_start
+        < runtime_control_lock
+        < runtime_generation_lock
+        < account_lock
+        < position_touch
+    )
     assert any(statement == "SET CONSTRAINTS ALL IMMEDIATE" for statement in normalized)
     assert all(
         "SET CONSTRAINTS ALL DEFERRED" not in statement for statement in normalized
@@ -457,6 +635,7 @@ def test_rejection_on_second_fill_rolls_back_every_candidate_fact(
 def test_unprovisioned_account_requires_reconciliation_without_planning_or_dml(
     migrated_postgres_dsn,
 ):
+    _provision(migrated_postgres_dsn, "other-account")
     context = _context()
     planner = _ExplodingPlanner()
     statements = []
@@ -472,6 +651,129 @@ def test_unprovisioned_account_requires_reconciliation_without_planning_or_dml(
         statement.upper().startswith(("INSERT ", "UPDATE ", "DELETE "))
         for statement in statements
     )
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+@pytest.mark.parametrize("mode", ("LEGACY", "SHADOW", "PAUSED"))
+def test_nonactive_runtime_is_unavailable_before_planner_or_dml(
+    migrated_postgres_dsn,
+    mode,
+):
+    _provision(migrated_postgres_dsn, activate=False)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE np.paper_runtime_control
+                SET mode = %s, runtime_generation = 0
+                WHERE control_key
+                """,
+                (mode,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    context = _context()
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+        ).execute(context)
+
+    assert unavailable.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+def test_active_control_without_pinned_epoch_is_unavailable_before_planner_or_dml(
+    migrated_postgres_dsn,
+):
+    _provision(migrated_postgres_dsn, activate=False)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                UPDATE np.paper_runtime_control
+                SET mode = 'ACTIVE', runtime_generation = 1
+                WHERE control_key
+                """)
+        connection.commit()
+    finally:
+        connection.close()
+    context = _context()
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+        ).execute(context)
+
+    assert unavailable.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+def test_missing_runtime_control_is_unavailable_before_planner_or_dml(
+    migrated_postgres_dsn,
+):
+    _provision(migrated_postgres_dsn, activate=False)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM np.paper_runtime_control")
+        connection.commit()
+    finally:
+        connection.close()
+    context = _context()
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+        ).execute(context)
+
+    assert unavailable.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+def test_epoch_for_another_opening_is_unavailable_before_planner_or_dml(
+    migrated_postgres_dsn,
+):
+    _provision(migrated_postgres_dsn, activate=False)
+    _provision(migrated_postgres_dsn, "other-account")
+    context = _context()
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+        ).execute(context)
+
+    assert unavailable.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
     assert _snapshot(migrated_postgres_dsn) == before
 
 
@@ -499,6 +801,53 @@ def test_concurrent_exact_calls_commit_once_replay_once_and_plan_once(
     assert planner.calls == [context.attempt]
     assert _relation_count(migrated_postgres_dsn, "paper_account_batch_manifests") == 1
     assert _relation_count(migrated_postgres_dsn, "paper_account_settlements") == 2
+
+
+def test_runtime_control_transition_waits_for_owner_share_lock_until_commit(
+    migrated_postgres_dsn,
+):
+    _provision(migrated_postgres_dsn)
+    planner = _BlockingPlanner()
+    context = _context()
+    owner = _owner(migrated_postgres_dsn, planner)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(owner.execute, context)
+        assert planner.entered.wait(timeout=10)
+
+        transition = _connect(migrated_postgres_dsn)
+        try:
+            with transition.cursor() as cursor:
+                cursor.execute("SET LOCAL lock_timeout = '250ms'")
+                with pytest.raises(psycopg2.Error) as blocked:
+                    cursor.execute("""
+                        UPDATE np.paper_runtime_control
+                        SET mode = 'PAUSED'
+                        WHERE control_key
+                        """)
+                assert blocked.value.pgcode == "55P03"
+            transition.rollback()
+            assert future.done() is False
+
+            planner.release.set()
+            committed = future.result(timeout=20)
+            assert committed.disposition is DurableSubmissionDisposition.COMMITTED
+
+            with transition.cursor() as cursor:
+                cursor.execute("SET LOCAL lock_timeout = '1s'")
+                cursor.execute("""
+                    UPDATE np.paper_runtime_control
+                    SET mode = 'PAUSED'
+                    WHERE control_key
+                    RETURNING mode
+                    """)
+                assert cursor.fetchone() == ("PAUSED",)
+            transition.rollback()
+        finally:
+            planner.release.set()
+            transition.close()
+
+    assert planner.calls == [context.attempt]
 
 
 def test_account_lock_serializes_collateral_across_distinct_positions(
@@ -662,6 +1011,7 @@ def test_manifest_instrument_mismatch_requires_reconciliation_without_dml(
         committed.attempt,
         ACCOUNT_KEY,
         PaperLinearInstrument("BTCUSDT", "XBT", "USDT"),
+        RUNTIME_GENERATION,
     )
     planner = _ExplodingPlanner()
     statements = []
@@ -680,7 +1030,113 @@ def test_manifest_instrument_mismatch_requires_reconciliation_without_dml(
     assert _snapshot(migrated_postgres_dsn) == before
 
 
-def test_failure_after_every_sql_mutation_rolls_back_all_sixteen_relations(
+@pytest.mark.parametrize("history", ("v1", "wrong_generation"))
+def test_v1_or_wrong_generation_manifest_requires_reconciliation_without_dml(
+    migrated_postgres_dsn,
+    history,
+):
+    opening = _provision(migrated_postgres_dsn)
+    context = _context()
+    _owner(migrated_postgres_dsn, _CountingPlanner()).execute(context)
+    owner_generation = RUNTIME_GENERATION
+    if history == "v1":
+        _rewrite_manifest_generation(migrated_postgres_dsn, None)
+    else:
+        owner_generation = 2
+        _activate(migrated_postgres_dsn, opening, owner_generation)
+        _rewrite_manifest_generation(migrated_postgres_dsn, owner_generation)
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionReconciliationRequired) as required:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+            runtime_generation=owner_generation,
+        ).execute(context)
+
+    assert required.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+def test_rollover_allows_exact_old_generation_replay_but_not_a_new_old_attempt(
+    migrated_postgres_dsn,
+):
+    opening = _provision(migrated_postgres_dsn)
+    old_context = _context()
+    _owner(migrated_postgres_dsn, _CountingPlanner()).execute(old_context)
+    _activate(migrated_postgres_dsn, opening, 2)
+
+    replay_planner = _ExplodingPlanner()
+    replay_statements = []
+    before_replay = _snapshot(migrated_postgres_dsn)
+    replayed = _owner(
+        migrated_postgres_dsn,
+        replay_planner,
+        _TrackingFactory(migrated_postgres_dsn, statements=replay_statements),
+        runtime_generation=2,
+    ).execute(old_context)
+
+    assert replayed.disposition is DurableSubmissionDisposition.REPLAYED
+    assert replayed.context is old_context
+    assert replayed.context.runtime_generation == 1
+    assert replay_planner.calls == []
+    assert not _has_dml(replay_statements)
+    assert _snapshot(migrated_postgres_dsn) == before_replay
+
+    stale_context = _context(
+        runtime_generation=1,
+        instruction=_instruction(
+            client_order_id="stale-new-order",
+            decision_id="stale-new-decision",
+            position_key="stale-new-position",
+        ),
+    )
+    stale_planner = _ExplodingPlanner()
+    stale_statements = []
+    before_stale = _snapshot(migrated_postgres_dsn)
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            stale_planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=stale_statements),
+            runtime_generation=2,
+        ).execute(stale_context)
+
+    assert unavailable.value.context is stale_context
+    assert stale_planner.calls == []
+    assert not _has_dml(stale_statements)
+    assert _snapshot(migrated_postgres_dsn) == before_stale
+
+
+def test_old_pinned_owner_is_unavailable_after_control_rollover_without_dml(
+    migrated_postgres_dsn,
+):
+    opening = _provision(migrated_postgres_dsn)
+    _activate(migrated_postgres_dsn, opening, 2)
+    context = _context()
+    planner = _ExplodingPlanner()
+    statements = []
+    before = _snapshot(migrated_postgres_dsn)
+
+    with pytest.raises(PaperAccountSubmissionRuntimeUnavailable) as unavailable:
+        _owner(
+            migrated_postgres_dsn,
+            planner,
+            _TrackingFactory(migrated_postgres_dsn, statements=statements),
+        ).execute(context)
+
+    assert unavailable.value.context is context
+    assert planner.calls == []
+    assert not _has_dml(statements)
+    assert _snapshot(migrated_postgres_dsn) == before
+
+
+def test_failure_after_every_sql_mutation_rolls_back_all_snapshotted_relations(
     migrated_postgres_dsn,
 ):
     probe_key = "mutation-probe"
@@ -704,10 +1160,16 @@ def test_failure_after_every_sql_mutation_rolls_back_all_sixteen_relations(
     assert mutation_count >= 12
 
     for fail_after in range(1, mutation_count + 1):
+        runtime_generation = fail_after + 1
         account_key = f"fault-account-{fail_after}"
-        _provision(migrated_postgres_dsn, account_key)
+        _provision(
+            migrated_postgres_dsn,
+            account_key,
+            runtime_generation=runtime_generation,
+        )
         context = _context(
             account_key=account_key,
+            runtime_generation=runtime_generation,
             instruction=_instruction(
                 client_order_id=f"fault-order-{fail_after}",
                 decision_id=f"fault-decision-{fail_after}",
@@ -718,7 +1180,12 @@ def test_failure_after_every_sql_mutation_rolls_back_all_sixteen_relations(
         factory = _MutationFailureFactory(migrated_postgres_dsn, fail_after)
 
         with pytest.raises(PaperAccountStorageError) as failure:
-            _owner(migrated_postgres_dsn, _CountingPlanner(), factory).execute(context)
+            _owner(
+                migrated_postgres_dsn,
+                _CountingPlanner(),
+                factory,
+                runtime_generation=runtime_generation,
+            ).execute(context)
 
         assert isinstance(failure.value.__cause__, RuntimeError)
         assert factory.connection is not None
@@ -732,7 +1199,7 @@ def test_failure_after_every_sql_mutation_rolls_back_all_sixteen_relations(
 def test_commit_acknowledgement_loss_is_unknown_then_exact_replay(
     migrated_postgres_dsn,
 ):
-    _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn)
     context = _context()
     planner = _CountingPlanner()
     factory = _TrackingFactory(
@@ -746,11 +1213,22 @@ def test_commit_acknowledgement_loss_is_unknown_then_exact_replay(
     assert unknown.value.context is context
     assert isinstance(unknown.value.__cause__, psycopg2.OperationalError)
     assert planner.calls == [context.attempt]
+    _activate(migrated_postgres_dsn, opening, 2)
     replay_planner = _ExplodingPlanner()
-    replayed = _owner(migrated_postgres_dsn, replay_planner).execute(context)
+    replay_statements = []
+    before_replay = _snapshot(migrated_postgres_dsn)
+    replayed = _owner(
+        migrated_postgres_dsn,
+        replay_planner,
+        _TrackingFactory(migrated_postgres_dsn, statements=replay_statements),
+        runtime_generation=2,
+    ).execute(context)
     assert replayed.disposition is DurableSubmissionDisposition.REPLAYED
     assert replayed.account_versions == (1, 2)
+    assert replayed.context.runtime_generation == 1
     assert replay_planner.calls == []
+    assert not _has_dml(replay_statements)
+    assert _snapshot(migrated_postgres_dsn) == before_replay
 
 
 def test_owner_never_queries_or_mutates_legacy_tables(migrated_postgres_dsn):
@@ -782,5 +1260,5 @@ def test_owner_never_queries_or_mutates_legacy_tables(migrated_postgres_dsn):
     after = _snapshot(migrated_postgres_dsn)
     before_by_table = dict(before)
     after_by_table = dict(after)
-    for table in _SNAPSHOT_TABLES[9:]:
+    for table in _SNAPSHOT_TABLES[11:]:
         assert after_by_table[table] == before_by_table[table] == ()
