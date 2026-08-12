@@ -162,13 +162,15 @@ def test_generation_schema_is_exact_and_fresh_database_has_no_epoch(
             assert _runtime_generation_catalog_is_exact(cursor) is True
             cursor.execute("SELECT COUNT(*) FROM np.paper_runtime_generations")
             assert cursor.fetchone() == (0,)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT ordinal_position, column_name, udt_name, is_nullable
                 FROM information_schema.columns
                 WHERE table_schema = 'np'
                   AND table_name = 'paper_account_batch_manifests'
                   AND column_name = 'runtime_generation'
-                """)
+                """
+            )
             assert cursor.fetchall() == [(22, "runtime_generation", "int8", "YES")]
     finally:
         connection.rollback()
@@ -185,21 +187,25 @@ def test_version_four_upgrade_preserves_v1_payload_hash_and_null_generation(
         with connection.cursor() as cursor:
             _insert_opening(cursor)
             _insert_legacy_manifest_without_external_refs(cursor)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT batch_version, batch_payload::text,
                        batch_payload_sha256::text
                 FROM np.paper_account_batch_manifests
-                """)
+                """
+            )
             before = cursor.fetchone()
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (5,)
+        assert apply_migrations(connection, migrations) == (5, 6)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT batch_version, batch_payload::text,
                        batch_payload_sha256::text, runtime_generation
                 FROM np.paper_account_batch_manifests
-                """)
+                """
+            )
             after = cursor.fetchone()
             cursor.execute("SELECT COUNT(*) FROM np.paper_runtime_generations")
             assert cursor.fetchone() == (0,)
@@ -316,20 +322,24 @@ def test_generation_registry_is_append_only_and_failed_mutations_leave_no_delta(
         with connection.cursor() as cursor:
             _insert_opening(cursor)
             _insert_epoch(cursor)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT runtime_generation, activation_id, activated_at
                 FROM np.paper_runtime_generations
-                """)
+                """
+            )
             before = cursor.fetchall()
             cursor.execute("SAVEPOINT before_forbidden_mutation")
             with pytest.raises(psycopg2.Error) as raised:
                 cursor.execute(mutation)
             assert raised.value.pgcode == sqlstate
             cursor.execute("ROLLBACK TO SAVEPOINT before_forbidden_mutation")
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT runtime_generation, activation_id, activated_at
                 FROM np.paper_runtime_generations
-                """)
+                """
+            )
             assert cursor.fetchall() == before
     finally:
         connection.rollback()
@@ -389,10 +399,12 @@ def test_manifest_version_generation_check_has_no_v2_null_gap(
             _insert_legacy_manifest_without_external_refs(cursor)
 
             with pytest.raises(psycopg2.Error) as raised:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE np.paper_account_batch_manifests
                     SET batch_version = 2, runtime_generation = NULL
-                    """)
+                    """
+                )
             assert raised.value.pgcode == "23514"
             connection.rollback()
     finally:
@@ -410,14 +422,18 @@ def test_manifest_generation_fk_binds_the_complete_opening_identity(
             _insert_epoch(cursor)
             _insert_order_ack(cursor)
             _insert_legacy_manifest_without_external_refs(cursor)
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE np.paper_account_batch_manifests
                 SET batch_version = 2, runtime_generation = 1
-                """)
-            cursor.execute("""
+                """
+            )
+            cursor.execute(
+                """
                 SELECT batch_version, runtime_generation
                 FROM np.paper_account_batch_manifests
-                """)
+                """
+            )
             assert cursor.fetchone() == (2, 1)
 
             _insert_opening(cursor, account="paper-other")
@@ -428,10 +444,12 @@ def test_manifest_generation_fk_binds_the_complete_opening_identity(
                 account="paper-other",
             )
             with pytest.raises(psycopg2.Error) as raised:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE np.paper_account_batch_manifests
                     SET runtime_generation = 2
-                    """)
+                    """
+                )
             assert raised.value.pgcode == "23503"
     finally:
         connection.rollback()
@@ -445,10 +463,12 @@ def test_readiness_catalog_rejects_manifest_generation_check_tamper(
     try:
         with connection.cursor() as cursor:
             assert _runtime_generation_catalog_is_exact(cursor) is True
-            cursor.execute("""
+            cursor.execute(
+                """
                 ALTER TABLE np.paper_account_batch_manifests
                 DROP CONSTRAINT paper_account_batch_manifests_version_known
-                """)
+                """
+            )
             assert _runtime_generation_catalog_is_exact(cursor) is False
     finally:
         connection.rollback()

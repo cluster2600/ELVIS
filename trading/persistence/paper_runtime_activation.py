@@ -28,36 +28,13 @@ from trading.persistence.paper_account_readiness import (
     _runtime_generation_evidence_is_exact,
 )
 
-_ACTIVATION_TRANSACTION_SQL = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+_ACTIVATION_TRANSACTION_SQL = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
 _SET_LOCK_TIMEOUT_SQL = "SET LOCAL lock_timeout = '1s'"
-_LOCK_AUTHORITY_TABLES_SQL = """
-LOCK TABLE
-    ONLY np.account_balances,
-    ONLY np.liquidations,
-    ONLY np.margin_history,
-    ONLY np.model_predictions,
-    ONLY np.open_positions,
-    ONLY np.order_events,
-    ONLY np.orders,
-    ONLY np.paper_account_balances,
-    ONLY np.paper_account_batch_manifests,
-    ONLY np.paper_account_postings,
-    ONLY np.paper_account_settlements,
-    ONLY np.paper_account_streams,
-    ONLY np.paper_margin_reservations,
-    ONLY np.paper_runtime_control,
-    ONLY np.paper_runtime_generations,
-    ONLY np.position_streams,
-    ONLY np.schema_migrations,
-    ONLY np.trades,
-    ONLY np.trading_session_resets
-IN SHARE MODE NOWAIT
-"""
-_SELECT_RUNTIME_CONTROL_FOR_UPDATE_SQL = """
+_ACQUIRE_ACTIVATION_FENCE_SQL = "SELECT np.acquire_paper_runtime_activation_fence()"
+_SELECT_RUNTIME_CONTROL_SQL = """
 SELECT mode, runtime_generation
 FROM np.paper_runtime_control
 WHERE control_key = TRUE
-FOR UPDATE NOWAIT
 """
 _SELECT_ACTIVATION_ID_SQL = """
 SELECT
@@ -71,33 +48,14 @@ SELECT
 FROM np.paper_runtime_generations
 WHERE activation_id = %s
 """
-_INSERT_RUNTIME_GENERATION_SQL = """
-INSERT INTO np.paper_runtime_generations (
-    runtime_generation,
-    activation_id,
-    execution_scope,
-    account_key,
-    owner_generation,
-    opening_version,
-    opening_payload_sha256
-) VALUES (%s, %s, %s, %s, %s, 1, %s)
-RETURNING runtime_generation
-"""
-_ACTIVATE_RUNTIME_CONTROL_SQL = """
-UPDATE np.paper_runtime_control
-SET
-    mode = 'ACTIVE',
-    runtime_generation = %s,
-    updated_at = clock_timestamp()
-WHERE control_key = TRUE
-  AND mode = %s
-  AND runtime_generation = %s
-RETURNING mode, runtime_generation
+_ACTIVATE_RUNTIME_GENERATION_SQL = """
+SELECT mode, runtime_generation
+FROM np.activate_paper_runtime_generation(%s, %s, %s, %s, %s, %s, %s, %s)
 """
 _CHECK_CONSTRAINTS_SQL = "SET CONSTRAINTS ALL IMMEDIATE"
 
 _BUSY_SQLSTATES = frozenset({"40P01", "55P03"})
-_UNIQUE_VIOLATION_SQLSTATE = "23505"
+_CONFLICT_SQLSTATES = frozenset({"23505", "PT001"})
 _RUNTIME_CONTROL_MODES = frozenset({"LEGACY", "SHADOW", "PAUSED", "ACTIVE"})
 _POSTGRES_BIGINT_MAX = (1 << 63) - 1
 
@@ -115,7 +73,7 @@ def _row(value: object, length: int, source: str) -> tuple[object, ...]:
 
 
 class PostgresPaperRuntimeActivation:
-    """Activate or replay one epoch under the complete dormant lock boundary."""
+    """Activate or replay one epoch through dormant database capabilities."""
 
     def __init__(self, connection_factory: Callable[[], object]) -> None:
         self._journal_boundary = PostgresOrderPositionJournal(connection_factory)
@@ -140,12 +98,12 @@ class PostgresPaperRuntimeActivation:
                 with connection.cursor() as cursor:
                     cursor.execute(_ACTIVATION_TRANSACTION_SQL)
                     cursor.execute(_SET_LOCK_TIMEOUT_SQL)
-                    cursor.execute(_LOCK_AUTHORITY_TABLES_SQL)
+                    cursor.execute(_ACQUIRE_ACTIVATION_FENCE_SQL)
                     result: PaperRuntimeActivationResult | None = None
                     if not _activation_catalog_is_authoritative(cursor):
                         result = self._blocked_assessment(cursor, context)
                     else:
-                        control = self._locked_control(cursor)
+                        control = self._runtime_control(cursor)
                         if control is None or not (
                             _activation_catalog_is_authoritative(cursor)
                         ):
@@ -165,7 +123,7 @@ class PostgresPaperRuntimeActivation:
                                 cursor,
                                 context=context.readiness,
                                 required_runtime_mode=context.source.value,
-                                lock_replayed_state=True,
+                                lock_replayed_state=False,
                             )
                             if assessment.disposition is not (
                                 PaperAccountReadinessDisposition.PREPARED_FOR_FENCE
@@ -188,7 +146,7 @@ class PostgresPaperRuntimeActivation:
             except psycopg2.Error as exc:
                 if getattr(exc, "pgcode", None) in _BUSY_SQLSTATES:
                     raise PaperRuntimeActivationBusy(context) from exc
-                if getattr(exc, "pgcode", None) == _UNIQUE_VIOLATION_SQLSTATE:
+                if getattr(exc, "pgcode", None) in _CONFLICT_SQLSTATES:
                     raise PaperRuntimeActivationConflict(context) from exc
                 raise PaperRuntimeActivationStorageError(
                     "PostgreSQL rejected the paper runtime activation"
@@ -234,7 +192,7 @@ class PostgresPaperRuntimeActivation:
             cursor,
             context=context.readiness,
             required_runtime_mode=context.source.value,
-            lock_replayed_state=True,
+            lock_replayed_state=False,
         )
         if (
             assessment.disposition
@@ -246,8 +204,8 @@ class PostgresPaperRuntimeActivation:
         return PaperRuntimeActivationBlocked(context, assessment)
 
     @staticmethod
-    def _locked_control(cursor: object) -> tuple[object, ...] | None:
-        cursor.execute(_SELECT_RUNTIME_CONTROL_FOR_UPDATE_SQL)
+    def _runtime_control(cursor: object) -> tuple[object, ...] | None:
+        cursor.execute(_SELECT_RUNTIME_CONTROL_SQL)
         raw = cursor.fetchone()
         if not isinstance(raw, (tuple, list)) or len(raw) != 2:
             return None
@@ -331,8 +289,10 @@ class PostgresPaperRuntimeActivation:
         readiness = context.readiness
         target = context.target_runtime_generation
         cursor.execute(
-            _INSERT_RUNTIME_GENERATION_SQL,
+            _ACTIVATE_RUNTIME_GENERATION_SQL,
             (
+                context.source.value,
+                context.expected_runtime_generation,
                 target,
                 context.activation_id,
                 readiness.execution_scope,
@@ -341,26 +301,11 @@ class PostgresPaperRuntimeActivation:
                 readiness.opening_payload_sha256,
             ),
         )
-        inserted = cursor.fetchone()
-        if (
-            inserted is None
-            or _row(inserted, 1, "inserted runtime generation")[0] != target
-        ):
-            raise PaperRuntimeActivationStorageError(
-                "paper runtime generation was not inserted"
-            )
-
-        cursor.execute(
-            _ACTIVATE_RUNTIME_CONTROL_SQL,
-            (
-                target,
-                context.source.value,
-                context.expected_runtime_generation,
-            ),
-        )
         activated = cursor.fetchone()
         if activated is None:
-            raise PaperRuntimeActivationConflict(context)
+            raise PaperRuntimeActivationStorageError(
+                "paper runtime activation capability returned no result"
+            )
         activated_row = _row(activated, 2, "activated runtime control")
         if activated_row != ("ACTIVE", target):
             raise PaperRuntimeActivationStorageError(

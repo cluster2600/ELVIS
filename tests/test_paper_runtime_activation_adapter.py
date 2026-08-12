@@ -8,13 +8,12 @@ import pytest
 
 from tests.test_paper_runtime_activation import _context
 from trading.persistence.paper_runtime_activation import (
-    _ACTIVATE_RUNTIME_CONTROL_SQL,
+    _ACQUIRE_ACTIVATION_FENCE_SQL,
+    _ACTIVATE_RUNTIME_GENERATION_SQL,
     _ACTIVATION_TRANSACTION_SQL,
     _CHECK_CONSTRAINTS_SQL,
-    _INSERT_RUNTIME_GENERATION_SQL,
-    _LOCK_AUTHORITY_TABLES_SQL,
     _SELECT_ACTIVATION_ID_SQL,
-    _SELECT_RUNTIME_CONTROL_FOR_UPDATE_SQL,
+    _SELECT_RUNTIME_CONTROL_SQL,
     _SET_LOCK_TIMEOUT_SQL,
     PaperRuntimeActivationStorageError,
     PostgresPaperRuntimeActivation,
@@ -53,43 +52,26 @@ def test_connection_failure_uses_activation_storage_boundary() -> None:
     assert isinstance(failure.value.__cause__, Exception)
 
 
-def test_activation_sql_has_exact_lock_order_and_cas_shape() -> None:
-    assert _ACTIVATION_TRANSACTION_SQL == (
-        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+def test_activation_sql_delegates_fence_and_mutation_to_exact_capabilities() -> None:
+    assert (
+        _ACTIVATION_TRANSACTION_SQL == "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
     )
     assert _SET_LOCK_TIMEOUT_SQL == "SET LOCAL lock_timeout = '1s'"
-    assert " ".join(_LOCK_AUTHORITY_TABLES_SQL.split()) == (
-        "LOCK TABLE ONLY np.account_balances, ONLY np.liquidations, "
-        "ONLY np.margin_history, ONLY np.model_predictions, "
-        "ONLY np.open_positions, ONLY np.order_events, ONLY np.orders, "
-        "ONLY np.paper_account_balances, ONLY np.paper_account_batch_manifests, "
-        "ONLY np.paper_account_postings, ONLY np.paper_account_settlements, "
-        "ONLY np.paper_account_streams, ONLY np.paper_margin_reservations, "
-        "ONLY np.paper_runtime_control, ONLY np.paper_runtime_generations, "
-        "ONLY np.position_streams, ONLY np.schema_migrations, ONLY np.trades, "
-        "ONLY np.trading_session_resets "
-        "IN SHARE MODE NOWAIT"
+    assert _ACQUIRE_ACTIVATION_FENCE_SQL == (
+        "SELECT np.acquire_paper_runtime_activation_fence()"
     )
-    assert " ".join(_SELECT_RUNTIME_CONTROL_FOR_UPDATE_SQL.split()) == (
+    assert " ".join(_SELECT_RUNTIME_CONTROL_SQL.split()) == (
         "SELECT mode, runtime_generation FROM np.paper_runtime_control "
-        "WHERE control_key = TRUE FOR UPDATE NOWAIT"
+        "WHERE control_key = TRUE"
     )
     assert " ".join(_SELECT_ACTIVATION_ID_SQL.split()) == (
         "SELECT runtime_generation, activation_id, execution_scope, account_key, "
         "owner_generation, opening_version, opening_payload_sha256 FROM "
         "np.paper_runtime_generations WHERE activation_id = %s"
     )
-    assert " ".join(_INSERT_RUNTIME_GENERATION_SQL.split()) == (
-        "INSERT INTO np.paper_runtime_generations ( runtime_generation, "
-        "activation_id, execution_scope, account_key, owner_generation, "
-        "opening_version, opening_payload_sha256 ) VALUES "
-        "(%s, %s, %s, %s, %s, 1, %s) RETURNING runtime_generation"
-    )
-    assert " ".join(_ACTIVATE_RUNTIME_CONTROL_SQL.split()) == (
-        "UPDATE np.paper_runtime_control SET mode = 'ACTIVE', "
-        "runtime_generation = %s, updated_at = clock_timestamp() "
-        "WHERE control_key = TRUE AND mode = %s AND runtime_generation = %s "
-        "RETURNING mode, runtime_generation"
+    assert " ".join(_ACTIVATE_RUNTIME_GENERATION_SQL.split()) == (
+        "SELECT mode, runtime_generation FROM "
+        "np.activate_paper_runtime_generation(%s, %s, %s, %s, %s, %s, %s, %s)"
     )
     assert _CHECK_CONSTRAINTS_SQL == "SET CONSTRAINTS ALL IMMEDIATE"
 

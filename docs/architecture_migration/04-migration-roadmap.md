@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b3 dormant locked activation boundary implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c1 dormant activation capabilities implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4006,6 +4006,92 @@ exact repository-consumer allowlist update in
 an intentional consumer of the order/position journal internals, not a runtime
 composition consumer. Black, isort, flake8, Python 3.10 compilation, and
 `git diff --check` were green.
+
+### M9b.14c1 dormant activation database capabilities
+
+M9b.14c1 adds forward migration
+`0006_paper_runtime_activation_capabilities.sql`. Its immutable SHA-256 is
+`e01c02d1e64b8b136e80dcf2fe365dc85df72d4e1cfa58a8a13b14e4b3f6449d`.
+Applying it creates no epoch, changes no control mode, assigns no role or
+credential, and exposes no production entrypoint. It creates only two narrowly
+callable `SECURITY DEFINER` functions, fixes both search paths to `pg_catalog`,
+and executes `REVOKE ALL ... FROM PUBLIC` for both signatures.
+
+`np.acquire_paper_runtime_activation_fence()` returns `void`. It acquires the
+M9b.14b3 authority fence on the exact nineteen lexically ordered `ONLY`
+relations in `SHARE MODE NOWAIT`: the migration ledger, seven legacy tables,
+all journal/account relations, runtime control, and runtime generations. It
+then selects the singleton control row `FOR UPDATE NOWAIT`, every account stream
+in `account_key` order `FOR UPDATE NOWAIT`, and every position stream in
+`position_key` order `FOR UPDATE NOWAIT`. This preserves the global
+control-before-account-before-position order. The table fence blocks new
+durable DML; the ordered row drain refuses activation when an older account or
+position writer already owns a row lock. The locks persist in the caller's
+transaction after the function returns.
+
+`PostgresPaperRuntimeActivation` calls this capability from a `READ COMMITTED`
+transaction and no longer executes table or replay-row locks directly. This
+isolation level is load-bearing. A function invocation establishes its outer
+statement snapshot before PL/pgSQL begins locking; retaining `REPEATABLE READ`
+would let later readiness queries reuse a snapshot from before the fence was
+established. Transaction and local lock-timeout settings do not establish a
+data snapshot, so the capability call remains the first data-bearing statement.
+The next `READ COMMITTED` statement sees every commit completed before the
+fence, while retained table and row locks keep subsequent readiness and replay
+reads stable. Account and position replay can therefore use plain reads.
+
+The second capability is
+`np.activate_paper_runtime_generation(expected_mode text,
+expected_generation bigint, target_generation bigint,
+requested_activation_id text, requested_execution_scope text,
+requested_account_key text, requested_owner_generation bigint,
+requested_opening_payload_sha256 text)`, returning
+`TABLE(mode text, runtime_generation bigint)`. It reacquires the complete fence
+and admits only the exact shapes `LEGACY/0 -> ACTIVE/1` and
+`PAUSED/N -> ACTIVE/N+1` for positive `N`. It validates the bigint successor
+and canonical activation/opening argument shapes before inserting the epoch
+under the existing opening foreign key and compare-and-swapping control.
+Invalid argument shapes raise SQLSTATE `22023`; relational provenance remains
+constraint-enforced. A CAS that changes no singleton row raises the stable
+custom SQLSTATE `PT001`, aborting the statement so its preceding epoch insert
+cannot be committed as an orphan. The adapter maps `PT001` and unique
+collisions to `PaperRuntimeActivationConflict`; its existing Busy, Blocked,
+exact replay, rollback, and commit-unknown contracts remain unchanged.
+
+The readiness authority gate advances with migration `0006`. It requires both
+functions with their exact identity arguments, result shapes, PL/pgSQL source,
+volatility, strictness, set-return behavior, `SECURITY DEFINER` state, safe
+search path, and a single common owner. Each function ACL must contain exactly
+one non-grantable `EXECUTE` entry from that owner to itself. `PUBLIC EXECUTE` or
+any third-party grant is catalog drift. The gate also checks that the owner has
+effective schema usage; one of PostgreSQL's table-lock-enabling `UPDATE`,
+`DELETE`, or `TRUNCATE` privileges on every one of the nineteen relations;
+`SELECT` plus `UPDATE` for control, account-stream, and position-stream row
+locks; generation `INSERT`; and control `UPDATE`. It does not require that
+owner to equal owners from migrations `0001` through `0005`, so exact upgrades
+applied by distinct historical owners remain valid when the capability owner
+has the required effective privileges.
+
+The mutation function is an offline trusted capability, not a general runtime
+API. Its owner can invoke the exact CAS directly and thereby bypass the Python
+readiness replay. M9b.14c1 intentionally creates no third-party grant and
+remains dormant and unwired. M9b.14c2 must either transfer both function
+ownerships to one isolated offline activation authority while retaining the
+owner-only ACL, or explicitly version the catalog contract for one exact
+activator grantee. It must also remove DDL and broad authority from ordinary
+runtime roles, compose startup fail-closed, and rotate affected credentials.
+Until those role, composition, and rotation gates exist—and the remaining
+reconciliation, bounded-replay, stale-writer, rollback, shadow-soak, and
+operator-approval gates pass—entering `ACTIVE` remains an explicit **NO-GO**.
+
+The focused unit, application-contract, adapter, readiness, migration-runner,
+and adjacent repository command passed 345 tests under each Python
+interpreter. The dedicated PostgreSQL 15 capability suite passed 13 tests under
+each interpreter. The complete PostgreSQL 15 suite passed 352 tests under
+`.venv/bin/python`. The full non-PostgreSQL Honolulu run passed 2,453 tests,
+with 50 skipped, 352 deselected, 293 warnings, and 7 subtests. Black targeting
+Python 3.10, isort, flake8 with an 88-character limit, Python 3.10 compilation,
+and `git diff --check` were green on the final slice.
 
 ## Cut-over policy
 

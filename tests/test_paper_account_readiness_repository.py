@@ -19,7 +19,7 @@ from trading.application.paper_account_readiness import (
 from trading.domain.order_lifecycle import OrderLifecycleState
 from trading.domain.paper_accounting import PaperAccountState
 from trading.domain.positions import PositionState
-from trading.persistence.migration_runner import load_migrations
+from trading.persistence.migration_runner import _statement_prefixes, load_migrations
 from trading.persistence.order_position_journal import JournalReplayError
 from trading.persistence.paper_account_journal import PaperAccountReplayError
 from trading.persistence.paper_account_readiness import (
@@ -133,6 +133,49 @@ RUNTIME_GENERATION_FUNCTION = (
     ["search_path=pg_catalog"],
     readiness_module._EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE,
     True,
+)
+RUNTIME_ACTIVATION_FUNCTIONS = (
+    (
+        readiness_module._RUNTIME_ACTIVATION_FENCE_FUNCTION,
+        "",
+        "void",
+        True,
+        "v",
+        False,
+        False,
+        False,
+        "f",
+        "u",
+        "plpgsql",
+        ["search_path=pg_catalog"],
+        readiness_module._EXPECTED_RUNTIME_ACTIVATION_FENCE_FUNCTION_SOURCE,
+        700001,
+        True,
+        True,
+        True,
+    ),
+    (
+        readiness_module._RUNTIME_ACTIVATION_MUTATION_FUNCTION,
+        "expected_mode text, expected_generation bigint, target_generation bigint, "
+        "requested_activation_id text, requested_execution_scope text, "
+        "requested_account_key text, requested_owner_generation bigint, "
+        "requested_opening_payload_sha256 text",
+        "TABLE(mode text, runtime_generation bigint)",
+        True,
+        "v",
+        False,
+        False,
+        True,
+        "f",
+        "u",
+        "plpgsql",
+        ["search_path=pg_catalog"],
+        readiness_module._EXPECTED_RUNTIME_ACTIVATION_MUTATION_FUNCTION_SOURCE,
+        700001,
+        True,
+        True,
+        True,
+    ),
 )
 RUNTIME_GENERATION_TRIGGER = (
     "paper_runtime_generations",
@@ -514,6 +557,7 @@ def snapshot_responder(
     runtime_generation_constraints=RUNTIME_GENERATION_CONSTRAINTS,
     runtime_generation_fks=RUNTIME_GENERATION_FKS,
     runtime_generation_function=(RUNTIME_GENERATION_FUNCTION,),
+    runtime_activation_functions=RUNTIME_ACTIVATION_FUNCTIONS,
     runtime_generation_trigger=(RUNTIME_GENERATION_TRIGGER,),
     runtime_manifest_column=RUNTIME_MANIFEST_COLUMN,
     runtime_manifest_constraints=RUNTIME_MANIFEST_CONSTRAINTS,
@@ -564,12 +608,14 @@ def snapshot_responder(
             return migration_constraints
         if sql.startswith("SELECT version, name, checksum"):
             return applied_rows
-        if "table_row.relname = ANY(%s)" in sql:
-            return durable_relation_rows
         if "FROM pg_proc routine_row" in sql:
+            if "acquire_paper_runtime_activation_fence" in sql:
+                return runtime_activation_functions
             if "reject_paper_runtime_generation_mutation" in sql:
                 return runtime_generation_function
             return runtime_control_function
+        if "table_row.relname = ANY(%s)" in sql:
+            return durable_relation_rows
         if "FROM pg_trigger trigger_row" in sql:
             if "table_row.relname = 'paper_runtime_generations'" in sql:
                 return runtime_generation_trigger
@@ -1075,6 +1121,36 @@ def test_future_generation_gap_extra_or_provenance_drift_fails_closed(
             "runtime_generation_constraints": RUNTIME_GENERATION_CONSTRAINTS[:1]
             + RUNTIME_GENERATION_CONSTRAINTS[2:]
         },
+        {
+            "runtime_activation_functions": (
+                (
+                    *RUNTIME_ACTIVATION_FUNCTIONS[0][:12],
+                    "BEGIN RETURN; END",
+                    *RUNTIME_ACTIVATION_FUNCTIONS[0][13:],
+                ),
+                RUNTIME_ACTIVATION_FUNCTIONS[1],
+            )
+        },
+        {
+            "runtime_activation_functions": (
+                (
+                    *RUNTIME_ACTIVATION_FUNCTIONS[0][:15],
+                    False,
+                    *RUNTIME_ACTIVATION_FUNCTIONS[0][16:],
+                ),
+                RUNTIME_ACTIVATION_FUNCTIONS[1],
+            )
+        },
+        {
+            "runtime_activation_functions": (
+                RUNTIME_ACTIVATION_FUNCTIONS[0],
+                (
+                    *RUNTIME_ACTIVATION_FUNCTIONS[1][:13],
+                    700002,
+                    *RUNTIME_ACTIVATION_FUNCTIONS[1][14:],
+                ),
+            )
+        },
     ),
 )
 def test_runtime_catalog_or_control_row_tamper_is_early_drift(
@@ -1089,6 +1165,23 @@ def test_runtime_catalog_or_control_row_tamper_is_early_drift(
     assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
     assert result.account_version is None
     assert result.legacy_watermarks == ()
+    assert account_calls == []
+    assert position_calls == []
+
+
+def test_extra_activation_execute_grantee_is_early_catalog_drift(monkeypatch) -> None:
+    extra_grantee_rows = tuple(
+        (*row[:15], False, *row[16:]) for row in RUNTIME_ACTIVATION_FUNCTIONS
+    )
+    database = ScriptedDatabase(
+        snapshot_responder(runtime_activation_functions=extra_grantee_rows)
+    )
+    account_calls, position_calls = install_replayers(monkeypatch)
+
+    result = PostgresPaperAccountReadiness(database.connect).assess(context())
+
+    assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
+    assert result.account_version is None
     assert account_calls == []
     assert position_calls == []
     statements = tuple(sql for sql, _params in database.connections[0].commands)
@@ -1734,11 +1827,21 @@ def test_repository_module_contains_no_dml_statement() -> None:
             sql_values.append(node.value.value)
 
     assert sql_values
-    forbidden = re.compile(
-        r"\b(ALTER|CREATE|DELETE|DROP|GRANT|INSERT|REVOKE|TRUNCATE|UPDATE)\b",
-        re.IGNORECASE,
+    forbidden = {
+        "ALTER",
+        "CREATE",
+        "DELETE",
+        "DROP",
+        "GRANT",
+        "INSERT",
+        "REVOKE",
+        "TRUNCATE",
+        "UPDATE",
+    }
+    assert all(
+        not ({prefix[0] for prefix in _statement_prefixes(sql)} & forbidden)
+        for sql in sql_values
     )
-    assert all(forbidden.search(sql) is None for sql in sql_values)
     source = source_path.read_text(encoding="utf-8")
     assert ".replay_account(" not in source
     assert ".replay_order(" not in source

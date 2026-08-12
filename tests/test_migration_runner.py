@@ -57,7 +57,7 @@ def fake_connection(*, applied_rows=()):
 def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4, 5)
+    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4, 5, 6)
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -220,6 +220,26 @@ def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
         "ALTER",
         "CREATE",
     }
+
+    activation_capabilities = migrations[5]
+    assert activation_capabilities.name == "paper_runtime_activation_capabilities"
+    assert activation_capabilities.checksum == (
+        "e01c02d1e64b8b136e80dcf2fe365dc" "85df72d4e1cfa58a8a13b14e4b3f6449d"
+    )
+    assert "CREATE FUNCTION np.acquire_paper_runtime_activation_fence()" in (
+        activation_capabilities.sql
+    )
+    assert "CREATE FUNCTION np.activate_paper_runtime_generation(" in (
+        activation_capabilities.sql
+    )
+    assert activation_capabilities.sql.count("SECURITY DEFINER") == 2
+    assert activation_capabilities.sql.count("SET search_path = pg_catalog") == 2
+    assert activation_capabilities.sql.count("FROM PUBLIC") == 2
+    assert "IN SHARE MODE NOWAIT" in activation_capabilities.sql
+    assert "ERRCODE = 'PT001'" in activation_capabilities.sql
+    assert {
+        prefix[0] for prefix in _statement_prefixes(activation_capabilities.sql)
+    } == {"CREATE", "REVOKE"}
 
 
 @pytest.mark.parametrize(

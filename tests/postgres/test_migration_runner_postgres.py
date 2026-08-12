@@ -38,15 +38,17 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
     migrations = load_migrations()
     connection = _connect(postgres_database_dsn)
     try:
-        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6)
         assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = 'np'
                 ORDER BY table_name
-                """)
+                """
+            )
             assert tuple(row[0] for row in cursor.fetchall()) == (
                 "account_balances",
                 "liquidations",
@@ -75,14 +77,17 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
             ]
             cursor.execute("SELECT COUNT(*) FROM np.account_balances")
             assert cursor.fetchone() == (0,)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM np.position_streams),
                     (SELECT COUNT(*) FROM np.orders),
                     (SELECT COUNT(*) FROM np.order_events)
-                """)
+                """
+            )
             assert cursor.fetchone() == (0, 0, 0)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     (SELECT COUNT(*) FROM np.paper_account_streams),
                     (SELECT COUNT(*) FROM np.paper_account_balances),
@@ -91,7 +96,8 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                     (SELECT COUNT(*) FROM np.paper_account_settlements),
                     (SELECT COUNT(*) FROM np.paper_account_postings),
                     (SELECT COUNT(*) FROM np.paper_runtime_generations)
-                """)
+                """
+            )
             assert cursor.fetchone() == (0, 0, 0, 0, 0, 0, 0)
     finally:
         connection.close()
@@ -105,19 +111,23 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
     try:
         with connection.cursor() as cursor:
             cursor.execute(migrations[0].sql)
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.open_positions (
                     symbol, side, entry_price, quantity, leverage
                 ) VALUES ('BTCUSDT', 'BUY', 50000, 0.01, 3)
-                """)
+                """
+            )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT symbol, side, entry_price, quantity, leverage
                 FROM np.open_positions
-                """)
+                """
+            )
             assert cursor.fetchone() == (
                 "BTCUSDT",
                 "BUY",
@@ -137,19 +147,23 @@ def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
     try:
         assert apply_migrations(connection, migrations[:1]) == (1,)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.open_positions (
                     symbol, side, entry_price, quantity, leverage
                 ) VALUES ('BTCUSDT', 'BUY', 51000, 0.02, 3)
-                """)
+                """
+            )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (2, 3, 4, 5)
+        assert apply_migrations(connection, migrations) == (2, 3, 4, 5, 6)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT symbol, side, entry_price, quantity, leverage
                 FROM np.open_positions
-                """)
+                """
+            )
             assert cursor.fetchone() == (
                 "BTCUSDT",
                 "BUY",
@@ -173,19 +187,23 @@ def test_versioned_journal_upgrades_to_dormant_account_ledger(
     try:
         assert apply_migrations(connection, migrations[:2]) == (1, 2)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.position_streams (
                     position_key, execution_scope
                 ) VALUES ('position-existing', 'paper:upgrade')
-                """)
+                """
+            )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (3, 4, 5)
+        assert apply_migrations(connection, migrations) == (3, 4, 5, 6)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT position_key, execution_scope
                 FROM np.position_streams
-                """)
+                """
+            )
             assert cursor.fetchone() == ("position-existing", "paper:upgrade")
             cursor.execute("SELECT to_regclass('np.paper_account_streams')")
             assert cursor.fetchone() == ("np.paper_account_streams",)
@@ -217,13 +235,15 @@ def test_versioned_account_ledger_upgrades_to_dormant_runtime_fence_without_loss
                 "trading_session_resets",
             ):
                 cursor.execute(f"INSERT INTO np.{relation} (id) VALUES (710001)")
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.account_balances (id, asset, balance)
                 VALUES (710001, 'USDT', 100)
-                """)
+                """
+            )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (4, 5)
+        assert apply_migrations(connection, migrations) == (4, 5, 6)
         with connection.cursor() as cursor:
             for relation in (
                 "account_balances",
@@ -253,7 +273,8 @@ def test_runtime_fence_function_collision_rolls_back_version_four_only(
     try:
         assert apply_migrations(connection, migrations[:3]) == (1, 2, 3)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE FUNCTION np.enforce_legacy_paper_runtime_fence()
                 RETURNS TRIGGER
                 LANGUAGE plpgsql
@@ -262,7 +283,8 @@ def test_runtime_fence_function_collision_rolls_back_version_four_only(
                     RETURN NULL;
                 END
                 $function$
-                """)
+                """
+            )
         connection.commit()
 
         with pytest.raises(MigrationApplyError, match="0004_paper_runtime_control"):
@@ -273,7 +295,8 @@ def test_runtime_fence_function_collision_rolls_back_version_four_only(
             assert cursor.fetchall() == [(1,), (2,), (3,)]
             cursor.execute("SELECT to_regclass('np.paper_runtime_control')")
             assert cursor.fetchone() == (None,)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT COUNT(*)
                 FROM pg_trigger trigger_row
                 JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
@@ -281,16 +304,19 @@ def test_runtime_fence_function_collision_rolls_back_version_four_only(
                   ON namespace_row.oid = table_row.relnamespace
                 WHERE namespace_row.nspname = 'np'
                   AND NOT trigger_row.tgisinternal
-                """)
+                """
+            )
             assert cursor.fetchone() == (0,)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT routine_row.prosecdef
                 FROM pg_proc routine_row
                 JOIN pg_namespace namespace_row
                   ON namespace_row.oid = routine_row.pronamespace
                 WHERE namespace_row.nspname = 'np'
                   AND routine_row.proname = 'enforce_legacy_paper_runtime_fence'
-                """)
+                """
+            )
             assert cursor.fetchone() == (False,)
     finally:
         connection.close()
@@ -317,9 +343,10 @@ def test_runtime_fence_upgrade_allows_legacy_table_owner_to_differ(
             )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (4, 5)
+        assert apply_migrations(connection, migrations) == (4, 5, 6)
         with connection.cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     legacy_table.relowner <> control_table.relowner,
                     fence_function.proowner = control_table.relowner
@@ -338,7 +365,8 @@ def test_runtime_fence_upgrade_allows_legacy_table_owner_to_differ(
                  AND function_namespace.nspname = 'np'
                 WHERE legacy_namespace.nspname = 'np'
                   AND legacy_table.relname = 'trades'
-                """)
+                """
+            )
             assert cursor.fetchone() == (True, True)
     finally:
         connection.rollback()
@@ -351,6 +379,70 @@ def test_runtime_fence_upgrade_allows_legacy_table_owner_to_differ(
                     sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role_name))
                 )
             connection.commit()
+        connection.close()
+
+
+def test_activation_capability_collision_rolls_back_version_six_only(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:5]) == (1, 2, 3, 4, 5)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE FUNCTION np.acquire_paper_runtime_activation_fence()
+                RETURNS VOID
+                LANGUAGE plpgsql
+                AS $function$
+                BEGIN
+                    RETURN;
+                END
+                $function$
+                """
+            )
+        connection.commit()
+
+        with pytest.raises(
+            MigrationApplyError,
+            match="0006_paper_runtime_activation_capabilities",
+        ):
+            apply_migrations(connection, migrations)
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT version FROM np.schema_migrations ORDER BY version")
+            assert cursor.fetchall() == [(1,), (2,), (3,), (4,), (5,)]
+            cursor.execute(
+                """
+                SELECT routine_row.prosecdef, language_row.lanname,
+                       routine_row.prosrc
+                FROM pg_proc routine_row
+                JOIN pg_namespace namespace_row
+                  ON namespace_row.oid = routine_row.pronamespace
+                JOIN pg_language language_row
+                  ON language_row.oid = routine_row.prolang
+                WHERE namespace_row.nspname = 'np'
+                  AND routine_row.proname =
+                      'acquire_paper_runtime_activation_fence'
+                """
+            )
+            assert cursor.fetchone() == (
+                False,
+                "plpgsql",
+                """
+                BEGIN
+                    RETURN;
+                END
+                """,
+            )
+            cursor.execute(
+                "SELECT to_regprocedure("
+                "'np.activate_paper_runtime_generation(text,bigint,bigint,text,"
+                "text,text,bigint,text)')"
+            )
+            assert cursor.fetchone() == (None,)
+    finally:
         connection.close()
 
 
@@ -390,11 +482,13 @@ def test_journal_table_collision_rolls_back_version_two_only(
         assert apply_migrations(connection, migrations[:1]) == (1,)
         with connection.cursor() as cursor:
             cursor.execute("CREATE TABLE np.orders (unexpected INTEGER)")
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO np.open_positions (
                     symbol, side, entry_price, quantity, leverage
                 ) VALUES ('BNBUSDT', 'SELL', 600, 0.5, 2)
-                """)
+                """
+            )
         connection.commit()
 
         with pytest.raises(MigrationApplyError, match="0002_order_position_journal"):
@@ -448,11 +542,11 @@ def test_concurrent_runners_apply_packaged_migrations_once(postgres_database_dsn
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _: migrate(), range(2)))
 
-    assert sorted(results) == [(), (1, 2, 3, 4, 5)]
+    assert sorted(results) == [(), (1, 2, 3, 4, 5, 6)]
     connection = _connect(postgres_database_dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM np.schema_migrations")
-            assert cursor.fetchone() == (5,)
+            assert cursor.fetchone() == (6,)
     finally:
         connection.close()

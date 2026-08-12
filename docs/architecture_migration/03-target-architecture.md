@@ -245,7 +245,10 @@ seven database triggers prepare the global legacy-writer fence without exposing
 an activation API or changing runtime authority. M9b.14b1 adds dormant
 migration `0005`, an empty append-only activation-epoch registry, version-2
 manifest stamping, backward-compatible replay, and exact readiness evidence;
-it still exposes no owner, transition, or runtime path.
+it still exposes no owner, transition, or runtime path. M9b.14b2 makes the
+dormant atomic owner generation-aware, M9b.14b3 adds the dormant activation
+contract, and M9b.14c1 moves that adapter behind two narrowly callable database
+capabilities without wiring any of them into production.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1281,6 +1284,75 @@ add fail-closed startup/composition and side-effect-free shadow operation.
 Bounded replay or snapshots, reconciliation/quarantine, stale-writer removal,
 compatibility policy, tested pause/rollback, soak evidence, and explicit
 operator cut-over remain blockers beyond those slices.
+
+M9b.14c1 supersedes only M9b.14b3's direct-lock mechanism while preserving its
+application contract, readiness semantics, exact replay, rollback, and
+commit-unknown behavior. Forward migration
+`0006_paper_runtime_activation_capabilities.sql`, with immutable SHA-256
+`e01c02d1e64b8b136e80dcf2fe365dc85df72d4e1cfa58a8a13b14e4b3f6449d`,
+creates two `SECURITY DEFINER` functions with `search_path = pg_catalog` and
+revokes every `PUBLIC` execution privilege from both. The migration grants no
+runtime or activator role access, changes no prior object owner, creates no
+epoch, and leaves the singleton in `LEGACY/0`.
+
+`np.acquire_paper_runtime_activation_fence()` is the zero-argument lock
+capability. It takes `SHARE MODE NOWAIT` on the same nineteen authority
+relations as M9b.14b3, with every relation qualified by `ONLY` and retained in
+canonical lexical order. It then drains pre-existing row owners in the global
+order control, accounts, positions: the singleton control row is selected
+`FOR UPDATE NOWAIT`, followed by every account stream ordered by `account_key`
+and every position stream ordered by `position_key`, also `FOR UPDATE NOWAIT`.
+The table locks prevent new durable DML while those row locks detect an older
+transaction that already entered either stream. All locks remain owned by the
+calling transaction after the function returns.
+
+The adapter now uses `READ COMMITTED`, not M9b.14b3's original direct-lock
+`REPEATABLE READ` design. Calling a PL/pgSQL function establishes the outer SQL
+statement's snapshot before the function body takes its locks. Under
+`REPEATABLE READ`, a commit completed before the fence was acquired could
+therefore remain invisible to the readiness reads that follow. Under
+`READ COMMITTED`, the fence call is the first data-bearing statement after the
+transaction and local lock-timeout settings; the next statement receives a
+fresh snapshot after all table and row locks are held. Those locks then prevent
+the nineteen relations from changing, so account and position replay uses
+plain reads without requesting direct locks from the Python caller.
+
+`np.activate_paper_runtime_generation(text, bigint, bigint, text, text, text,
+bigint, text)` is the mutation capability. It reacquires the same fence,
+accepts only `LEGACY/0 -> ACTIVE/1` or `PAUSED/N -> ACTIVE/N+1` for positive
+`N`, checks the PostgreSQL-bigint successor and canonical activation/opening
+argument shapes, inserts that exact epoch under the existing opening foreign
+key, and compare-and-swaps the singleton. Invalid argument shapes fail with
+SQLSTATE `22023`; relational provenance still fails through the existing
+constraints. A zero-row CAS raises the dedicated SQLSTATE `PT001`; the failed
+statement cannot leave its preceding epoch insert committable. The adapter maps
+`PT001` and unique collisions to its typed conflict result.
+
+Readiness treats both functions as authority-bearing catalog. It verifies the
+exact names, identity arguments, result types, PL/pgSQL source, volatility,
+strictness, set-return shape, `SECURITY DEFINER` flag, safe search path, and
+common function owner. Each ACL must contain exactly one non-grantable
+`EXECUTE` entry from that owner to itself: `PUBLIC` or any third-party grant is
+catalog drift. The gate also proves that the owner has effective schema usage,
+one PostgreSQL table-lock-enabling privilege on each of the exact nineteen
+relations, the select/update privileges needed for the three row-drain
+queries, generation insert, and control update. The functions need not share
+ownership with relations created by older migrations, so a legitimate
+distinct-owner upgrade is not classified as drift.
+
+This owner-only capability is deliberately offline and trusted. Its mutation
+function performs the exact database transition but cannot itself reproduce
+the Python readiness replay; invoking it directly can therefore bypass that
+application policy. M9b.14c2 must either transfer both function ownerships to
+one isolated offline activation authority while retaining the owner-only ACL,
+or explicitly version the catalog contract for one exact activator grantee. It
+must keep ordinary runtime credentials unable to execute the capability or
+perform DDL and rotate affected credentials before composition. M9b.14c1
+itself adds no role, bootstrap entrypoint, credential, startup or health gate,
+operator command, runtime composition, pause/rollback workflow, or shadow
+execution. `ACTIVE` remains an explicit **NO-GO** until role separation,
+composition, credential rotation, reconciliation, bounded replay, stale-writer
+removal, rollback, soak, and operator-approval gates are complete.
 
 ## Runtime and configuration
 

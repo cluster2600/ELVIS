@@ -99,13 +99,15 @@ def _runtime_snapshot(dsn):
                 "SELECT mode, runtime_generation FROM np.paper_runtime_control"
             )
             control = tuple(cursor.fetchall())
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT runtime_generation, activation_id, execution_scope,
                        account_key, owner_generation, opening_version,
                        opening_payload_sha256
                 FROM np.paper_runtime_generations
                 ORDER BY runtime_generation
-                """)
+                """
+            )
             epochs = tuple(cursor.fetchall())
         return control, epochs
     finally:
@@ -213,40 +215,42 @@ class _BlockingCommitFactory:
 
 
 class _MutationFailureCursor(_TracingCursor):
-    def __init__(self, cursor, statements, fail_after):
+    def __init__(self, cursor, statements, fail_stage):
         super().__init__(cursor, statements)
-        self._fail_after = fail_after
-        self.mutations = 0
+        self._fail_stage = fail_stage
 
     def execute(self, statement, parameters=None):
         result = super().execute(statement, parameters)
         normalized = " ".join(str(statement).split()).upper()
-        if normalized.startswith(("INSERT ", "UPDATE ")):
-            self.mutations += 1
-            if self.mutations == self._fail_after:
-                raise RuntimeError(f"injected failure after mutation {self.mutations}")
-        if self._fail_after == 3 and normalized == "SET CONSTRAINTS ALL IMMEDIATE":
+        if self._fail_stage == "capability" and normalized.startswith(
+            "SELECT MODE, RUNTIME_GENERATION FROM "
+            "NP.ACTIVATE_PAPER_RUNTIME_GENERATION("
+        ):
+            raise RuntimeError("injected failure after activation capability")
+        if self._fail_stage == "constraints" and normalized == (
+            "SET CONSTRAINTS ALL IMMEDIATE"
+        ):
             raise RuntimeError("injected failure during pre-commit validation")
         return result
 
 
 class _MutationFailureConnection(_TrackingConnection):
-    def __init__(self, connection, *, statements, fail_after):
+    def __init__(self, connection, *, statements, fail_stage):
         super().__init__(connection, statements=statements)
-        self._fail_after = fail_after
+        self._fail_stage = fail_stage
 
     def cursor(self):
         return _MutationFailureCursor(
             self._connection.cursor(),
             self._statements,
-            self._fail_after,
+            self._fail_stage,
         )
 
 
 class _MutationFailureFactory:
-    def __init__(self, dsn, fail_after):
+    def __init__(self, dsn, fail_stage):
         self._dsn = dsn
-        self._fail_after = fail_after
+        self._fail_stage = fail_stage
         self.statements = []
         self.connection = None
 
@@ -254,7 +258,7 @@ class _MutationFailureFactory:
         self.connection = _MutationFailureConnection(
             _connect(self._dsn),
             statements=self.statements,
-            fail_after=self._fail_after,
+            fail_stage=self._fail_stage,
         )
         return self.connection
 
@@ -330,7 +334,7 @@ def test_legacy_zero_activation_commits_epoch_one_and_exact_retry_rolls_back(
     assert len(_runtime_snapshot(migrated_postgres_dsn)[1]) == 1
 
 
-def test_activation_trace_uses_one_cursor_and_canonical_lock_then_mutation_order(
+def test_activation_trace_uses_one_cursor_and_capabilities_in_boundary_order(
     migrated_postgres_dsn,
 ):
     opening = _provision(migrated_postgres_dsn)
@@ -342,55 +346,32 @@ def test_activation_trace_uses_one_cursor_and_canonical_lock_then_mutation_order
     assert receipt.disposition is PaperRuntimeActivationDisposition.ACTIVATED
     assert len(factory.connections) == 1
     normalized = tuple(statement.upper() for statement in statements)
-    transaction = normalized.index("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+    transaction = normalized.index("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
     timeout = normalized.index("SET LOCAL LOCK_TIMEOUT = '1S'")
-    authority_lock = next(
-        index
-        for index, statement in enumerate(normalized)
-        if statement.startswith("LOCK TABLE ONLY NP.ACCOUNT_BALANCES")
-    )
-    control_lock = next(
+    fence = normalized.index("SELECT NP.ACQUIRE_PAPER_RUNTIME_ACTIVATION_FENCE()")
+    control_read = next(
         index
         for index, statement in enumerate(normalized)
         if "FROM NP.PAPER_RUNTIME_CONTROL" in statement
-        and "FOR UPDATE NOWAIT" in statement
+        and statement.startswith("SELECT MODE, RUNTIME_GENERATION")
     )
-    account_lock = next(
+    mutation = next(
         index
         for index, statement in enumerate(normalized)
-        if "FROM NP.PAPER_ACCOUNT_STREAMS" in statement and "FOR UPDATE" in statement
-    )
-    epoch_insert = next(
-        index
-        for index, statement in enumerate(normalized)
-        if statement.startswith("INSERT INTO NP.PAPER_RUNTIME_GENERATIONS")
-    )
-    control_update = next(
-        index
-        for index, statement in enumerate(normalized)
-        if statement.startswith("UPDATE NP.PAPER_RUNTIME_CONTROL")
+        if statement.startswith(
+            "SELECT MODE, RUNTIME_GENERATION FROM "
+            "NP.ACTIVATE_PAPER_RUNTIME_GENERATION("
+        )
     )
     constraints = normalized.index("SET CONSTRAINTS ALL IMMEDIATE")
-    assert (
-        transaction
-        < timeout
-        < authority_lock
-        < control_lock
-        < account_lock
-        < epoch_insert
-        < control_update
-        < constraints
+    assert transaction < timeout < fence < control_read < mutation < constraints
+    assert not any(
+        statement.startswith(("LOCK TABLE ", "INSERT ", "UPDATE ", "DELETE "))
+        for statement in normalized
     )
-    authority_sql = normalized[authority_lock]
-    for relation in (
-        "NP.PAPER_RUNTIME_CONTROL",
-        "NP.PAPER_RUNTIME_GENERATIONS",
-        "NP.SCHEMA_MIGRATIONS",
-    ):
-        assert f"ONLY {relation}" in authority_sql
 
 
-def test_blocked_trace_locks_account_before_position_without_activation_dml(
+def test_blocked_trace_acquires_fence_before_reads_without_activation_call(
     migrated_postgres_dsn,
 ):
     opening = _provision(migrated_postgres_dsn)
@@ -408,31 +389,15 @@ def test_blocked_trace_locks_account_before_position_without_activation_dml(
 
     assert type(result) is PaperRuntimeActivationBlocked
     normalized = tuple(statement.upper() for statement in statements)
-    authority_lock = next(
-        index
-        for index, statement in enumerate(normalized)
-        if statement.startswith("LOCK TABLE ONLY NP.ACCOUNT_BALANCES")
-    )
-    control_lock = next(
+    fence = normalized.index("SELECT NP.ACQUIRE_PAPER_RUNTIME_ACTIVATION_FENCE()")
+    first_control_read = next(
         index
         for index, statement in enumerate(normalized)
         if "FROM NP.PAPER_RUNTIME_CONTROL" in statement
-        and "FOR UPDATE NOWAIT" in statement
     )
-    account_lock = next(
-        index
-        for index, statement in enumerate(normalized)
-        if "FROM NP.PAPER_ACCOUNT_STREAMS" in statement and "FOR UPDATE" in statement
-    )
-    position_lock = next(
-        index
-        for index, statement in enumerate(normalized)
-        if "FROM NP.POSITION_STREAMS" in statement and "FOR UPDATE" in statement
-    )
-    assert authority_lock < control_lock < account_lock < position_lock
+    assert fence < first_control_read
     assert not any(
-        statement.startswith(("INSERT ", "UPDATE ", "DELETE "))
-        for statement in normalized
+        "NP.ACTIVATE_PAPER_RUNTIME_GENERATION(" in statement for statement in normalized
     )
 
 
@@ -619,14 +584,14 @@ def test_commit_unknown_is_resolved_by_exact_read_only_replay(
     assert retry_factory.connections[0].rollbacks == 1
 
 
-@pytest.mark.parametrize("fail_after", (1, 2, 3))
-def test_failure_after_epoch_or_control_mutation_rolls_back_complete_transition(
+@pytest.mark.parametrize("fail_stage", ("capability", "constraints"))
+def test_failure_after_capability_or_precommit_check_rolls_back_transition(
     migrated_postgres_dsn,
-    fail_after,
+    fail_stage,
 ):
     opening = _provision(migrated_postgres_dsn)
     before = _runtime_snapshot(migrated_postgres_dsn)
-    factory = _MutationFailureFactory(migrated_postgres_dsn, fail_after)
+    factory = _MutationFailureFactory(migrated_postgres_dsn, fail_stage)
 
     with pytest.raises(PaperRuntimeActivationStorageError) as failure:
         _activation(migrated_postgres_dsn, factory).activate(_context(opening))

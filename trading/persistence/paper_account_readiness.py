@@ -48,6 +48,8 @@ _RUNTIME_CONTROL_FUNCTION = "enforce_legacy_paper_runtime_fence"
 _RUNTIME_CONTROL_TRIGGER_PREFIX = "legacy_paper_runtime_fence_"
 _RUNTIME_GENERATION_FUNCTION = "reject_paper_runtime_generation_mutation"
 _RUNTIME_GENERATION_TRIGGER = "paper_runtime_generations_append_only"
+_RUNTIME_ACTIVATION_FENCE_FUNCTION = "acquire_paper_runtime_activation_fence"
+_RUNTIME_ACTIVATION_MUTATION_FUNCTION = "activate_paper_runtime_generation"
 _RUNTIME_CONTROL_MODES = frozenset({"LEGACY", "SHADOW", "PAUSED", "ACTIVE"})
 _EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE = """DECLARE
     current_mode TEXT;
@@ -90,6 +92,123 @@ _EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE = """BEGIN
     RAISE EXCEPTION USING
         ERRCODE = '55000',
         MESSAGE = 'paper runtime generations are append-only';
+END"""
+_EXPECTED_RUNTIME_ACTIVATION_FENCE_FUNCTION_SOURCE = """BEGIN
+    LOCK TABLE
+        ONLY np.account_balances,
+        ONLY np.liquidations,
+        ONLY np.margin_history,
+        ONLY np.model_predictions,
+        ONLY np.open_positions,
+        ONLY np.order_events,
+        ONLY np.orders,
+        ONLY np.paper_account_balances,
+        ONLY np.paper_account_batch_manifests,
+        ONLY np.paper_account_postings,
+        ONLY np.paper_account_settlements,
+        ONLY np.paper_account_streams,
+        ONLY np.paper_margin_reservations,
+        ONLY np.paper_runtime_control,
+        ONLY np.paper_runtime_generations,
+        ONLY np.position_streams,
+        ONLY np.schema_migrations,
+        ONLY np.trades,
+        ONLY np.trading_session_resets
+    IN SHARE MODE NOWAIT;
+
+    PERFORM 1
+    FROM np.paper_runtime_control
+    WHERE control_key IS TRUE
+    FOR UPDATE NOWAIT;
+
+    PERFORM 1
+    FROM np.paper_account_streams
+    ORDER BY account_key
+    FOR UPDATE NOWAIT;
+
+    PERFORM 1
+    FROM np.position_streams
+    ORDER BY position_key
+    FOR UPDATE NOWAIT;
+END"""
+_EXPECTED_RUNTIME_ACTIVATION_MUTATION_FUNCTION_SOURCE = """DECLARE
+    activated_mode TEXT;
+    activated_generation BIGINT;
+BEGIN
+    PERFORM np.acquire_paper_runtime_activation_fence();
+
+    IF expected_mode IS NULL
+       OR expected_generation IS NULL
+       OR NOT (
+           (expected_mode = 'LEGACY' AND expected_generation = 0)
+           OR (expected_mode = 'PAUSED' AND expected_generation > 0)
+       )
+       OR expected_generation >= 9223372036854775807
+       OR target_generation IS NULL
+       OR requested_activation_id IS NULL
+       OR requested_activation_id = ''
+       OR requested_activation_id <> BTRIM(requested_activation_id)
+       OR LENGTH(requested_activation_id) > 255
+       OR requested_execution_scope IS NULL
+       OR requested_execution_scope = ''
+       OR requested_execution_scope <> BTRIM(requested_execution_scope)
+       OR LENGTH(requested_execution_scope) > 128
+       OR requested_account_key IS NULL
+       OR requested_account_key = ''
+       OR requested_account_key <> BTRIM(requested_account_key)
+       OR LENGTH(requested_account_key) > 255
+       OR requested_owner_generation IS NULL
+       OR requested_owner_generation <= 0
+       OR requested_opening_payload_sha256 IS NULL
+       OR requested_opening_payload_sha256 !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '22023',
+            MESSAGE = 'paper runtime activation arguments are invalid';
+    END IF;
+
+    IF target_generation <> expected_generation + 1 THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '22023',
+            MESSAGE = 'paper runtime activation arguments are invalid';
+    END IF;
+
+    INSERT INTO np.paper_runtime_generations (
+        runtime_generation,
+        activation_id,
+        execution_scope,
+        account_key,
+        owner_generation,
+        opening_version,
+        opening_payload_sha256
+    ) VALUES (
+        target_generation,
+        requested_activation_id,
+        requested_execution_scope,
+        requested_account_key,
+        requested_owner_generation,
+        1,
+        requested_opening_payload_sha256
+    );
+
+    UPDATE np.paper_runtime_control AS control_row
+    SET
+        mode = 'ACTIVE',
+        runtime_generation = target_generation,
+        updated_at = clock_timestamp()
+    WHERE control_row.control_key IS TRUE
+      AND control_row.mode = expected_mode
+      AND control_row.runtime_generation = expected_generation
+    RETURNING control_row.mode, control_row.runtime_generation
+    INTO activated_mode, activated_generation;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING
+            ERRCODE = 'PT001',
+            MESSAGE = 'paper runtime activation compare-and-set failed';
+    END IF;
+
+    RETURN QUERY
+    SELECT activated_mode, activated_generation;
 END"""
 _DURABLE_BUSINESS_RELATIONS = tuple(
     sorted(
@@ -390,6 +509,130 @@ JOIN pg_namespace generation_namespace
 WHERE namespace_row.nspname = 'np'
   AND routine_row.proname = 'reject_paper_runtime_generation_mutation'
 ORDER BY routine_row.oid
+"""
+_SELECT_RUNTIME_ACTIVATION_FUNCTIONS_SQL = """
+SELECT
+    routine_row.proname,
+    pg_get_function_identity_arguments(routine_row.oid),
+    pg_get_function_result(routine_row.oid),
+    routine_row.prosecdef,
+    routine_row.provolatile,
+    routine_row.proleakproof,
+    routine_row.proisstrict,
+    routine_row.proretset,
+    routine_row.prokind,
+    routine_row.proparallel,
+    language_row.lanname,
+    routine_row.proconfig,
+    routine_row.prosrc,
+    routine_row.proowner,
+    (
+        SELECT COUNT(*) = 19
+           AND BOOL_AND(
+               has_table_privilege(
+                   routine_row.proowner,
+                   table_row.oid,
+                   %s
+               )
+               OR has_table_privilege(
+                   routine_row.proowner,
+                   table_row.oid,
+                   %s
+               )
+               OR has_table_privilege(
+                   routine_row.proowner,
+                   table_row.oid,
+                   %s
+               )
+           )
+        FROM pg_class table_row
+        JOIN pg_namespace table_namespace
+          ON table_namespace.oid = table_row.relnamespace
+        WHERE table_namespace.nspname = 'np'
+          AND table_row.relname = ANY(%s)
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        control_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        control_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        generation_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        account_stream_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        account_stream_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        position_stream_row.oid,
+        %s
+    )
+    AND has_table_privilege(
+        routine_row.proowner,
+        position_stream_row.oid,
+        %s
+    ),
+    (
+        SELECT COUNT(*) = 1
+           AND BOOL_AND(
+               function_acl.grantor = routine_row.proowner
+               AND function_acl.grantee = routine_row.proowner
+               AND function_acl.privilege_type = 'EXECUTE'
+               AND NOT function_acl.is_grantable
+           )
+        FROM aclexplode(
+            COALESCE(
+                routine_row.proacl,
+                acldefault('f', routine_row.proowner)
+            )
+        ) AS function_acl
+    ),
+    has_schema_privilege(routine_row.proowner, namespace_row.oid, %s)
+FROM pg_proc routine_row
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = routine_row.pronamespace
+JOIN pg_language language_row
+  ON language_row.oid = routine_row.prolang
+JOIN pg_class control_row
+  ON control_row.relname = 'paper_runtime_control'
+JOIN pg_namespace control_namespace
+  ON control_namespace.oid = control_row.relnamespace
+ AND control_namespace.nspname = 'np'
+JOIN pg_class generation_row
+  ON generation_row.relname = 'paper_runtime_generations'
+JOIN pg_namespace generation_namespace
+  ON generation_namespace.oid = generation_row.relnamespace
+ AND generation_namespace.nspname = 'np'
+JOIN pg_class account_stream_row
+  ON account_stream_row.relname = 'paper_account_streams'
+JOIN pg_namespace account_stream_namespace
+  ON account_stream_namespace.oid = account_stream_row.relnamespace
+ AND account_stream_namespace.nspname = 'np'
+JOIN pg_class position_stream_row
+  ON position_stream_row.relname = 'position_streams'
+JOIN pg_namespace position_stream_namespace
+  ON position_stream_namespace.oid = position_stream_row.relnamespace
+ AND position_stream_namespace.nspname = 'np'
+WHERE namespace_row.nspname = 'np'
+  AND routine_row.proname IN (
+      'acquire_paper_runtime_activation_fence',
+      'activate_paper_runtime_generation'
+  )
+ORDER BY routine_row.proname, routine_row.oid
 """
 _SELECT_RUNTIME_GENERATION_TRIGGER_SQL = """
 SELECT
@@ -1031,6 +1274,91 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
         return False
 
 
+def _runtime_activation_capabilities_catalog_is_exact(cursor: object) -> bool:
+    try:
+        cursor.execute(
+            _SELECT_RUNTIME_ACTIVATION_FUNCTIONS_SQL,
+            (
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                [
+                    relation.removeprefix("np.")
+                    for relation in _DURABLE_BUSINESS_RELATIONS
+                    + (_SCHEMA_MIGRATION_RELATION,)
+                ],
+                "SELECT",
+                "UPDATE",
+                "INSERT",
+                "SELECT",
+                "UPDATE",
+                "SELECT",
+                "UPDATE",
+                "USAGE",
+            ),
+        )
+        function_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if len(function_rows) != 2:
+            return False
+
+        fence_function, mutation_function = function_rows
+        if fence_function[:12] != (
+            _RUNTIME_ACTIVATION_FENCE_FUNCTION,
+            "",
+            "void",
+            True,
+            "v",
+            False,
+            False,
+            False,
+            "f",
+            "u",
+            "plpgsql",
+            ["search_path=pg_catalog"],
+        ):
+            return False
+        if type(fence_function[12]) is not str or (
+            fence_function[12].strip()
+            != _EXPECTED_RUNTIME_ACTIVATION_FENCE_FUNCTION_SOURCE
+        ):
+            return False
+        if type(fence_function[13]) is not int:
+            return False
+        if fence_function[14:] != (True, True, True):
+            return False
+
+        if mutation_function[:12] != (
+            _RUNTIME_ACTIVATION_MUTATION_FUNCTION,
+            "expected_mode text, expected_generation bigint, target_generation "
+            "bigint, requested_activation_id text, requested_execution_scope "
+            "text, requested_account_key text, requested_owner_generation bigint, "
+            "requested_opening_payload_sha256 text",
+            "TABLE(mode text, runtime_generation bigint)",
+            True,
+            "v",
+            False,
+            False,
+            True,
+            "f",
+            "u",
+            "plpgsql",
+            ["search_path=pg_catalog"],
+        ):
+            return False
+        if type(mutation_function[12]) is not str or (
+            mutation_function[12].strip()
+            != _EXPECTED_RUNTIME_ACTIVATION_MUTATION_FUNCTION_SOURCE
+        ):
+            return False
+        return (
+            type(mutation_function[13]) is int
+            and mutation_function[13] == fence_function[13]
+            and mutation_function[14:] == (True, True, True)
+        )
+    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        return False
+
+
 def _read_runtime_control(
     cursor: object,
 ) -> tuple[str, int] | None:
@@ -1572,6 +1900,7 @@ def _collect_paper_account_readiness(
             _read_runtime_control(cursor)
             if _runtime_control_catalog_is_exact(cursor)
             and _runtime_generation_catalog_is_exact(cursor)
+            and _runtime_activation_capabilities_catalog_is_exact(cursor)
             else None
         )
         if runtime_control is None:
@@ -1610,6 +1939,7 @@ def _activation_catalog_is_authoritative(cursor: object) -> bool:
             and _durable_business_relations_are_authoritative(cursor)
             and _runtime_control_catalog_is_exact(cursor)
             and _runtime_generation_catalog_is_exact(cursor)
+            and _runtime_activation_capabilities_catalog_is_exact(cursor)
         )
     except psycopg2.Error as exc:
         if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:
