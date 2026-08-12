@@ -16,9 +16,23 @@ from trading.domain.orders import (
 class _LegacyPaperExecutor(Protocol):
     default_leverage: int
 
-    def execute_buy(self, symbol: str, quantity: float, price: float) -> object: ...
+    def execute_buy(
+        self,
+        symbol: str,
+        quantity: float,
+        price: float,
+        *,
+        client_order_id: str,
+    ) -> object: ...
 
-    def execute_sell(self, symbol: str, quantity: float, price: float) -> object: ...
+    def execute_sell(
+        self,
+        symbol: str,
+        quantity: float,
+        price: float,
+        *,
+        client_order_id: str,
+    ) -> object: ...
 
 
 class LegacyPaperExecutionAdapter:
@@ -61,6 +75,11 @@ class LegacyPaperExecutionAdapter:
                 intent,
                 "intent leverage does not match the legacy executor leverage",
             )
+        if not self._is_storage_safe_client_order_id(intent.client_order_id):
+            return self._not_sent(
+                intent,
+                "client order ID is not representable at the paper boundary",
+            )
 
         try:
             quantity = float(intent.quantity)
@@ -77,11 +96,17 @@ class LegacyPaperExecutionAdapter:
 
         if intent.side is OrderSide.BUY:
             result = self._executor.execute_buy(
-                intent.symbol, quantity, reference_price
+                intent.symbol,
+                quantity,
+                reference_price,
+                client_order_id=intent.client_order_id,
             )
         else:
             result = self._executor.execute_sell(
-                intent.symbol, quantity, reference_price
+                intent.symbol,
+                quantity,
+                reference_price,
+                client_order_id=intent.client_order_id,
             )
 
         return self._map_result(intent, result)
@@ -114,13 +139,15 @@ class LegacyPaperExecutionAdapter:
             return self._ambiguous(intent, "legacy executor returned another symbol")
         if not self._matches_text(result.get("side"), intent.side.value):
             return self._ambiguous(intent, "legacy executor returned another side")
+        if not self._matches_text(result.get("clientOrderId"), intent.client_order_id):
+            return self._ambiguous(
+                intent, "legacy executor returned another client order ID"
+            )
 
         raw_order_id = result.get("orderId")
-        if isinstance(raw_order_id, bool) or raw_order_id is None:
+        if not self._is_storage_safe_identifier(raw_order_id):
             return self._ambiguous(intent, "filled legacy response has no order ID")
-        venue_order_id = str(raw_order_id)
-        if not venue_order_id or venue_order_id != venue_order_id.strip():
-            return self._ambiguous(intent, "filled legacy response has no order ID")
+        venue_order_id = raw_order_id
 
         return SubmissionReport(
             client_order_id=intent.client_order_id,
@@ -133,6 +160,21 @@ class LegacyPaperExecutionAdapter:
     @staticmethod
     def _matches_text(value: object, expected: str) -> bool:
         return isinstance(value, str) and value == expected
+
+    @staticmethod
+    def _is_storage_safe_client_order_id(value: object) -> bool:
+        return LegacyPaperExecutionAdapter._is_storage_safe_identifier(value)
+
+    @staticmethod
+    def _is_storage_safe_identifier(value: object) -> bool:
+        return (
+            type(value) is str
+            and bool(value)
+            and value == value.strip()
+            and len(value) <= 255
+            and "\x00" not in value
+            and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+        )
 
     @staticmethod
     def _not_sent(intent: OrderIntent, reason: str) -> SubmissionReport:

@@ -34,21 +34,42 @@ class LegacyExecutor:
     def __init__(self, result: object, *, default_leverage: int = 3) -> None:
         self.result = result
         self.default_leverage = default_leverage
-        self.buy_calls: list[tuple[str, float, float]] = []
-        self.sell_calls: list[tuple[str, float, float]] = []
+        self.buy_calls: list[tuple[str, float, float, str]] = []
+        self.sell_calls: list[tuple[str, float, float, str]] = []
 
-    def execute_buy(self, symbol: str, quantity: float, price: float) -> object:
-        self.buy_calls.append((symbol, quantity, price))
+    def execute_buy(
+        self,
+        symbol: str,
+        quantity: float,
+        price: float,
+        *,
+        client_order_id: str,
+    ) -> object:
+        self.buy_calls.append((symbol, quantity, price, client_order_id))
         return self.result
 
-    def execute_sell(self, symbol: str, quantity: float, price: float) -> object:
-        self.sell_calls.append((symbol, quantity, price))
+    def execute_sell(
+        self,
+        symbol: str,
+        quantity: float,
+        price: float,
+        *,
+        client_order_id: str,
+    ) -> object:
+        self.sell_calls.append((symbol, quantity, price, client_order_id))
         return self.result
 
 
 class RaisingExecutor(LegacyExecutor):
-    def execute_buy(self, symbol: str, quantity: float, price: float) -> object:
-        self.buy_calls.append((symbol, quantity, price))
+    def execute_buy(
+        self,
+        symbol: str,
+        quantity: float,
+        price: float,
+        *,
+        client_order_id: str,
+    ) -> object:
+        self.buy_calls.append((symbol, quantity, price, client_order_id))
         raise TimeoutError("uncertain paper database outcome")
 
 
@@ -56,6 +77,7 @@ def filled_result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
         "symbol": "BTCUSDT",
         "orderId": "MOCK_BTCUSDT_1",
+        "clientOrderId": "ELV-0123456789abcdef0123456789abcdef",
         "side": "BUY",
         "status": "FILLED",
     }
@@ -69,7 +91,14 @@ def test_buy_submission_maps_filled_result_and_converts_decimal_at_boundary() ->
 
     report = adapter.submit(make_intent())
 
-    assert executor.buy_calls == [("BTCUSDT", 0.001, 123456.75)]
+    assert executor.buy_calls == [
+        (
+            "BTCUSDT",
+            0.001,
+            123456.75,
+            "ELV-0123456789abcdef0123456789abcdef",
+        )
+    ]
     assert executor.sell_calls == []
     assert report.status is SubmissionStatus.SUBMITTED
     assert report.retry_safety is RetrySafety.UNSAFE
@@ -86,7 +115,14 @@ def test_sell_submission_uses_only_the_sell_method() -> None:
 
     assert report.acknowledged is True
     assert executor.buy_calls == []
-    assert executor.sell_calls == [("BTCUSDT", 0.001, 123456.75)]
+    assert executor.sell_calls == [
+        (
+            "BTCUSDT",
+            0.001,
+            123456.75,
+            "ELV-0123456789abcdef0123456789abcdef",
+        )
+    ]
 
 
 def test_live_mode_is_rejected_before_any_executor_call() -> None:
@@ -177,8 +213,12 @@ def test_uncertain_legacy_result_is_ambiguous(result: object) -> None:
     [
         filled_result(symbol="ETHUSDT"),
         filled_result(side="SELL"),
+        filled_result(clientOrderId=None),
+        filled_result(clientOrderId="ELV-another-order"),
         filled_result(orderId=" "),
         filled_result(orderId=True),
+        filled_result(orderId="x" * 256),
+        filled_result(orderId="MOCK\x00BAD"),
     ],
 )
 def test_incoherent_filled_result_is_ambiguous(result: object) -> None:
@@ -211,6 +251,36 @@ def test_adapter_exception_is_classified_once_by_order_service() -> None:
     assert len(executor.buy_calls) == 1
     assert report.status is SubmissionStatus.AMBIGUOUS
     assert report.retry_safety is RetrySafety.UNSAFE
+
+
+@pytest.mark.parametrize(
+    "client_order_id",
+    ["x" * 256, "contains\x00nul", "contains\ud800surrogate"],
+)
+def test_unrepresentable_client_order_id_is_not_sent(
+    client_order_id: str,
+) -> None:
+    executor = LegacyExecutor(filled_result())
+
+    report = LegacyPaperExecutionAdapter(executor, "paper").submit(
+        make_intent(client_order_id=client_order_id)
+    )
+
+    assert report.status is SubmissionStatus.NOT_SENT
+    assert report.retry_safety is RetrySafety.SAFE
+    assert executor.buy_calls == []
+
+
+def test_maximum_storage_safe_client_order_id_is_forwarded_exactly() -> None:
+    client_order_id = "é" * 255
+    executor = LegacyExecutor(filled_result(clientOrderId=client_order_id))
+
+    report = LegacyPaperExecutionAdapter(executor, "paper").submit(
+        make_intent(client_order_id=client_order_id)
+    )
+
+    assert report.status is SubmissionStatus.SUBMITTED
+    assert executor.buy_calls[0][3] == client_order_id
 
 
 @pytest.mark.parametrize(

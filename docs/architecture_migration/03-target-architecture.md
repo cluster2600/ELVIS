@@ -246,6 +246,17 @@ added with the order repository; an in-memory deduplication cache would provide
 false safety. The service does not invent quantity, leverage, price, or balance
 fallbacks.
 
+M9b.5 closes only the transport-correlation gap in the still-authoritative
+paper path. `LegacyPaperExecutionAdapter` passes the stable client order ID as
+a keyword-only argument to `BinanceExecutor`, and accepts a nominal paper
+`FILLED` response as a submission acknowledgement only when the response echoes
+that exact ID. The mock venue order ID is opaque and collision-resistant rather
+than derived from wall-clock seconds. This echo proves which invocation
+produced one response; it is not a durable receipt, a fill fact, deduplication,
+or a query-by-client-ID implementation. Legacy executor callers that do not
+provide a client ID remain supported but cannot satisfy the typed adapter's
+correlation check.
+
 ### `JournaledOrderService`
 
 M9b.4 supplies the unwired durable wrapper. It accepts one
@@ -396,15 +407,17 @@ yet durably quarantined because the schema and operational workflow for
 quarantine are deliberately deferred. Each append currently replays the
 complete stream before validation and again after insertion; that cost is
 acceptable for an unwired correctness slice, but bounded replay or snapshots
-are required before activation. Before any cut-over, the execution adapter must
-guarantee clean Unicode and the schema limits of 255 characters for every venue
-order ID and trade ID it emits; detecting an unrepresentable identifier only
-after an external effect is not an acceptable activation boundary. The codec
-rejects NUL characters, isolated Unicode surrogates, and over-length
-domain-sourced identifiers, but this validation cannot retroactively make an
-already accepted venue identifier safe. Later M9b slices must add durable
-quarantine, reconciliation, runtime composition, and the remaining activation
-gates before `PositionService` can own the runtime boundary.
+are required before activation. M9b.5 prevalidates and echoes the domain-sourced
+client order ID at the legacy paper transport boundary and emits a bounded
+opaque mock venue order ID. A future fill source must still guarantee clean
+Unicode and the schema limit of 255 characters for every trade ID it emits;
+detecting an unrepresentable identifier only after an external effect is not an
+acceptable activation boundary. The codec rejects NUL characters, isolated
+Unicode surrogates, and over-length identifiers, but this validation cannot
+retroactively make an already accepted venue identifier safe. Later M9b slices
+must add an atomic paper receipt, query/reconciliation, durable quarantine,
+runtime composition, and the remaining activation gates before
+`PositionService` can own the runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.4 unwired journaled application coordinator) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.5 correlated legacy paper response) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1542,14 +1542,14 @@ cover direct, facade, relative, aliased, assignment, and literal dynamic import
 forms across all production roots.
 
 Activation remains blocked until the runtime can construct a truthful
-pre-submit `PositionInstruction`, propagate the stable client order ID into the
-actual side-effect owner, query/reconcile by that identity, and expose an
-atomic, durable confirmed-fill observation. It also needs collective
-position-capacity reservation, scope-wide unresolved-order inventory, durable
-quarantine, one database configuration/factory, migrations and reconciliation
-before readiness, bounded replay, and retirement of the executor, inline exit,
-and Balanced Starter position authorities. The current paper executor's
-`FILLED` response is not promoted to a confirmed fill.
+pre-submit `PositionInstruction`, query/reconcile the propagated client order
+identity from an atomic durable paper receipt, and expose an independent
+confirmed-fill observation. It also needs collective position-capacity
+reservation, scope-wide unresolved-order inventory, durable quarantine, one
+database configuration/factory, migrations and reconciliation before
+readiness, bounded replay, and retirement of the executor, inline exit, and
+Balanced Starter position authorities. The current paper executor's `FILLED`
+response is not promoted to a confirmed fill.
 
 Verification at implementation time:
 
@@ -1602,6 +1602,80 @@ Python 3.10. The new PostgreSQL 15 composition matrix passes 4 tests, and the
 complete isolated PostgreSQL suite passes 35. The isolated non-PostgreSQL suite
 passes 1,539 tests, skips 49, and deselects 38 under `Pacific/Honolulu`. Black,
 isort, flake8, Python 3.10 compilation, and the diff check pass.
+
+### M9b.5 correlated legacy paper response
+
+M9b.5 closes one concrete transport gap in the active legacy paper path without
+activating the journal. `LegacyPaperExecutionAdapter` passes the
+`OrderIntent.client_order_id` as an explicit keyword-only argument through
+`execute_buy` or `execute_sell`. `BinanceExecutor` validates a supplied client
+ID before fee calculation, position reads, or database effects, forwards it to
+the paper execution owner, and echoes it as `clientOrderId` in the response.
+The adapter treats a nominal `FILLED` response as `SUBMITTED` only when this
+echo exactly matches the intent; a missing or different echo is
+`AMBIGUOUS/UNSAFE`, never acknowledged by symbol and side alone.
+
+Mock venue order IDs no longer use `int(time.time())`, which could collide for
+two same-symbol calls in one second. Each accepted paper invocation emits a
+bounded opaque UUID-based `orderId`. Direct legacy callers that provide no
+client ID remain compatible and receive no correlated echo; only the typed
+adapter requires the echo. The change neither retries nor deduplicates an
+order, and it does not make a paper response a `ConfirmedFill`.
+
+This slice deliberately adds no SQL, lookup cache, or `get_order_status`
+implementation. The legacy trade and position helpers still use separate
+connections, commit independently, and can swallow write failures; neither
+table stores the client or venue order ID. Therefore the response is transport
+correlation only, not a durable receipt, idempotency guarantee, restart proof,
+or reconciliation source. A forward migration and one transaction-owning paper
+repository must persist the instruction identity, execution outcome, and fill
+observation before M9b.4 can be composed into runtime.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py \
+  tests/test_paper_fill_integrity.py \
+  tests/test_main_order_submission.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py
+.venv/bin/black --target-version py310 --check \
+  trading/execution/legacy_paper_adapter.py \
+  trading/execution/binance_executor.py \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py
+.venv/bin/isort --check-only \
+  trading/execution/legacy_paper_adapter.py \
+  trading/execution/binance_executor.py \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py
+.venv/bin/flake8 \
+  trading/execution/legacy_paper_adapter.py \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/execution/legacy_paper_adapter.py \
+  trading/execution/binance_executor.py \
+  tests/test_legacy_paper_adapter.py \
+  tests/test_binance_executor.py
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN \
+  -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused suite passes 60 tests and skips 4; the adapter/executor subset
+passes 47 tests and skips 3 on Python 3.10. Black and isort pass for all four
+changed Python files. Flake8 passes for the new adapter and tests; the complete
+legacy `binance_executor.py` still has its documented pre-existing lint debt,
+so this slice does not claim a clean whole-file flake8 result for it. Python
+3.10 compilation and the diff check pass. The isolated non-PostgreSQL suite
+passes 1,552 tests, skips 50, and deselects 38 under `Pacific/Honolulu`.
 
 ## Cut-over policy
 
