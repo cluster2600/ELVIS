@@ -416,6 +416,95 @@ def test_business_table_replaced_by_exact_row_view_is_schema_drift_before_replay
     assert "position_streams ORDER BY position_key" not in sql
 
 
+@pytest.mark.parametrize("mode", ("SHADOW", "PAUSED", "ACTIVE"))
+def test_nonlegacy_runtime_control_mode_is_an_explicit_blocker(
+    migrated_postgres_dsn,
+    mode,
+):
+    encoded = _provision(migrated_postgres_dsn)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE np.paper_runtime_control
+                SET mode = %s,
+                    runtime_generation = runtime_generation + 1
+                WHERE control_key
+                """,
+                (mode,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = _assess(migrated_postgres_dsn, _context(encoded))
+
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert _finding_kinds(result) == {
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY
+    }
+    assert result.account_version == 0
+    assert len(result.legacy_watermarks) == len(LEGACY_RELATIONS)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    (
+        "DELETE FROM np.paper_runtime_control",
+        """
+        CREATE OR REPLACE FUNCTION np.enforce_legacy_paper_runtime_fence()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = pg_catalog
+        AS $function$
+        BEGIN
+            RETURN NULL;
+        END
+        $function$
+        """,
+        """
+        ALTER TABLE np.trades
+        DISABLE TRIGGER legacy_paper_runtime_fence_trades
+        """,
+        """
+        ALTER TABLE np.paper_runtime_control
+        DROP CONSTRAINT paper_runtime_control_mode;
+        ALTER TABLE np.paper_runtime_control
+        ADD CONSTRAINT paper_runtime_control_mode CHECK (TRUE)
+        """,
+    ),
+)
+def test_runtime_control_or_fence_tamper_is_early_schema_drift(
+    migrated_postgres_dsn,
+    tamper,
+):
+    encoded = _provision(migrated_postgres_dsn)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(tamper)
+        connection.commit()
+    finally:
+        connection.close()
+    trace = _TracingFactory(migrated_postgres_dsn)
+
+    result = _assess(
+        migrated_postgres_dsn,
+        _context(encoded),
+        factory=trace,
+    )
+
+    assert _finding_kinds(result) == {PaperAccountReadinessFindingKind.MIGRATION_DRIFT}
+    assert result.account_version is None
+    assert result.legacy_watermarks == ()
+    sql = "\n".join(command for command, _ in trace.connections[0].commands)
+    assert "FROM np.orders" not in sql
+    assert "paper_account_streams ORDER BY account_key" not in sql
+    assert "position_streams ORDER BY position_key" not in sql
+
+
 def test_account_provenance_and_foreign_scope_are_global_blockers(
     migrated_postgres_dsn,
 ):

@@ -256,6 +256,7 @@ def test_replay_or_ownership_findings_require_reconciliation(kind) -> None:
         PaperAccountReadinessFindingKind.MARGIN_RESERVATION_PRESENT,
         PaperAccountReadinessFindingKind.DURABLE_OPEN_POSITION,
         PaperAccountReadinessFindingKind.LEGACY_OPEN_POSITION,
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
     ),
 )
 def test_non_reconciliation_findings_are_blocking(kind) -> None:

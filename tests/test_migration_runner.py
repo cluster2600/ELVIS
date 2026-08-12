@@ -57,7 +57,7 @@ def fake_connection(*, applied_rows=()):
 def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1, 2, 3)
+    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4)
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -140,6 +140,39 @@ def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     assert "np.open_positions" not in account_ledger.sql
     assert {prefix[0] for prefix in _statement_prefixes(account_ledger.sql)} == {
         "CREATE"
+    }
+
+    runtime_control = migrations[3]
+    assert runtime_control.name == "paper_runtime_control"
+    assert runtime_control.checksum == (
+        "869b015928c8cba7e60838ee1fbeb000" "6ce4647ef003c936c4f6a354e0306edb"
+    )
+    assert "CREATE TABLE np.paper_runtime_control" in runtime_control.sql
+    assert "CREATE FUNCTION np.enforce_legacy_paper_runtime_fence()" in (
+        runtime_control.sql
+    )
+    assert "SECURITY DEFINER" in runtime_control.sql
+    assert "SET search_path = pg_catalog" in runtime_control.sql
+    assert "FOR SHARE" in runtime_control.sql
+    assert "ERRCODE = '55000'" in runtime_control.sql
+    assert "ENABLE ALWAYS TRIGGER" in runtime_control.sql
+    assert runtime_control.sql.count("CREATE TRIGGER") == 7
+    assert runtime_control.sql.count("ENABLE ALWAYS TRIGGER") == 7
+    for relation in (
+        "account_balances",
+        "liquidations",
+        "margin_history",
+        "model_predictions",
+        "open_positions",
+        "trades",
+        "trading_session_resets",
+    ):
+        assert f"ON np.{relation}" in runtime_control.sql
+        assert f"legacy_paper_runtime_fence_{relation}" in runtime_control.sql
+    assert {prefix[0] for prefix in _statement_prefixes(runtime_control.sql)} == {
+        "ALTER",
+        "CREATE",
+        "INSERT",
     }
 
 

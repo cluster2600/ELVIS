@@ -239,6 +239,10 @@ accounted paper submission and adds the still-unwired concrete
 `PostgresAtomicPaperAccountOwner`. That owner must lock the provisioned account
 before the position and either replay one exact manifest, reject with no durable
 mutation, or commit the journal batch and every account fact together.
+M9b.13 adds the pure readiness vocabulary and its dormant global PostgreSQL
+assessment. M9b.14a adds migration `0004`, whose default-`LEGACY` singleton and
+seven database triggers prepare the global legacy-writer fence without exposing
+an activation API or changing runtime authority.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -937,20 +941,23 @@ malformed row retains only the valid decoded prefix and carries the canonical
 `MIGRATION_DRIFT` finding rather than being misreported as merely pending.
 
 Even an exact ledger is not sufficient authority for business reads. The
-adapter next verifies all sixteen durable business relations as ordinary,
-permanent PostgreSQL tables with no rules, user triggers, row-level security,
-forced row-level security, inheritance, or policies. The exact inventory is
+adapter next verifies all seventeen durable business relations as ordinary,
+permanent PostgreSQL tables with no rules, row-level security, forced row-level
+security, inheritance, or policies. The exact inventory is
 `np.account_balances`, `np.liquidations`, `np.margin_history`,
 `np.model_predictions`, `np.open_positions`, `np.trades`,
 `np.trading_session_resets`, `np.order_events`, `np.orders`,
 `np.position_streams`, `np.paper_account_streams`,
 `np.paper_account_balances`, `np.paper_margin_reservations`,
 `np.paper_account_batch_manifests`, `np.paper_account_settlements`, and
-`np.paper_account_postings`. A missing table, view or foreign-table substitution,
-temporary or unlogged persistence, or behavior overlay is canonical
-`MIGRATION_DRIFT` and stops before any business relation is read.
+`np.paper_account_postings`, plus M9b.14a's `np.paper_runtime_control`.
+User triggers are forbidden on every non-legacy relation; the seven legacy
+relations must carry only the exact M9b.14a guards validated below. A missing
+table, view or foreign-table substitution, temporary or unlogged persistence,
+or behavior overlay is canonical `MIGRATION_DRIFT` and stops before any
+business relation is read.
 
-The later legacy fence will cover seven shared tables with no execution-scope
+The M9b.14a legacy fence covers seven shared tables with no execution-scope
 column. Readiness therefore cannot be established from a caller-local subset.
 After exact migration proof, M9b.13b inventories every
 `paper_account_streams` and `position_streams` identity across every execution
@@ -1003,15 +1010,72 @@ M9b.13b adds no schema migration, fence record, rotating runtime generation,
 trigger, database-role restriction, legacy-writer shutdown, health/startup gate,
 reconciliation mutation, shadow execution, or cut-over decision.
 
-A future activation transaction must first establish a database-enforced global
-legacy-writer fence, then repeat this evidence under the lock order
-`fence -> account -> position`; it cannot reuse an earlier
+A future activation transaction must first lock the database-enforced global
+legacy-writer fence installed by M9b.14a, then repeat this evidence under the
+lock order `fence -> account -> position`; it cannot reuse an earlier
 `PREPARED_FOR_FENCE` result.
 That transition must wait out in-flight legacy writes, prevent stale binaries
 from writing after activation, and retain an explicit rollback policy. The
 current global full-history replay is also unbounded and requires measured soak,
 operational timeouts, and a bounded replay or snapshot strategy before runtime
 activation.
+
+M9b.14a installs the first database-enforced, but still dormant, paper-runtime
+control through forward migration `0004_paper_runtime_control.sql`. The migration
+creates the singleton `np.paper_runtime_control` relation with `control_key =
+TRUE`, one of `LEGACY`, `SHADOW`, `PAUSED`, or `ACTIVE`, a non-negative
+`runtime_generation`, and an update timestamp. It seeds exactly one row in
+`LEGACY` at generation `0`. This dedicated runtime generation is deliberately
+separate from the immutable `owner_generation` stored in each paper-account
+opening and batch manifest; neither value can stand in for the other.
+
+The migration also creates the zero-argument trigger function
+`np.enforce_legacy_paper_runtime_fence()`. It is `SECURITY DEFINER`, fixes its
+`search_path` to `pg_catalog`, and reads the singleton `FOR SHARE`. An absent,
+ambiguous, or invalid control row fails closed with SQLSTATE `55000`.
+`LEGACY` and `SHADOW` permit legacy writes; `PAUSED` and `ACTIVE` reject them
+with SQLSTATE `55000`. Seven exact `BEFORE ... FOR EACH STATEMENT` triggers cover
+`INSERT`, `UPDATE`, `DELETE`, and `TRUNCATE` on
+`np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.trades`, and
+`np.trading_session_resets`. Their canonical names are
+`legacy_paper_runtime_fence_<table>`, and every trigger is `ENABLE ALWAYS` so a
+stale writer cannot bypass the fence merely by changing session replication
+role.
+
+The default remains behavior-preserving: migration application alone leaves the
+legacy runtime authoritative and able to mutate all seven tables. `SHADOW` also
+leaves those writes enabled; it reserves a later parity phase in which only the
+legacy path may act. `PAUSED` and `ACTIVE` have database-level legacy-DML
+semantics now, but this slice exposes no transition API and no runtime code can
+select either mode.
+
+M9b.13b readiness now treats the control relation and fence implementation as
+authority-bearing schema. Its durable-relation inventory contains seventeen
+tables and permits user triggers only on the seven legacy tables. It then proves
+the exact control columns, defaults, validated constraints, singleton row,
+trigger-function identity and source, `SECURITY DEFINER`/volatile/zero-argument
+properties, safe `search_path`, shared ownership with the control table, and all
+seven exact `ENABLE ALWAYS` trigger identities and event masks. No additional
+user trigger is tolerated. Missing, repeated, malformed, or negative-generation
+control state is canonical `MIGRATION_DRIFT` and stops before business reads.
+A valid non-`LEGACY` mode instead adds
+`RUNTIME_CONTROL_NOT_LEGACY` while still collecting the complete global
+assessment; only valid `LEGACY` state can yield `PREPARED_FOR_FENCE` in this
+slice. The returned assessment remains stale-on-return and non-authoritative.
+
+M9b.14a does not grant runtime authority. It adds no activation or rollback API,
+role or privilege separation, runtime/startup/health wiring, active-owner
+generation check, shadow executor, compatibility projection, reconciliation
+mutation, or cut-over. Before `ACTIVE` is reachable, a migration/admin role must
+own schema objects while a non-superuser runtime role has neither ownership nor
+DDL/`CREATE` privileges. A locked transition must wait out in-flight legacy
+writes, repeat readiness in the global order `fence -> account -> position`,
+advance and bind `runtime_generation` atomically to the sole durable owner, and
+leave a tested fail-closed `PAUSED`/rollback procedure. Bounded replay or
+snapshots, operational timeouts, reconciliation/quarantine, shadow parity,
+restart recovery, compatibility-projection policy, soak evidence, and removal
+of every legacy writer remain explicit `ACTIVE` blockers.
 
 ## Runtime and configuration
 

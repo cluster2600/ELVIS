@@ -42,6 +42,47 @@ _LEGACY_RELATIONS = (
     "np.trades",
     "np.trading_session_resets",
 )
+_RUNTIME_CONTROL_RELATION = "np.paper_runtime_control"
+_RUNTIME_CONTROL_FUNCTION = "enforce_legacy_paper_runtime_fence"
+_RUNTIME_CONTROL_TRIGGER_PREFIX = "legacy_paper_runtime_fence_"
+_RUNTIME_CONTROL_MODES = frozenset({"LEGACY", "SHADOW", "PAUSED", "ACTIVE"})
+_EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE = """DECLARE
+    current_mode TEXT;
+    current_generation BIGINT;
+BEGIN
+    BEGIN
+        SELECT mode, runtime_generation
+        INTO STRICT current_mode, current_generation
+        FROM np.paper_runtime_control
+        WHERE control_key IS TRUE
+        FOR SHARE;
+    EXCEPTION
+        WHEN NO_DATA_FOUND OR TOO_MANY_ROWS OR undefined_table THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '55000',
+                MESSAGE = 'paper runtime control is unavailable';
+    END;
+
+    IF current_mode IS NULL
+       OR current_generation IS NULL
+       OR current_generation < 0
+       OR current_mode NOT IN ('LEGACY', 'SHADOW', 'PAUSED', 'ACTIVE') THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'paper runtime control is invalid';
+    END IF;
+
+    IF current_mode IN ('PAUSED', 'ACTIVE') THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = FORMAT(
+                'legacy paper writes are fenced in %s mode',
+                current_mode
+            );
+    END IF;
+
+    RETURN NULL;
+END"""
 _DURABLE_BUSINESS_RELATIONS = tuple(
     sorted(
         _LEGACY_RELATIONS
@@ -54,6 +95,7 @@ _DURABLE_BUSINESS_RELATIONS = tuple(
             "np.paper_account_settlements",
             "np.paper_account_streams",
             "np.paper_margin_reservations",
+            _RUNTIME_CONTROL_RELATION,
             "np.position_streams",
         )
     )
@@ -170,6 +212,92 @@ JOIN pg_namespace namespace_row
 WHERE namespace_row.nspname = 'np'
   AND table_row.relname = ANY(%s)
 ORDER BY table_row.relname
+"""
+_SELECT_RUNTIME_CONTROL_COLUMNS_SQL = """
+SELECT
+    ordinal_position,
+    column_name,
+    udt_name,
+    is_nullable,
+    CASE
+        WHEN column_default IS NULL THEN 'none'
+        WHEN LOWER(column_default) = 'true' THEN 'true'
+        WHEN LOWER(column_default) IN ('now()', 'current_timestamp') THEN 'now'
+        ELSE 'other'
+    END
+FROM information_schema.columns
+WHERE table_schema = 'np'
+  AND table_name = 'paper_runtime_control'
+ORDER BY ordinal_position
+"""
+_SELECT_RUNTIME_CONTROL_CONSTRAINTS_SQL = """
+SELECT
+    constraint_row.conname,
+    constraint_row.contype,
+    constraint_row.conkey,
+    constraint_row.condeferrable,
+    constraint_row.condeferred,
+    constraint_row.convalidated,
+    pg_get_expr(constraint_row.conbin, constraint_row.conrelid)
+FROM pg_constraint constraint_row
+JOIN pg_class table_row
+  ON table_row.oid = constraint_row.conrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_runtime_control'
+ORDER BY constraint_row.conname
+"""
+_SELECT_RUNTIME_CONTROL_FUNCTION_SQL = """
+SELECT
+    routine_row.prosecdef,
+    routine_row.provolatile,
+    routine_row.proleakproof,
+    routine_row.proisstrict,
+    routine_row.pronargs,
+    routine_row.prorettype = 'trigger'::regtype,
+    language_row.lanname,
+    routine_row.proconfig,
+    routine_row.prosrc,
+    routine_row.proowner = control_row.relowner
+FROM pg_proc routine_row
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = routine_row.pronamespace
+JOIN pg_language language_row
+  ON language_row.oid = routine_row.prolang
+JOIN pg_class control_row
+  ON control_row.relname = 'paper_runtime_control'
+JOIN pg_namespace control_namespace
+  ON control_namespace.oid = control_row.relnamespace
+ AND control_namespace.nspname = 'np'
+WHERE namespace_row.nspname = 'np'
+  AND routine_row.proname = 'enforce_legacy_paper_runtime_fence'
+ORDER BY routine_row.oid
+"""
+_SELECT_RUNTIME_CONTROL_TRIGGERS_SQL = """
+SELECT
+    table_row.relname,
+    trigger_row.tgname,
+    trigger_row.tgenabled,
+    trigger_row.tgtype,
+    routine_namespace.nspname,
+    routine_row.proname
+FROM pg_trigger trigger_row
+JOIN pg_class table_row
+  ON table_row.oid = trigger_row.tgrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+JOIN pg_proc routine_row
+  ON routine_row.oid = trigger_row.tgfoid
+JOIN pg_namespace routine_namespace
+  ON routine_namespace.oid = routine_row.pronamespace
+WHERE namespace_row.nspname = 'np'
+  AND NOT trigger_row.tgisinternal
+ORDER BY table_row.relname, trigger_row.tgname
+"""
+_SELECT_RUNTIME_CONTROL_SQL = """
+SELECT control_key, mode, runtime_generation
+FROM np.paper_runtime_control
 """
 _SELECT_ACCOUNT_IDENTITIES_SQL = """
 SELECT account_key, execution_scope
@@ -359,10 +487,135 @@ def _durable_business_relations_are_authoritative(cursor: object) -> bool:
     )
     rows = tuple(tuple(row) for row in cursor.fetchall())
     expected = tuple(
-        (relation, "r", "p", False, False, False, False, False, False)
+        (
+            relation,
+            "r",
+            "p",
+            False,
+            False,
+            False,
+            relation in _LEGACY_RELATIONS,
+            False,
+            False,
+        )
         for relation in _DURABLE_BUSINESS_RELATIONS
     )
     return rows == expected
+
+
+def _runtime_control_catalog_is_exact(cursor: object) -> bool:
+    try:
+        cursor.execute(_SELECT_RUNTIME_CONTROL_COLUMNS_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (1, "control_key", "bool", "NO", "true"),
+            (2, "mode", "text", "NO", "none"),
+            (3, "runtime_generation", "int8", "NO", "none"),
+            (4, "updated_at", "timestamptz", "NO", "now"),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_CONTROL_CONSTRAINTS_SQL)
+        constraints = tuple(tuple(row) for row in cursor.fetchall())
+        if constraints != (
+            (
+                "paper_runtime_control_generation_nonnegative",
+                "c",
+                [3],
+                False,
+                False,
+                True,
+                "(runtime_generation >= 0)",
+            ),
+            (
+                "paper_runtime_control_mode",
+                "c",
+                [2],
+                False,
+                False,
+                True,
+                "(mode = ANY (ARRAY['LEGACY'::text, 'SHADOW'::text, "
+                "'PAUSED'::text, 'ACTIVE'::text]))",
+            ),
+            (
+                "paper_runtime_control_pkey",
+                "p",
+                [1],
+                False,
+                False,
+                True,
+                None,
+            ),
+            (
+                "paper_runtime_control_singleton",
+                "c",
+                [1],
+                False,
+                False,
+                True,
+                "control_key",
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_CONTROL_FUNCTION_SQL)
+        function_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if len(function_rows) != 1:
+            return False
+        function = function_rows[0]
+        if function[:8] != (
+            True,
+            "v",
+            False,
+            False,
+            0,
+            True,
+            "plpgsql",
+            ["search_path=pg_catalog"],
+        ):
+            return False
+        if type(function[8]) is not str:
+            return False
+        if function[8].strip() != _EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE:
+            return False
+        if function[9] is not True:
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_CONTROL_TRIGGERS_SQL)
+        trigger_rows = tuple(tuple(row) for row in cursor.fetchall())
+        expected_triggers = tuple(
+            (
+                relation.removeprefix("np."),
+                _RUNTIME_CONTROL_TRIGGER_PREFIX + relation.removeprefix("np."),
+                "A",
+                62,
+                "np",
+                _RUNTIME_CONTROL_FUNCTION,
+            )
+            for relation in _LEGACY_RELATIONS
+        )
+        return trigger_rows == expected_triggers
+    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        return False
+
+
+def _read_runtime_control(
+    cursor: object,
+) -> tuple[str, int] | None:
+    try:
+        cursor.execute(_SELECT_RUNTIME_CONTROL_SQL)
+        rows = tuple(cursor.fetchall())
+        if len(rows) != 1:
+            return None
+        row = _one_row(rows[0], "paper runtime control", 3)
+        if row[0] is not True or type(row[1]) is not str:
+            return None
+        if row[1] not in _RUNTIME_CONTROL_MODES:
+            return None
+        if type(row[2]) is not int or not 0 <= row[2] <= (1 << 63) - 1:
+            return None
+        return row[1], row[2]
+    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        return None
 
 
 def _decode_order_references(rows: object) -> tuple[tuple[str, str, str], ...]:
@@ -476,9 +729,19 @@ def _assess_exact_schema(
     context: PaperAccountReadinessContext,
     expected: tuple[MigrationIdentity, ...],
     applied: tuple[MigrationIdentity, ...],
+    runtime_mode: str,
 ) -> PaperAccountReadinessAssessment:
     findings = []
     account_version = None
+
+    if runtime_mode != "LEGACY":
+        findings.append(
+            _finding(
+                PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
+                "runtime_control",
+                _RUNTIME_CONTROL_RELATION,
+            )
+        )
 
     raw_order_references = None
     try:
@@ -789,12 +1052,25 @@ class PostgresPaperAccountReadiness:
                             applied,
                         )
                     else:
-                        result = _assess_exact_schema(
-                            cursor,
-                            context=context,
-                            expected=expected,
-                            applied=applied,
+                        runtime_control = (
+                            _read_runtime_control(cursor)
+                            if _runtime_control_catalog_is_exact(cursor)
+                            else None
                         )
+                        if runtime_control is None:
+                            result = _schema_drift_assessment(
+                                context,
+                                expected,
+                                applied,
+                            )
+                        else:
+                            result = _assess_exact_schema(
+                                cursor,
+                                context=context,
+                                expected=expected,
+                                applied=applied,
+                                runtime_mode=runtime_control[0],
+                            )
             except psycopg2.Error as exc:
                 if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:
                     result = _schema_drift_assessment(context, expected, applied)

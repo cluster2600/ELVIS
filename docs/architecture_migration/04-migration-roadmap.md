@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.13b dormant global pre-fence assessment implemented; final counted gates pending; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14a dormant global legacy-writer fence implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -3145,8 +3145,9 @@ or behavior overlay produces the canonical migration blocker and stops before
 business inventory. A malformed trailing row preserves only its decodable
 prefix and is `MIGRATION_DRIFT`, not `MIGRATION_PENDING`.
 
-An exact ledger is followed by a second authority gate covering all sixteen
-business relations: `np.account_balances`, `np.liquidations`,
+At the M9b.13b checkpoint, an exact ledger was followed by a second authority
+gate covering these sixteen business relations: `np.account_balances`,
+`np.liquidations`,
 `np.margin_history`, `np.model_predictions`, `np.open_positions`, `np.trades`,
 `np.trading_session_resets`, `np.order_events`, `np.orders`,
 `np.position_streams`, `np.paper_account_streams`,
@@ -3156,9 +3157,10 @@ business relations: `np.account_balances`, `np.liquidations`,
 rules, user triggers, row-level security, forced row-level security,
 inheritance, or policies. Missing relations, views or other relation kinds,
 non-permanent persistence, and behavior overlays produce `MIGRATION_DRIFT`
-before a business row is trusted.
+before a business row is trusted. M9b.14a extends that gate with the seventeenth
+control relation and exact legacy-trigger authority described below.
 
-The future legacy fence is global because none of the seven migration-`0001`
+The M9b.14a legacy fence is global because none of the seven migration-`0001`
 tables carries an execution scope. The assessment therefore scans every account
 and position identity across every stored scope, not only the requested scope.
 It passes the same cursor and each identity's stored scope into strict account
@@ -3204,7 +3206,7 @@ transition, not permission to start trading.
 This slice adds no migration, fence record, runtime generation, trigger,
 database-role restriction, legacy-writer shutdown, startup or health wiring,
 reconciliation mutation, shadow execution, or cut-over. A later activation
-boundary must install and lock the global fence, wait out in-flight legacy
+boundary must lock the M9b.14a global fence, wait out in-flight legacy
 writes, repeat this assessment under `fence -> account -> position`, and prevent
 old binaries from writing after activation. Full global replay is currently
 unbounded, so bounded replay or snapshots, operational timeouts, soak evidence,
@@ -3285,19 +3287,200 @@ The full non-PostgreSQL Honolulu run passed 2,308 tests, with 50 skipped, 135
 deselected, and 7 subtests. Black, isort, flake8, Python 3.10 compilation, and
 the diff check were green.
 
+### M9b.14a dormant global legacy-writer fence
+
+M9b.14a adds the forward-only
+`0004_paper_runtime_control.sql` migration without wiring the migration runner
+or any new owner into production startup. Its immutable SHA-256 is
+`869b015928c8cba7e60838ee1fbeb0006ce4647ef003c936c4f6a354e0306edb`.
+It creates the ordinary permanent
+singleton table `np.paper_runtime_control` with this exact initial authority:
+
+- `control_key boolean NOT NULL PRIMARY KEY DEFAULT TRUE`, constrained to
+  `TRUE` so at most one canonical row can exist;
+- `mode text NOT NULL`, constrained to `LEGACY`, `SHADOW`, `PAUSED`, or
+  `ACTIVE`;
+- `runtime_generation bigint NOT NULL`, constrained non-negative; and
+- `updated_at timestamptz NOT NULL DEFAULT now()`.
+
+The migration inserts exactly `(TRUE, 'LEGACY', 0)`. `runtime_generation` is a
+dedicated future runtime-ownership epoch. It is not the immutable
+`owner_generation` that binds a paper-account opening and its manifests, and
+this slice neither copies nor derives one from the other.
+
+The zero-argument `np.enforce_legacy_paper_runtime_fence()` trigger function is
+`SECURITY DEFINER`, volatile, non-strict, and configured with
+`search_path=pg_catalog`. Each statement takes a `FOR SHARE` lock on the control
+row before it decides whether legacy DML is allowed. Missing control state fails
+closed with SQLSTATE `55000` and `paper runtime control is unavailable`;
+ill-formed state fails with `paper runtime control is invalid`. `LEGACY` and
+`SHADOW` return without blocking the statement. `PAUSED` and `ACTIVE` fail with
+SQLSTATE `55000` and `legacy paper writes are fenced in <mode> mode`.
+
+The migration installs these seven exact guards:
+
+- `legacy_paper_runtime_fence_account_balances` on `np.account_balances`;
+- `legacy_paper_runtime_fence_liquidations` on `np.liquidations`;
+- `legacy_paper_runtime_fence_margin_history` on `np.margin_history`;
+- `legacy_paper_runtime_fence_model_predictions` on `np.model_predictions`;
+- `legacy_paper_runtime_fence_open_positions` on `np.open_positions`;
+- `legacy_paper_runtime_fence_trades` on `np.trades`; and
+- `legacy_paper_runtime_fence_trading_session_resets` on
+  `np.trading_session_resets`.
+
+Every guard is `BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE`, statement-level,
+and `ENABLE ALWAYS`. The migration therefore covers every DML operation used by
+the legacy persistence helpers and does not depend on row cardinality. Because
+the seed is `LEGACY`, applying `0004` alone preserves current runtime behavior;
+it does not silently pause or activate a writer. `SHADOW` also permits legacy
+DML and does not itself execute a second path.
+
+The M9b.13b assessment advances with the migration. Its authority inventory now
+contains the original sixteen business tables plus
+`np.paper_runtime_control`. The seven legacy tables are the only relations
+allowed to report user triggers; a separate exact catalog gate then verifies
+the four control columns and defaults, all four named validated constraints,
+the function signature, language, volatility, security-definer flag, safe
+configuration, owner, and full PostgreSQL function source. It verifies exactly
+seven user triggers across the namespace, each with its canonical relation,
+name, `ENABLE ALWAYS` state, complete statement-level DML mask, and exact
+`np.enforce_legacy_paper_runtime_fence` target. An extra or altered trigger,
+function, relation, column, default, constraint, or behavior overlay remains
+`MIGRATION_DRIFT`.
+
+Readiness next reads the raw singleton `(control_key, mode,
+runtime_generation)`. An absent or repeated row, non-`TRUE` key, unknown mode,
+non-integer generation, negative generation, or out-of-range generation is
+early `MIGRATION_DRIFT` and prevents account, position, order, manifest, and
+legacy-watermark reads. A structurally valid `SHADOW`, `PAUSED`, or `ACTIVE`
+row is not schema drift: the adapter records
+`RUNTIME_CONTROL_NOT_LEGACY` for `np.paper_runtime_control` and continues the
+complete global evidence collection. Only valid `LEGACY` state can produce a
+finding-free `PREPARED_FOR_FENCE` result in M9b.14a. That result remains
+`snapshot_authoritative == False` and grants no transition authority.
+
+This slice intentionally adds no public activation, pause, shadow, generation,
+or rollback API. It changes no database roles or grants, does not revoke schema
+`CREATE` or object ownership from the current runtime identity, and adds no
+startup, health, CLI, executor, atomic-owner, or compatibility-projection
+wiring. A superuser or object owner can still alter the fence. Consequently,
+`ACTIVE` remains prohibited until all of the following are implemented and
+proved:
+
+- separate migration/admin ownership and a non-superuser runtime role without
+  schema/object ownership, DDL, or schema `CREATE` privileges;
+- one locked transition boundary that waits out legacy statements, re-runs
+  authoritative evidence in `fence -> account -> position` order, advances
+  `runtime_generation`, and binds that generation to every durable-owner write;
+- startup and restart validation that fails closed on mode, generation,
+  migration, role, replay, or ownership mismatch;
+- reconciliation/quarantine for unsupported history plus a bounded replay or
+  snapshot plan, operational timeouts, and measured soak evidence;
+- side-effect-free `SHADOW` parity and an explicit compatibility-projection
+  policy; and
+- removal or proved fencing of every legacy writer, together with a tested
+  `PAUSED` and rollback procedure that never creates two authoritative owners.
+
+The verification gate for this slice includes migration package/upgrade and
+catalog checks, direct PostgreSQL DML tests for all four operations on all seven
+relations in all four modes, malformed/missing-control fail-closed cases,
+transaction and generation visibility, exact readiness-catalog drift tests,
+both supported Python interpreters, the full PostgreSQL suite, the complete
+non-PostgreSQL suite, formatting/static checks, compilation, and
+`git diff --check`.
+
+Literal verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py
+.venv/bin/isort --check-only \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py
+.venv/bin/flake8 \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_control_postgres.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The literal M9b.14a focused contract/repository/runner command passed 228 tests
+under each Python interpreter. The focused PostgreSQL 15 migration/readiness/
+fence command passed 181 tests under each interpreter; the complete PostgreSQL
+15 suite passed 282 tests under `.venv/bin/python`. The full non-PostgreSQL
+Honolulu run passed 2,317 tests, with 50 skipped, 285 deselected, and 7 subtests.
+Black, isort, flake8, Python 3.10 compilation, and `git diff --check` were green.
+
 ## Cut-over policy
 
-Each later behavioural migration has three modes:
+The paper-runtime control has four modes:
 
 1. **legacy** — current implementation is authoritative;
 2. **shadow** — both implementations evaluate the same frozen input, only the
    legacy path may act, and differences are recorded; and
-3. **active** — the new implementation acts, with a narrow switch back to
-   legacy until the next stable checkpoint.
+3. **paused** — legacy writes are fenced and no new owner may act while a
+   transition, reconciliation, or rollback is unresolved; and
+4. **active** — the new durable owner alone may act and the database rejects
+   writes to every legacy paper table.
 
 Shadow mode must never call a second executor or mutate cooldown, positions,
 portfolio, model feedback, or persistence. A comparison is useful only if it is
-side-effect free.
+side-effect free. Rollback from `ACTIVE` must first enter `PAUSED`, wait out and
+reconcile the active owner, and then select one authority deliberately; it must
+never create a window in which legacy and durable writers can both commit.
 
 ## Commit plan
 

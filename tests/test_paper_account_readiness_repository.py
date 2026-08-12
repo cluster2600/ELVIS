@@ -51,8 +51,86 @@ MIGRATION_COLUMNS = (
 )
 MIGRATION_CONSTRAINTS = (("p", [1], False, False, True),)
 DURABLE_RELATION_ROWS = tuple(
-    (relation, "r", "p", False, False, False, False, False, False)
+    (
+        relation,
+        "r",
+        "p",
+        False,
+        False,
+        False,
+        relation in readiness_module._LEGACY_RELATIONS,
+        False,
+        False,
+    )
     for relation in readiness_module._DURABLE_BUSINESS_RELATIONS
+)
+RUNTIME_CONTROL_COLUMNS = (
+    (1, "control_key", "bool", "NO", "true"),
+    (2, "mode", "text", "NO", "none"),
+    (3, "runtime_generation", "int8", "NO", "none"),
+    (4, "updated_at", "timestamptz", "NO", "now"),
+)
+RUNTIME_CONTROL_CONSTRAINTS = (
+    (
+        "paper_runtime_control_generation_nonnegative",
+        "c",
+        [3],
+        False,
+        False,
+        True,
+        "(runtime_generation >= 0)",
+    ),
+    (
+        "paper_runtime_control_mode",
+        "c",
+        [2],
+        False,
+        False,
+        True,
+        "(mode = ANY (ARRAY['LEGACY'::text, 'SHADOW'::text, "
+        "'PAUSED'::text, 'ACTIVE'::text]))",
+    ),
+    (
+        "paper_runtime_control_pkey",
+        "p",
+        [1],
+        False,
+        False,
+        True,
+        None,
+    ),
+    (
+        "paper_runtime_control_singleton",
+        "c",
+        [1],
+        False,
+        False,
+        True,
+        "control_key",
+    ),
+)
+RUNTIME_CONTROL_FUNCTION = (
+    True,
+    "v",
+    False,
+    False,
+    0,
+    True,
+    "plpgsql",
+    ["search_path=pg_catalog"],
+    readiness_module._EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE,
+    True,
+)
+RUNTIME_CONTROL_TRIGGERS = tuple(
+    (
+        relation.removeprefix("np."),
+        readiness_module._RUNTIME_CONTROL_TRIGGER_PREFIX + relation.removeprefix("np."),
+        "A",
+        62,
+        "np",
+        readiness_module._RUNTIME_CONTROL_FUNCTION,
+    )
+    for relation in readiness_module._LEGACY_RELATIONS
 )
 
 
@@ -234,6 +312,11 @@ def snapshot_responder(
     raw_order_references=(),
     raw_manifest_references=(),
     durable_relation_rows=DURABLE_RELATION_ROWS,
+    runtime_control_columns=RUNTIME_CONTROL_COLUMNS,
+    runtime_control_constraints=RUNTIME_CONTROL_CONSTRAINTS,
+    runtime_control_function=(RUNTIME_CONTROL_FUNCTION,),
+    runtime_control_triggers=RUNTIME_CONTROL_TRIGGERS,
+    runtime_control_rows=((True, "LEGACY", 0),),
 ):
     applied_rows = migration_rows() if applied is None else tuple(applied)
     watermarks = {} if legacy_rows is None else dict(legacy_rows)
@@ -253,14 +336,30 @@ def snapshot_responder(
             return [(relation,)]
         if sql.startswith("SELECT table_row.relkind, table_row.relpersistence"):
             return migration_relation_rows
+        if (
+            "FROM information_schema.columns" in sql
+            and "table_name = 'paper_runtime_control'" in sql
+        ):
+            return runtime_control_columns
         if "FROM information_schema.columns" in sql:
             return migration_columns
+        if (
+            "FROM pg_constraint constraint_row" in sql
+            and "table_row.relname = 'paper_runtime_control'" in sql
+        ):
+            return runtime_control_constraints
         if "FROM pg_constraint constraint_row" in sql:
             return migration_constraints
         if sql.startswith("SELECT version, name, checksum"):
             return applied_rows
         if "table_row.relname = ANY(%s)" in sql:
             return durable_relation_rows
+        if "FROM pg_proc routine_row" in sql:
+            return runtime_control_function
+        if "FROM pg_trigger trigger_row" in sql:
+            return runtime_control_triggers
+        if "FROM np.paper_runtime_control" in sql:
+            return runtime_control_rows
         if "FROM np.orders" in sql:
             return raw_order_references
         if "FROM np.paper_account_batch_manifests" in sql:
@@ -508,7 +607,7 @@ def test_non_authoritative_durable_business_relation_is_early_drift(
     field_index,
 ) -> None:
     first = list(DURABLE_RELATION_ROWS[0])
-    first[field_index] = "v" if field_index == 1 else True
+    first[field_index] = "v" if field_index == 1 else not first[field_index]
     drifted = (tuple(first), *DURABLE_RELATION_ROWS[1:])
     database = ScriptedDatabase(snapshot_responder(durable_relation_rows=drifted))
     account_calls, position_calls = install_replayers(monkeypatch)
@@ -516,6 +615,76 @@ def test_non_authoritative_durable_business_relation_is_early_drift(
     result = PostgresPaperAccountReadiness(database.connect).assess(context())
 
     assert result.applied_migrations == result.expected_migrations
+    assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
+    assert result.account_version is None
+    assert result.legacy_watermarks == ()
+    assert account_calls == []
+    assert position_calls == []
+    statements = tuple(sql for sql, _params in database.connections[0].commands)
+    assert not any("FROM np.orders" in sql for sql in statements)
+    assert not any("FROM np.paper_account_streams" in sql for sql in statements)
+    assert_read_only_snapshot(database.connections[0])
+
+
+@pytest.mark.parametrize("mode", ("SHADOW", "PAUSED", "ACTIVE"))
+def test_nonlegacy_runtime_control_mode_is_a_stable_blocker(
+    monkeypatch,
+    mode,
+) -> None:
+    database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(runtime_control_rows=((True, mode, 9),)),
+    )
+
+    assert finding_kinds(result) == (
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
+    )
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert result.account_version == 0
+    assert len(result.legacy_watermarks) == len(readiness_module._LEGACY_RELATIONS)
+    assert_read_only_snapshot(database.connections[0])
+
+
+@pytest.mark.parametrize(
+    "control_changes",
+    (
+        {"runtime_control_rows": ()},
+        {"runtime_control_rows": ((True, "LEGACY", -1),)},
+        {
+            "runtime_control_function": (
+                (*RUNTIME_CONTROL_FUNCTION[:8], "BEGIN RETURN NULL; END", True),
+            )
+        },
+        {
+            "runtime_control_triggers": (
+                (
+                    *RUNTIME_CONTROL_TRIGGERS[0][:2],
+                    "D",
+                    *RUNTIME_CONTROL_TRIGGERS[0][3:],
+                ),
+                *RUNTIME_CONTROL_TRIGGERS[1:],
+            )
+        },
+        {
+            "runtime_control_constraints": (
+                (
+                    *RUNTIME_CONTROL_CONSTRAINTS[0][:-1],
+                    "(runtime_generation >= '-1'::integer)",
+                ),
+                *RUNTIME_CONTROL_CONSTRAINTS[1:],
+            )
+        },
+    ),
+)
+def test_runtime_control_catalog_or_row_tamper_is_early_drift(
+    monkeypatch,
+    control_changes,
+) -> None:
+    database = ScriptedDatabase(snapshot_responder(**control_changes))
+    account_calls, position_calls = install_replayers(monkeypatch)
+
+    result = PostgresPaperAccountReadiness(database.connect).assess(context())
+
     assert finding_kinds(result) == (PaperAccountReadinessFindingKind.MIGRATION_DRIFT,)
     assert result.account_version is None
     assert result.legacy_watermarks == ()

@@ -5,6 +5,7 @@ from threading import Barrier
 
 import psycopg2
 import pytest
+from psycopg2 import sql
 
 from trading.persistence import (
     Migration,
@@ -37,7 +38,7 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
     migrations = load_migrations()
     connection = _connect(postgres_database_dsn)
     try:
-        assert apply_migrations(connection, migrations) == (1, 2, 3)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4)
         assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -60,6 +61,7 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                 "paper_account_settlements",
                 "paper_account_streams",
                 "paper_margin_reservations",
+                "paper_runtime_control",
                 "position_streams",
                 "schema_migrations",
                 "trades",
@@ -108,7 +110,7 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (1, 2, 3)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -140,7 +142,7 @@ def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (2, 3)
+        assert apply_migrations(connection, migrations) == (2, 3, 4)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -176,7 +178,7 @@ def test_versioned_journal_upgrades_to_dormant_account_ledger(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (3,)
+        assert apply_migrations(connection, migrations) == (3, 4)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT position_key, execution_scope
@@ -187,7 +189,166 @@ def test_versioned_journal_upgrades_to_dormant_account_ledger(
             assert cursor.fetchone() == ("np.paper_account_streams",)
             cursor.execute("SELECT COUNT(*) FROM np.paper_account_streams")
             assert cursor.fetchone() == (0,)
+            cursor.execute(
+                "SELECT control_key, mode, runtime_generation "
+                "FROM np.paper_runtime_control"
+            )
+            assert cursor.fetchone() == (True, "LEGACY", 0)
     finally:
+        connection.close()
+
+
+def test_versioned_account_ledger_upgrades_to_dormant_runtime_fence_without_loss(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:3]) == (1, 2, 3)
+        with connection.cursor() as cursor:
+            for relation in (
+                "liquidations",
+                "margin_history",
+                "model_predictions",
+                "open_positions",
+                "trades",
+                "trading_session_resets",
+            ):
+                cursor.execute(f"INSERT INTO np.{relation} (id) VALUES (710001)")
+            cursor.execute("""
+                INSERT INTO np.account_balances (id, asset, balance)
+                VALUES (710001, 'USDT', 100)
+                """)
+        connection.commit()
+
+        assert apply_migrations(connection, migrations) == (4,)
+        with connection.cursor() as cursor:
+            for relation in (
+                "account_balances",
+                "liquidations",
+                "margin_history",
+                "model_predictions",
+                "open_positions",
+                "trades",
+                "trading_session_resets",
+            ):
+                cursor.execute(f"SELECT id FROM np.{relation}")
+                assert cursor.fetchall() == [(710001,)]
+            cursor.execute(
+                "SELECT control_key, mode, runtime_generation "
+                "FROM np.paper_runtime_control"
+            )
+            assert cursor.fetchone() == (True, "LEGACY", 0)
+    finally:
+        connection.close()
+
+
+def test_runtime_fence_function_collision_rolls_back_version_four_only(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:3]) == (1, 2, 3)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                CREATE FUNCTION np.enforce_legacy_paper_runtime_fence()
+                RETURNS TRIGGER
+                LANGUAGE plpgsql
+                AS $function$
+                BEGIN
+                    RETURN NULL;
+                END
+                $function$
+                """)
+        connection.commit()
+
+        with pytest.raises(MigrationApplyError, match="0004_paper_runtime_control"):
+            apply_migrations(connection, migrations)
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT version FROM np.schema_migrations ORDER BY version")
+            assert cursor.fetchall() == [(1,), (2,), (3,)]
+            cursor.execute("SELECT to_regclass('np.paper_runtime_control')")
+            assert cursor.fetchone() == (None,)
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM pg_trigger trigger_row
+                JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
+                JOIN pg_namespace namespace_row
+                  ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = 'np'
+                  AND NOT trigger_row.tgisinternal
+                """)
+            assert cursor.fetchone() == (0,)
+            cursor.execute("""
+                SELECT routine_row.prosecdef
+                FROM pg_proc routine_row
+                JOIN pg_namespace namespace_row
+                  ON namespace_row.oid = routine_row.pronamespace
+                WHERE namespace_row.nspname = 'np'
+                  AND routine_row.proname = 'enforce_legacy_paper_runtime_fence'
+                """)
+            assert cursor.fetchone() == (False,)
+    finally:
+        connection.close()
+
+
+def test_runtime_fence_upgrade_allows_legacy_table_owner_to_differ(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    role_name = None
+    try:
+        assert apply_migrations(connection, migrations[:3]) == (1, 2, 3)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = f"{cursor.fetchone()[0]}_legacy_owner"
+            cursor.execute(
+                sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role_name))
+            )
+            cursor.execute(
+                sql.SQL("ALTER TABLE np.trades OWNER TO {}").format(
+                    sql.Identifier(role_name)
+                )
+            )
+        connection.commit()
+
+        assert apply_migrations(connection, migrations) == (4,)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    legacy_table.relowner <> control_table.relowner,
+                    fence_function.proowner = control_table.relowner
+                FROM pg_class legacy_table
+                JOIN pg_namespace legacy_namespace
+                  ON legacy_namespace.oid = legacy_table.relnamespace
+                JOIN pg_class control_table
+                  ON control_table.relname = 'paper_runtime_control'
+                JOIN pg_namespace control_namespace
+                  ON control_namespace.oid = control_table.relnamespace
+                 AND control_namespace.nspname = 'np'
+                JOIN pg_proc fence_function
+                  ON fence_function.proname = 'enforce_legacy_paper_runtime_fence'
+                JOIN pg_namespace function_namespace
+                  ON function_namespace.oid = fence_function.pronamespace
+                 AND function_namespace.nspname = 'np'
+                WHERE legacy_namespace.nspname = 'np'
+                  AND legacy_table.relname = 'trades'
+                """)
+            assert cursor.fetchone() == (True, True)
+    finally:
+        connection.rollback()
+        if role_name is not None:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role_name))
+                )
+            connection.commit()
         connection.close()
 
 
@@ -285,11 +446,11 @@ def test_concurrent_runners_apply_packaged_migrations_once(postgres_database_dsn
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _: migrate(), range(2)))
 
-    assert sorted(results) == [(), (1, 2, 3)]
+    assert sorted(results) == [(), (1, 2, 3, 4)]
     connection = _connect(postgres_database_dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM np.schema_migrations")
-            assert cursor.fetchone() == (3,)
+            assert cursor.fetchone() == (4,)
     finally:
         connection.close()
