@@ -1270,6 +1270,7 @@ def test_repository_has_one_persistence_consumer_and_stays_unwired():
         Path("trading/persistence/atomic_paper_submission_owner.py"),
         Path("trading/persistence/paper_account_journal.py"),
         Path("trading/persistence/paper_account_readiness.py"),
+        Path("trading/persistence/paper_runtime_activation.py"),
     ]
     assert {
         Path("main.py"),

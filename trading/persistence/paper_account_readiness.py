@@ -1248,11 +1248,13 @@ def _assess_exact_schema(
     applied: tuple[MigrationIdentity, ...],
     runtime_mode: str,
     runtime_generation_evidence_is_exact: bool,
+    required_runtime_mode: str,
+    lock_replayed_state: bool,
 ) -> PaperAccountReadinessAssessment:
     findings = []
     account_version = None
 
-    if runtime_mode != "LEGACY":
+    if runtime_mode != required_runtime_mode:
         findings.append(
             _finding(
                 PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
@@ -1352,7 +1354,7 @@ def _assess_exact_schema(
                 cursor,
                 execution_scope=execution_scope,
                 account_key=account_key,
-                lock=False,
+                lock=lock_replayed_state,
             )
         except PaperAccountJournalError:
             findings.append(
@@ -1429,7 +1431,7 @@ def _assess_exact_schema(
                 cursor,
                 execution_scope=execution_scope,
                 position_key=position_key,
-                lock=False,
+                lock=lock_replayed_state,
             ).projection
         except JournalRepositoryError:
             findings.append(
@@ -1533,6 +1535,88 @@ def _assess_exact_schema(
     )
 
 
+def _collect_paper_account_readiness(
+    cursor: object,
+    *,
+    context: PaperAccountReadinessContext,
+    required_runtime_mode: str,
+    lock_replayed_state: bool,
+) -> PaperAccountReadinessAssessment:
+    """Collect complete evidence on a caller-owned cursor and transaction."""
+    if type(context) is not PaperAccountReadinessContext:
+        raise PaperAccountReadinessInputError(
+            "context must be a PaperAccountReadinessContext"
+        )
+    if required_runtime_mode not in {"LEGACY", "PAUSED"}:
+        raise PaperAccountReadinessInputError(
+            "required_runtime_mode must be LEGACY or PAUSED"
+        )
+    if type(lock_replayed_state) is not bool:
+        raise PaperAccountReadinessInputError("lock_replayed_state must be a boolean")
+
+    expected = _expected_migrations()
+    applied: tuple[MigrationIdentity, ...] = ()
+    try:
+        applied, migration_findings = _read_migration_evidence(cursor)
+        if migration_findings or applied != expected:
+            return _migration_only_assessment(
+                context=context,
+                expected=expected,
+                applied=applied,
+                findings=migration_findings,
+            )
+        if not _durable_business_relations_are_authoritative(cursor):
+            return _schema_drift_assessment(context, expected, applied)
+
+        runtime_control = (
+            _read_runtime_control(cursor)
+            if _runtime_control_catalog_is_exact(cursor)
+            and _runtime_generation_catalog_is_exact(cursor)
+            else None
+        )
+        if runtime_control is None:
+            return _schema_drift_assessment(context, expected, applied)
+        return _assess_exact_schema(
+            cursor,
+            context=context,
+            expected=expected,
+            applied=applied,
+            runtime_mode=runtime_control[0],
+            runtime_generation_evidence_is_exact=(
+                _runtime_generation_evidence_is_exact(
+                    cursor,
+                    context=context,
+                    runtime_mode=runtime_control[0],
+                    runtime_generation=runtime_control[1],
+                )
+            ),
+            required_runtime_mode=required_runtime_mode,
+            lock_replayed_state=lock_replayed_state,
+        )
+    except psycopg2.Error as exc:
+        if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:
+            return _schema_drift_assessment(context, expected, applied)
+        raise
+
+
+def _activation_catalog_is_authoritative(cursor: object) -> bool:
+    """Prove the catalog authority required before replaying an activation ID."""
+    try:
+        expected = _expected_migrations()
+        applied, migration_findings = _read_migration_evidence(cursor)
+        return (
+            not migration_findings
+            and applied == expected
+            and _durable_business_relations_are_authoritative(cursor)
+            and _runtime_control_catalog_is_exact(cursor)
+            and _runtime_generation_catalog_is_exact(cursor)
+        )
+    except psycopg2.Error as exc:
+        if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:
+            return False
+        raise
+
+
 class PostgresPaperAccountReadiness:
     """Collect one stale-on-return assessment from a single read-only snapshot."""
 
@@ -1551,7 +1635,6 @@ class PostgresPaperAccountReadiness:
             raise PaperAccountReadinessInputError(
                 "context must be a PaperAccountReadinessContext"
             )
-        expected = _expected_migrations()
         try:
             connection = self._journal_boundary._connection()
         except JournalRepositoryError as exc:
@@ -1560,60 +1643,19 @@ class PostgresPaperAccountReadiness:
             ) from exc
 
         try:
-            applied: tuple[MigrationIdentity, ...] = ()
             try:
                 with connection.cursor() as cursor:
                     cursor.execute(_READ_TRANSACTION_SQL)
-                    applied, migration_findings = _read_migration_evidence(cursor)
-                    if migration_findings or applied != expected:
-                        result = _migration_only_assessment(
-                            context=context,
-                            expected=expected,
-                            applied=applied,
-                            findings=migration_findings,
-                        )
-                    elif not _durable_business_relations_are_authoritative(cursor):
-                        result = _schema_drift_assessment(
-                            context,
-                            expected,
-                            applied,
-                        )
-                    else:
-                        runtime_control = (
-                            _read_runtime_control(cursor)
-                            if _runtime_control_catalog_is_exact(cursor)
-                            and _runtime_generation_catalog_is_exact(cursor)
-                            else None
-                        )
-                        if runtime_control is None:
-                            result = _schema_drift_assessment(
-                                context,
-                                expected,
-                                applied,
-                            )
-                        else:
-                            result = _assess_exact_schema(
-                                cursor,
-                                context=context,
-                                expected=expected,
-                                applied=applied,
-                                runtime_mode=runtime_control[0],
-                                runtime_generation_evidence_is_exact=(
-                                    _runtime_generation_evidence_is_exact(
-                                        cursor,
-                                        context=context,
-                                        runtime_mode=runtime_control[0],
-                                        runtime_generation=runtime_control[1],
-                                    )
-                                ),
-                            )
+                    result = _collect_paper_account_readiness(
+                        cursor,
+                        context=context,
+                        required_runtime_mode="LEGACY",
+                        lock_replayed_state=False,
+                    )
             except psycopg2.Error as exc:
-                if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:
-                    result = _schema_drift_assessment(context, expected, applied)
-                else:
-                    raise PaperAccountReadinessStorageError(
-                        "paper readiness assessment query failed"
-                    ) from exc
+                raise PaperAccountReadinessStorageError(
+                    "paper readiness assessment query failed"
+                ) from exc
             except PaperAccountReadinessError:
                 raise
             except (PaperAccountJournalError, JournalRepositoryError) as exc:

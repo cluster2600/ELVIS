@@ -828,6 +828,8 @@ def test_readiness_contract_is_pure_and_has_no_runtime_consumer() -> None:
 
     assert consumers == [
         Path("trading/persistence/paper_account_readiness.py"),
+        Path("trading/persistence/paper_runtime_activation.py"),
+        Path("trading/application/paper_runtime_activation.py"),
     ]
     assert {Path("main.py"), Path("core/bootstrap.py")} <= set(scanned)
 

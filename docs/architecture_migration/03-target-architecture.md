@@ -1137,8 +1137,8 @@ reactivation must append epoch `N+1`. M9b.14b1 does not perform either action:
 it seeds no epoch, changes no owner, transition, runtime composition, role,
 grant, secret, policy, or readiness digest, and leaves the singleton control at
 `LEGACY/0`. Delivery remains ordered as M9b.14b2's dormant generation-aware
-atomic owner, M9b.14b3's dormant locked transition and same-cursor authoritative
-readiness re-check, M9b.14c's migration/bootstrap entrypoint plus separated
+atomic owner, M9b.14b3's dormant locked transition and same-cursor readiness
+re-check, M9b.14c's migration/bootstrap entrypoint plus separated
 roles, grants, and secret rotation, and M9b.14d's startup composition and
 side-effect-free shadow operation. Only after those slices and the remaining
 reconciliation, bounded-replay, compatibility, stale-writer, rollback, and soak
@@ -1189,10 +1189,98 @@ M9b.14b2 remains unreachable from production composition. It creates no epoch,
 changes no control mode, exposes no activation or pause API, wires no startup,
 health, executor, CLI, or shadow path, and changes no role, grant, credential,
 legacy projection, or readiness authority. The database remains at `LEGACY/0`
-unless an external test or future transition boundary changes it. M9b.14b3 must
-still own the locked same-cursor readiness and transition contract; M9b.14c
-must install role-separated bootstrap and grants; M9b.14d must compose
-fail-closed startup and shadow operation before any cut-over is considered.
+through production composition; only direct use of the dormant adapter can
+change it. M9b.14b3 supplies the locked same-cursor readiness and transition
+contract; M9b.14c must install role-separated bootstrap and grants; M9b.14d
+must compose fail-closed startup and shadow operation before any cut-over is
+considered.
+
+M9b.14b3 now implements that transition boundary as dormant application and
+persistence contracts. `PaperRuntimeActivationContext` retains the exact
+`PaperAccountReadinessContext`, a clean `activation_id` of at most 255
+characters, `PaperRuntimeActivationSource.LEGACY` or `.PAUSED`, and the
+expected control generation. `LEGACY` requires generation `0`; `PAUSED`
+requires a positive generation; and `target_runtime_generation` is the
+representable PostgreSQL bigint `expected_runtime_generation + 1`. The
+application facade exports the context, source, `ACTIVATED | REPLAYED`
+disposition, receipt, blocked result, result union, positional-only
+`PaperRuntimeActivationPort.activate(context, /)`, and the frozen typed `Busy`,
+`Conflict`, and `CommitUnknown` failures. Those exceptions preserve the whole
+context and activation identity through copy and pickle while still permitting
+Python's internal traceback, cause, context, suppression, and notes state.
+`Busy.requires_reconciliation` is false; `Conflict` and `CommitUnknown` require
+reconciliation by the retained activation identity.
+
+`PostgresPaperRuntimeActivation` accepts only a connection factory and one
+validated context. It opens a fresh transaction, sets `REPEATABLE READ`, sets a
+one-second local lock timeout, and takes one canonical `SHARE MODE NOWAIT`
+table lock before reading authority. Every target is qualified with `ONLY` so
+inheritance drift cannot recursively widen the lock set. The nineteen targets
+are `np.schema_migrations` plus all eighteen durable business relations:
+`np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.order_events`, `np.orders`,
+`np.paper_account_balances`, `np.paper_account_batch_manifests`,
+`np.paper_account_postings`, `np.paper_account_settlements`,
+`np.paper_account_streams`, `np.paper_margin_reservations`,
+`np.paper_runtime_control`, `np.paper_runtime_generations`,
+`np.position_streams`, `np.trades`, and `np.trading_session_resets`. This
+single fence blocks concurrent migration-ledger, legacy, journal, manifest,
+control, and epoch writers while allowing the same transaction to promote its
+own locks for the epoch insert and control update.
+
+After the table fence, the adapter validates the exact migration, relation,
+control, generation, function, trigger, constraint, and foreign-key catalogs;
+locks the singleton control row `FOR UPDATE NOWAIT`; and validates the catalog
+again under that row lock. A new transition must match the context's exact
+source and expected generation. The same cursor then repeats readiness for the
+requested `LEGACY` or `PAUSED` mode, locks and replays the sole account, and
+locks and replays position streams in sorted identity order. An assessment
+that is not `PREPARED_FOR_FENCE` becomes
+`PaperRuntimeActivationBlocked(context, assessment)` and the transaction rolls
+back. The embedded assessment deliberately keeps
+`snapshot_authoritative == False`: its locked evidence was sufficient to
+refuse mutation inside that transaction, but it is stale and grants no
+capability after rollback. A missing relation that prevents establishing the
+initial nineteen-table boundary is instead a storage failure.
+
+When readiness is prepared, the adapter inserts exactly target epoch `N+1`
+with the activation ID and complete account-opening provenance, compare-and-
+swaps control from the exact `LEGACY/0` or `PAUSED/N` source to `ACTIVE/N+1`,
+forces deferred constraints, and commits once. No receipt is returned before
+that commit succeeds. A `55P03` lock timeout or `40P01` deadlock before commit
+is typed `PaperRuntimeActivationBusy`; a stale source/generation, reused
+activation identity, failed CAS, or unique collision is
+`PaperRuntimeActivationConflict`; all such paths roll back without a partial
+epoch or control change. Only an exception from the final commit becomes
+`PaperRuntimeActivationCommitUnknown`. Retrying its exact activation ID can
+resolve the outcome without creating another epoch.
+
+Exact activation-ID replay is read-only. The immutable epoch must match the
+context's target generation and complete opening provenance, current control
+must be valid `PAUSED` or `ACTIVE` at least as advanced as that target, and the
+complete current control/registry/manifest evidence must remain exact. Thus a
+generation-1 activation may still replay after a valid later generation, but a
+stray row under `LEGACY/0`, a gap, wrong account, reused ID, or corrupted
+manifest cannot. `REPLAYED` and `Blocked` both finish with explicit rollback;
+neither calls commit and neither can yield `CommitUnknown`.
+
+M9b.14b3 remains deliberately unwired. Its persistence adapter is not exported
+by the persistence facade and has no production consumer, startup hook,
+operator command, health gate, executor, pause API, rollback API, or shadow
+path. It changes no database role, object ownership, grant, credential, or
+legacy compatibility policy, so `ACTIVE` remains unreachable through
+production composition. M9b.14c must provide the migration/bootstrap
+entrypoint and a dedicated least-privilege activation capability able to
+lock/read the nineteen authority relations, insert epochs, and update control,
+separately from migration ownership and ordinary runtime credentials.
+PostgreSQL 15 has no standalone table `LOCK` grant: a `SHARE` lock requires a
+non-`SELECT` table privilege. Role design must therefore use a narrowly
+callable owner/`SECURITY DEFINER` boundary or another audited mechanism rather
+than accidentally granting general DML over all nineteen tables. M9b.14d must
+add fail-closed startup/composition and side-effect-free shadow operation.
+Bounded replay or snapshots, reconciliation/quarantine, stale-writer removal,
+compatibility policy, tested pause/rollback, soak evidence, and explicit
+operator cut-over remain blockers beyond those slices.
 
 ## Runtime and configuration
 

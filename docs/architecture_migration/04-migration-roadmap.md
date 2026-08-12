@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b2 dormant generation-aware owner implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b3 dormant locked activation boundary implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -3485,11 +3485,11 @@ The migration deliberately leaves its new
 
 `runtime_generation` is an activation epoch and remains distinct from
 `owner_generation`: the latter records how an account was provisioned and does
-not rotate. The transition contract for a later slice must append epoch `N`
-only when entering `ACTIVE N`. `PAUSED` retains `N`; a subsequent entry into
-`ACTIVE` appends `N+1`. The unique `activation_id` lets a caller resolve whether
-an activation transaction committed without creating another epoch or binding
-the wrong account.
+not rotate. The dormant M9b.14b3 transition appends epoch `N` only when entering
+`ACTIVE N`. `PAUSED` retains `N`; a subsequent entry into `ACTIVE` appends
+`N+1`. The unique `activation_id` lets a caller resolve whether an activation
+transaction committed without creating another epoch or binding the wrong
+account.
 
 The epoch table is append-only at the database boundary. The migration creates
 the exact zero-argument function
@@ -3562,19 +3562,18 @@ compatibility projection, reconciliation mutation, policy digest, cut-over, or
 rollback authority. No current production path can create version-2 manifests
 or enter `ACTIVE`.
 
-The remaining slices are ordered as follows:
+The delivery order is now recorded as follows:
 
-1. M9b.14b2 makes the atomic owner generation-aware but keeps that owner
-   dormant; every new durable batch must be V2 and use the supplied epoch's
-   exact account provenance.
-2. M9b.14b3 adds a dormant locked transition contract, including the
-   same-cursor authoritative readiness re-check and commit-unknown recovery by
-   `activation_id`. It may define transition behavior before database-role
-   separation, but it must still make `ACTIVE` unreachable in production.
-3. M9b.14c adds the migration/bootstrap entrypoint, separates migration/admin
-   ownership from the non-superuser runtime identity, removes runtime DDL and
-   schema `CREATE`, applies exact grants, and rotates the affected secret.
-4. M9b.14d adds fail-closed startup/composition and side-effect-free shadow
+1. M9b.14b2 made the atomic owner generation-aware while keeping that owner
+   dormant; every new durable batch uses V2 and the supplied epoch's exact
+   account provenance.
+2. M9b.14b3 adds the dormant locked transition contract documented below,
+   including the same-cursor locked readiness re-check and commit-unknown
+   recovery by `activation_id`; `ACTIVE` remains unreachable in production.
+3. M9b.14c remains the migration/bootstrap entrypoint, migration/admin
+   ownership separation, non-superuser runtime design, exact privilege
+   boundary, schema `CREATE`/DDL removal, and affected-secret rotation.
+4. M9b.14d remains fail-closed startup/composition and side-effect-free shadow
    operation. Explicit reconciliation/quarantine, bounded replay or snapshots,
    compatibility policy, stale-writer removal, tested pause/rollback, soak
    evidence, and an operator-approved cut-over still gate `ACTIVE`.
@@ -3734,9 +3733,10 @@ This is still a dormant proof boundary. No production module constructs the
 owner or its context, and the slice adds no transition API, epoch insertion,
 mode mutation, readiness lock, startup/runtime/health wiring, shadow executor,
 role or grant change, secret rotation, legacy compatibility projection,
-reconciliation mutation, or cut-over authority. M9b.14b3 remains the locked
-same-cursor transition slice; M9b.14c remains bootstrap and database-role
-separation; M9b.14d remains fail-closed composition and shadow operation.
+reconciliation mutation, or cut-over authority. M9b.14b3, documented below,
+supplies the dormant locked same-cursor transition; M9b.14c remains bootstrap
+and database-role separation; M9b.14d remains fail-closed composition and
+shadow operation.
 
 Literal focused verification commands for M9b.14b2:
 
@@ -3799,6 +3799,213 @@ concurrent control update until commit. The complete PostgreSQL 15 suite passed
 315 tests. The non-PostgreSQL Honolulu run passed 2,396 tests, with 50 skipped,
 318 deselected, and 7 subtests. Black, isort, flake8, Python 3.10 compilation,
 and `git diff --check` were green.
+
+### M9b.14b3 dormant locked activation boundary
+
+M9b.14b3 adds the pure application contract in
+`trading/application/paper_runtime_activation.py` and the deliberately
+unexported persistence adapter in
+`trading/persistence/paper_runtime_activation.py`. The application facade
+exports:
+
+- `PaperRuntimeActivationSource` with only `LEGACY` and `PAUSED`;
+- `PaperRuntimeActivationContext(readiness, activation_id, source,
+  expected_runtime_generation)`, whose target is exactly the next PostgreSQL
+  bigint generation;
+- `PaperRuntimeActivationDisposition.ACTIVATED | REPLAYED`, the receipt,
+  blocked result, result union, and positional-only port; and
+- frozen, copy/pickle-safe `PaperRuntimeActivationBusy`,
+  `PaperRuntimeActivationConflict`, and
+  `PaperRuntimeActivationCommitUnknown`, each retaining the exact context and
+  activation ID. Busy is retryable without reconciliation; Conflict and
+  CommitUnknown require reconciliation by that identity.
+
+The context enforces the transition shape before connection I/O. A `LEGACY`
+source requires expected generation `0`; a `PAUSED` source requires a positive
+expected generation; `target_runtime_generation` is exactly expected plus one
+and must fit PostgreSQL `bigint`. The activation ID is trimmed, non-empty,
+free of NUL and isolated surrogate characters, and no longer than 255
+characters. The typed exceptions keep their business fields frozen while
+permitting only the traceback/cause/context/suppression/notes attributes Python
+needs to propagate exceptions correctly.
+
+The adapter starts one fresh `REPEATABLE READ` transaction, applies
+`SET LOCAL lock_timeout = '1s'`, and then issues one canonical table lock:
+`LOCK TABLE ... IN SHARE MODE NOWAIT`. Every relation is prefixed by `ONLY`.
+The exact nineteen targets are `np.schema_migrations` and the eighteen
+relations in the readiness durable-business inventory: the seven legacy
+tables; `np.order_events`; `np.orders`; `np.paper_account_balances`;
+`np.paper_account_batch_manifests`; `np.paper_account_postings`;
+`np.paper_account_settlements`; `np.paper_account_streams`;
+`np.paper_margin_reservations`; `np.paper_runtime_control`;
+`np.paper_runtime_generations`; and `np.position_streams`. The list is
+canonical and lexically ordered in SQL. This boundary fences direct legacy,
+journal, manifest, migration-ledger, control, and epoch writers before the
+transaction collects evidence. PostgreSQL 15 also proves that the same
+transaction can promote its own SHARE locks to insert an epoch and update the
+control row.
+
+After the table fence, the transaction validates exact migration and authority
+catalogs, selects the singleton control `FOR UPDATE NOWAIT`, and revalidates
+the catalog under that lock. Missing or malformed control state becomes a
+locked readiness assessment and stable `MIGRATION_DRIFT` when that assessment
+can be collected; inability to establish the initial table fence remains a
+storage error. It never trusts an activation-ID row before catalog authority
+and current control/generation coherence are proven.
+
+For a new transition, control must exactly match the context's
+`LEGACY/0` or `PAUSED/N` expectation. The refactored readiness collector runs
+on that same cursor, requires the requested mode, locks/replays the account,
+then locks/replays positions in sorted identity order. Its public read-only
+entrypoint remains behavior-compatible. Any non-prepared assessment returns
+`PaperRuntimeActivationBlocked` and explicitly rolls back. The assessment's
+`snapshot_authoritative` property remains false: the locked evidence justified
+refusal inside the transaction, but the returned object is stale and is not an
+activation capability.
+
+Prepared evidence allows exactly three mutation steps before one commit:
+
+1. insert target generation `N+1`, the unique activation ID, and exact opening
+   provenance into `np.paper_runtime_generations`;
+2. compare-and-swap the singleton from the exact source/generation to
+   `ACTIVE/N+1`; and
+3. execute `SET CONSTRAINTS ALL IMMEDIATE` before committing once.
+
+A `55P03` lock failure or timeout and `40P01` deadlock become
+`PaperRuntimeActivationBusy` before commit. A stale source/generation,
+activation-ID collision or mismatch, failed CAS, or unique collision becomes
+`PaperRuntimeActivationConflict`. Both paths roll back completely. Other
+known-precommit storage failures remain
+`PaperRuntimeActivationStorageError`. Only an exception from the final commit
+becomes `PaperRuntimeActivationCommitUnknown`; the retained ID and context are
+the exact reconciliation input.
+
+An existing exact activation ID is a read-only replay path, including after
+later valid control progression. The target epoch must match the context and
+full account-opening provenance; current control must be `PAUSED` or `ACTIVE`
+at that generation or later; and the complete current epoch prefix and raw V2
+manifest provenance must be exact. A stray row under `LEGACY/0`, a gap,
+corrupt manifest, wrong account, or reused ID is never replayed. `REPLAYED` and
+`Blocked` explicitly roll back and never commit, so neither can produce
+CommitUnknown. Only a successfully committed activation or the exact replay of
+its immutable row produces a receipt.
+
+This slice remains dormant and unwired. No production composition constructs
+the adapter; the persistence facade does not export it; and there is no
+startup, health, executor, CLI, shadow, pause, rollback, or cut-over consumer.
+It changes no migration, database role, grant, object owner, secret, or legacy
+projection. M9b.14c must add the migration/bootstrap entrypoint, assign a
+dedicated least-privilege capability that can lock/read all nineteen authority
+relations, insert epochs, and update control, separate migration ownership from
+runtime, remove schema `CREATE`/DDL from runtime, and rotate the affected
+credential. PostgreSQL 15 has no standalone table `LOCK` grant: `SELECT` alone
+fails with `42501` for this `SHARE` lock, while a non-`SELECT` table privilege
+permits it. M9b.14c must therefore choose a narrowly callable
+owner/`SECURITY DEFINER` boundary or another audited design that does not grant
+general DML over all nineteen relations. M9b.14d must add fail-closed
+startup/composition and side-effect-free shadow operation. Bounded replay or
+snapshots, reconciliation/quarantine, compatibility policy, stale-writer
+removal, tested pause/rollback, soak evidence, and explicit operator approval
+still block an `ACTIVE` cut-over.
+
+Literal focused verification commands for M9b.14b3:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_migration_runner.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_migration_runner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_paper_runtime_activation_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_paper_runtime_activation_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q -m 'not postgres'
+.venv/bin/black --target-version py310 --check \
+  trading/application/paper_runtime_activation.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_runtime_activation.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_runtime_activation_postgres.py
+.venv/bin/isort --check-only \
+  trading/application/paper_runtime_activation.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_runtime_activation.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_runtime_activation_postgres.py
+.venv/bin/flake8 \
+  trading/application/paper_runtime_activation.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_runtime_activation.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_runtime_activation_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/paper_runtime_activation.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_runtime_activation.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_runtime_activation.py \
+  tests/test_paper_runtime_activation_adapter.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_runtime_activation_postgres.py
+git diff --check
+```
+
+The focused application/adapter/readiness command passed 261 tests under each
+Python interpreter. The adjacent journal/owner/migration command passed 540
+tests under each interpreter. The focused PostgreSQL 15 activation command
+passed 24 tests under each interpreter, and the complete PostgreSQL 15 suite
+passed 339 tests. The full non-PostgreSQL Honolulu run passed 2,449 tests, with
+50 skipped, 339 deselected, and 7 subtests. That full gate also validates the
+exact repository-consumer allowlist update in
+`tests/test_order_position_journal.py`: the dormant transition adapter is now
+an intentional consumer of the order/position journal internals, not a runtime
+composition consumer. Black, isort, flake8, Python 3.10 compilation, and
+`git diff --check` were green.
 
 ## Cut-over policy
 
