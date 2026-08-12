@@ -37,7 +37,7 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
     migrations = load_migrations()
     connection = _connect(postgres_database_dsn)
     try:
-        assert apply_migrations(connection, migrations) == (1, 2)
+        assert apply_migrations(connection, migrations) == (1, 2, 3)
         assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -54,6 +54,12 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                 "open_positions",
                 "order_events",
                 "orders",
+                "paper_account_balances",
+                "paper_account_batch_manifests",
+                "paper_account_postings",
+                "paper_account_settlements",
+                "paper_account_streams",
+                "paper_margin_reservations",
                 "position_streams",
                 "schema_migrations",
                 "trades",
@@ -73,6 +79,16 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                     (SELECT COUNT(*) FROM np.order_events)
                 """)
             assert cursor.fetchone() == (0, 0, 0)
+            cursor.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM np.paper_account_streams),
+                    (SELECT COUNT(*) FROM np.paper_account_balances),
+                    (SELECT COUNT(*) FROM np.paper_margin_reservations),
+                    (SELECT COUNT(*) FROM np.paper_account_batch_manifests),
+                    (SELECT COUNT(*) FROM np.paper_account_settlements),
+                    (SELECT COUNT(*) FROM np.paper_account_postings)
+                """)
+            assert cursor.fetchone() == (0, 0, 0, 0, 0, 0)
     finally:
         connection.close()
 
@@ -92,7 +108,7 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (1, 2)
+        assert apply_migrations(connection, migrations) == (1, 2, 3)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -124,7 +140,7 @@ def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (2,)
+        assert apply_migrations(connection, migrations) == (2, 3)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -139,6 +155,65 @@ def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
             )
             cursor.execute("SELECT to_regclass('np.order_events')")
             assert cursor.fetchone() == ("np.order_events",)
+            cursor.execute("SELECT to_regclass('np.paper_account_streams')")
+            assert cursor.fetchone() == ("np.paper_account_streams",)
+    finally:
+        connection.close()
+
+
+def test_versioned_journal_upgrades_to_dormant_account_ledger(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:2]) == (1, 2)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO np.position_streams (
+                    position_key, execution_scope
+                ) VALUES ('position-existing', 'paper:upgrade')
+                """)
+        connection.commit()
+
+        assert apply_migrations(connection, migrations) == (3,)
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT position_key, execution_scope
+                FROM np.position_streams
+                """)
+            assert cursor.fetchone() == ("position-existing", "paper:upgrade")
+            cursor.execute("SELECT to_regclass('np.paper_account_streams')")
+            assert cursor.fetchone() == ("np.paper_account_streams",)
+            cursor.execute("SELECT COUNT(*) FROM np.paper_account_streams")
+            assert cursor.fetchone() == (0,)
+    finally:
+        connection.close()
+
+
+def test_account_ledger_table_collision_rolls_back_version_three_only(
+    postgres_database_dsn,
+):
+    migrations = load_migrations()
+    connection = _connect(postgres_database_dsn)
+    try:
+        assert apply_migrations(connection, migrations[:2]) == (1, 2)
+        with connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE np.paper_account_streams (unexpected INTEGER)")
+        connection.commit()
+
+        with pytest.raises(MigrationApplyError, match="0003_paper_account_ledger"):
+            apply_migrations(connection, migrations)
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT version FROM np.schema_migrations ORDER BY version")
+            assert cursor.fetchall() == [(1,), (2,)]
+            cursor.execute("SELECT to_regclass('np.paper_account_balances')")
+            assert cursor.fetchone() == (None,)
+            cursor.execute("SELECT unexpected FROM np.paper_account_streams")
+            assert cursor.fetchall() == []
+            cursor.execute("SELECT to_regclass('np.orders_paper_account_batch_ref_uq')")
+            assert cursor.fetchone() == (None,)
     finally:
         connection.close()
 
@@ -210,11 +285,11 @@ def test_concurrent_runners_apply_packaged_migrations_once(postgres_database_dsn
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _: migrate(), range(2)))
 
-    assert sorted(results) == [(), (1, 2)]
+    assert sorted(results) == [(), (1, 2, 3)]
     connection = _connect(postgres_database_dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM np.schema_migrations")
-            assert cursor.fetchone() == (2,)
+            assert cursor.fetchone() == (3,)
     finally:
         connection.close()

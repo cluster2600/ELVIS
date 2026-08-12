@@ -226,12 +226,12 @@ settlement ordering, exact available/reserved balances, quantum-ceiling margin,
 derived postings, admission, replay, and insolvency semantics. It adds no SQL,
 durable account owner, or runtime composition.
 M9b.12a adds the pure, unwired
-`trading.persistence.paper_account_journal_codec` boundary for the next durable
-account slice. It defines compact, version-1 envelopes for an explicitly scoped
-empty-account opening, one newly applied settlement, and the ACK/full-fill batch
-that binds journal facts to account facts. It adds no migration, repository,
-transaction owner, or runtime composition; migration `0003` remains the next
-schema slice.
+`trading.persistence.paper_account_journal_codec` boundary. It defines compact,
+version-1 envelopes for an explicitly scoped empty-account opening, one newly
+applied settlement, and the ACK/full-fill batch that binds journal facts to
+account facts. M9b.12b adds dormant migration `0003` with six account-ledger
+relations, but still adds no repository, transaction owner, or runtime
+composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -690,16 +690,59 @@ lock, transaction, writer, account provisioning command, venue action, legacy
 projection, runtime consumer, readiness check, reconciliation workflow, or
 sole-writer fence. It does not add funding, borrowing, liquidation, unrealised
 mark-to-market, price/tick/lot discovery, or automatic adoption of pre-codec
-history. The next additive slice is migration `0003`, which can map these
-already fixed envelopes to dormant account-opening, account-settlement,
-posting/projection, reservation, and batch-provenance storage before an atomic
-owner is implemented. That schema must bind every manifest to the exact
-immutable `(execution_scope, account_key, owner_generation)` opening. Although
-settlement envelopes intentionally omit scope and generation, no settlement may
-be orphaned: every settlement/fill identity and payload hash must belong to the
-exact manifest fill through composite foreign keys or an equivalently strict
-deferred constraint that supports inserting the atomic batch in one
-transaction.
+history.
+
+M9b.12b maps those fixed envelopes to dormant storage through immutable
+migration `0003_paper_account_ledger.sql`. The migration contains only `CREATE
+TABLE` and `CREATE UNIQUE INDEX` statements. It adds four composite reference
+indexes to the version-2 order journal and exactly six account relations:
+
+- `paper_account_streams` stores the provisioned version-1 opening envelope,
+  its execution scope, owner generation, collateral asset, and the current
+  account version/state;
+- `paper_account_balances` and `paper_margin_reservations` store the current
+  exact-text projections, with reservations tied to an account/position in the
+  same execution scope;
+- `paper_account_batch_manifests` binds one client order to the exact opening
+  version/hash and `(execution_scope, account_key, owner_generation)`, the
+  instruction hash, exact ACK identity/type/time/hash, and declared account and
+  position ranges;
+- `paper_account_settlements` is both the compact settlement envelope and the
+  relational manifest-fill row; there is deliberately no seventh batch-fill
+  table; and
+- `paper_account_postings` stores each settlement's exact-text available or
+  reserved-margin posting projection.
+
+The `owner_generation` on the opening is immutable provisioning provenance; it
+is not a rotating runtime generation or a sole-writer fence. A settlement
+copies its manifest range and fill ordinal. SQL checks the account and position
+ordinal arithmetic, requires its deferred manifest membership, binds the exact
+`CONFIRMED_FILL` journal identity and event hash through a deferred composite
+foreign key, binds the order symbol, requires the quote asset to equal the
+account collateral, and rejects equal base/quote assets. Unique keys prevent a
+client order from being claimed by two account manifests and prevent duplicate
+account versions, manifest ordinals, journal position versions, event IDs, or
+trade IDs among settlement rows. Deferral permits one future transaction to
+insert the mutually dependent journal/account facts; it does not weaken these
+row-level invariants at commit.
+
+SQL intentionally does not prove that a manifest has exactly `fill_count`
+settlement rows or no missing ordinal, nor that its JSON fill members and hashes
+match those rows. A manifest without settlements is therefore structurally
+valid at this schema-only boundary. SQL also does not recanonicalize JSON or
+exact `Decimal` strings, replay settlement causality, prove cross-batch account
+version contiguity, equate the stream version/state with the settlement tail,
+or prove balance/reservation/posting conservation. The future repository must
+lock the account before the position, decode and recompute the M9b.12a
+envelopes, validate complete manifest membership and every projection, and
+quarantine any mismatch before replay or activation.
+
+M9b.12b creates no seed, opening-capital default, backfill, trigger, DML,
+destructive or legacy-table statement. It adds no repository, transaction
+owner, provisioning command, runtime consumer, readiness gate, reconciliation
+workflow, legacy projection, generation control, or sole-writer fence. It does
+not confer account provenance on older version-2 histories, which still require
+reconciliation.
 
 ## Runtime and configuration
 
@@ -836,15 +879,18 @@ balance, replay, and insolvency rules over exact M9b.9 settlements, but does not
 persist or transact them. None of these slices activates runtime ownership or
 fences the legacy writers.
 M9b.12a adds compact version-1 opening, applied-settlement, and owner-batch
-envelopes before the schema is frozen. The opening binds explicit capital and
-policy to execution scope and owner generation. Each applied-settlement row is
-re-derived from its prior account and journal-sourced settlement, while the
-batch manifest hashes the instruction, ACK, every fill event, and every account
-settlement across exact contiguous position/account ranges. These codecs add no
-database relation and cannot establish a lock, atomic commit, active owner, or
-legacy fence by themselves. Migration `0003` remains pending and must bind each
-manifest to its exact immutable scoped opening and each settlement to its exact
-manifest fill without permitting orphan rows.
+envelopes. The opening binds explicit capital and policy to execution scope and
+provisioned owner generation. Each applied-settlement row is re-derived from
+its prior account and journal-sourced settlement, while the batch manifest
+hashes the instruction, ACK, every fill event, and every account settlement
+across exact contiguous position/account ranges. M9b.12b's dormant migration
+`0003` stores those envelopes and projections in six account relations. Its
+manifest points to the exact opening version/hash, instruction, and ACK; each
+settlement row is its manifest-fill row and points to the exact confirmed-fill
+journal fact. The schema provides row-level relational integrity but leaves
+manifest completeness, codec replay, projection validation, and quarantine to
+the future repository. Neither slice establishes an active transaction owner,
+runtime generation, readiness gate, or legacy fence.
 
 Cut-over still requires: durable account-version, balance, reservation, and
 posting storage atomically owned with the journal batch; persisted instrument

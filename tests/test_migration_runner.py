@@ -57,7 +57,7 @@ def fake_connection(*, applied_rows=()):
 def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1, 2)
+    assert tuple(migration.version for migration in migrations) == (1, 2, 3)
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -106,6 +106,41 @@ def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     assert "np.trades" not in journal.sql
     assert "np.open_positions" not in journal.sql
     assert {prefix[0] for prefix in _statement_prefixes(journal.sql)} == {"CREATE"}
+
+    account_ledger = migrations[2]
+    assert account_ledger.name == "paper_account_ledger"
+    assert account_ledger.checksum == (
+        "6d7b99ed9cfa3480a12c550736e6bc91" "4320fd0785d07fd1e48a8e37b912e081"
+    )
+    for relation in (
+        "paper_account_streams",
+        "paper_account_balances",
+        "paper_margin_reservations",
+        "paper_account_batch_manifests",
+        "paper_account_settlements",
+        "paper_account_postings",
+    ):
+        assert f"CREATE TABLE np.{relation}" in account_ledger.sql
+    assert "opening_payload JSONB" in account_ledger.sql
+    assert "batch_payload JSONB" in account_ledger.sql
+    assert "settlement_payload JSONB" in account_ledger.sql
+    assert "available_decimal TEXT" in account_ledger.sql
+    assert "reserved_decimal TEXT" in account_ledger.sql
+    assert "amount_decimal TEXT" in account_ledger.sql
+    assert "DEFERRABLE INITIALLY DEFERRED" in account_ledger.sql
+    assert "SUBMISSION_ACKNOWLEDGED" in account_ledger.sql
+    assert "CONFIRMED_FILL" in account_ledger.sql
+    assert "INSERT " not in account_ledger.sql.upper()
+    assert "UPDATE " not in account_ledger.sql.upper()
+    assert "\nDELETE " not in account_ledger.sql.upper()
+    assert "DROP " not in account_ledger.sql.upper()
+    assert "TRUNCATE " not in account_ledger.sql.upper()
+    assert "ALTER " not in account_ledger.sql.upper()
+    assert "np.trades" not in account_ledger.sql
+    assert "np.open_positions" not in account_ledger.sql
+    assert {prefix[0] for prefix in _statement_prefixes(account_ledger.sql)} == {
+        "CREATE"
+    }
 
 
 @pytest.mark.parametrize(

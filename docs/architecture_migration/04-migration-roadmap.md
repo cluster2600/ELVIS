@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; M9b.11 account contract and M9b.12a persistence codec are not durable; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.12b dormant paper-account schema; no account transaction owner or runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -2530,16 +2530,11 @@ readiness gate, reconciliation/quarantine workflow, legacy compatibility write,
 or sole-writer fence. It also adds no funding, borrowing, liquidation,
 unrealised mark-to-market, or price/tick/lot policy. Shape-compatible terminal
 history created before this codec still lacks owner/account provenance and
-requires reconciliation. Migration `0003` is the next additive slice; it must
-store these envelopes and projections dormantly before a future owner can lock
-the account first, lock the position second, and commit journal plus account
-facts atomically. Its manifest row must reference the exact immutable opening
-identified by `(execution_scope, account_key, owner_generation)`. Settlement
-rows omit scope and generation intentionally, so the schema must prevent
-orphans by binding every settlement's account/position/event/trade identities
-and payload hash to the exact manifest fill with composite foreign keys or an
-equivalently strict deferred constraint. Deferral may support one atomic batch
-insert; it must not weaken the invariant at commit.
+requires reconciliation. M9b.12b now supplies the next additive slice:
+migration `0003` stores the envelopes and projections dormantly before a future
+owner can lock the account first, lock the position second, and commit journal
+plus account facts atomically. Its exact schema contract and deliberate
+row-level completeness boundary are recorded below.
 
 Verification commands for this slice:
 
@@ -2581,6 +2576,123 @@ isort, flake8, Python 3.10 compilation, and the diff check pass. The complete
 non-PostgreSQL gate passes 2,045 tests, skips 50, deselects 66, and passes 7
 subtests under `Pacific/Honolulu`. No PostgreSQL test is required for M9b.12a
 because it adds no schema or I/O.
+
+### M9b.12b dormant paper-account ledger schema
+
+M9b.12b adds the checksummed, forward-only
+`0003_paper_account_ledger.sql` migration. Its immutable SHA-256 is
+`6d7b99ed9cfa3480a12c550736e6bc914320fd0785d07fd1e48a8e37b912e081`.
+The migration is additive and CREATE-only: four unique indexes make exact
+composite references into the unchanged version-2 order journal possible, and
+six new relations remain empty after migration:
+
+- `paper_account_streams` holds the provisioned opening envelope and the future
+  account-global lock/version/state row;
+- `paper_account_balances` and `paper_margin_reservations` hold current
+  exact-Decimal-text projections;
+- `paper_account_batch_manifests` holds the owner-batch envelope and its exact
+  opening, instruction, and ACK references;
+- `paper_account_settlements` holds each compact settlement and simultaneously
+  serves as the relational manifest-fill row; and
+- `paper_account_postings` holds the per-settlement projection entries.
+
+There is intentionally no separate batch-fill relation. Each settlement copies
+its manifest's first account version, ACK position version, fill count, and its
+one-based ordinal. CHECK constraints derive the exact account and position
+versions from that ordinal. A deferred composite foreign key binds the row to
+the manifest range, while another binds its position/order/event/trade/type/hash
+to the exact version-2 `CONFIRMED_FILL`. The manifest binds the exact immutable
+opening scope/account/provisioned generation/version/hash, order instruction
+hash, and `SUBMISSION_ACKNOWLEDGED` identity/time/hash. It also prevents one
+client order from being claimed by two accounts. Instrument checks require
+distinct base and quote assets and require the quote asset to be the account's
+collateral. `owner_generation` is opening provenance, not runtime fencing.
+
+These constraints prove row-level ownership, identity, denomination, ordinal,
+and envelope-reference consistency at commit. They do not prove that the
+number of settlement rows equals `fill_count`, that every declared ordinal or
+JSON manifest member is present, or that stored JSON/hash and exact Decimal
+text are canonical. A manifest with zero settlement rows is explicitly valid
+in this dormant schema. Nor does SQL replay M9b.11 causality, prove global
+inter-batch account contiguity, synchronize the stream tail, or validate
+balance/reservation/posting conservation. The future account repository must
+decode and recompute all M9b.12a envelopes, cross-check complete manifest
+membership and projections, and quarantine any mismatch. Its atomic owner must
+lock account first and position second before it can own journal plus account
+facts.
+
+The migration performs no seed, default-capital provisioning, backfill, DML,
+`ALTER`, destructive statement, trigger, or legacy-table write. It adds no
+repository, transaction owner, execution call, runtime wiring, readiness gate,
+reconciliation workflow, rotating generation, or sole-writer fence. Existing
+version-2 histories are not adopted or blessed. The legacy runtime remains
+authoritative, so rollback of this slice is application-code rollback with the
+unused additive relations left in place.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/pytest -q tests/test_migration_runner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/pytest -q \
+  tests/postgres/test_paper_account_ledger_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_paper_account_ledger_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/pytest -q \
+  tests/postgres/test_migration_runner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/pytest -q tests/postgres
+.venv/bin/pytest -q \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_order_position_journal.py
+.venv/bin/black --target-version py310 --check \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_ledger_postgres.py
+.venv/bin/isort --check-only \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_ledger_postgres.py
+.venv/bin/flake8 \
+  tests/test_migration_runner.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_ledger_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/persistence \
+  tests/test_migration_runner.py \
+  tests/postgres
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The migration unit suite passes 35 tests. The dedicated dormant-ledger
+PostgreSQL 15 suite passes 17 tests under each supported Python interpreter;
+the migration PostgreSQL suite passes 9 tests, and the complete PostgreSQL 15
+suite passes 82 tests. The exact adjacent migration/codec/accounting suite
+passes 404 tests under each interpreter. Black, isort, flake8, Python 3.10
+compilation, and the diff check pass. The complete non-PostgreSQL gate is also
+complete for this slice: 2,046 tests pass, 50 skip, 85 deselect, and 7 subtests
+pass under `Pacific/Honolulu`. Pytest exits successfully; the legacy background
+threads still emit their known post-success logging errors after the result.
 
 ## Cut-over policy
 
