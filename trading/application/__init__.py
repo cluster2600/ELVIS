@@ -1,5 +1,13 @@
 """Deterministic application services for the migrated trading path."""
 
+from trading.application.durable_submission import (
+    DurableLifecycleReceipt,
+    DurableSubmissionDisposition,
+    DurableSubmissionOwner,
+    DurableSubmissionReceipt,
+    SubmissionAttemptContext,
+    SubmissionCommitUnknown,
+)
 from trading.application.journaled_order_service import (
     Clock,
     EventReceipt,
@@ -20,6 +28,10 @@ from trading.application.signal_policy import (
 
 __all__ = [
     "Clock",
+    "DurableLifecycleReceipt",
+    "DurableSubmissionDisposition",
+    "DurableSubmissionOwner",
+    "DurableSubmissionReceipt",
     "EventReceipt",
     "ExecutionPort",
     "JournaledOrderService",
@@ -32,5 +44,7 @@ __all__ = [
     "SignalPolicy",
     "SignalPolicyPipeline",
     "SignalPolicyResult",
+    "SubmissionAttemptContext",
+    "SubmissionCommitUnknown",
     "SubmissionObservationNotRecorded",
 ]

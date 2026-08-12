@@ -199,6 +199,8 @@ transitions without a runtime consumer. M9b.1 prepares the durable journal
 schema, M9b.2 adds its pure, lossless persistence codec, and M9b.3 adds the
 unwired transactional repository and reducer-based replay boundary. M9b.4 adds
 the application-level `JournaledOrderService`, still with no runtime consumer.
+M9b.7 adds a pure durable-submission owner contract for the next transaction
+boundary, without implementing SQL, a repository, or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -266,6 +268,33 @@ fails the whole request rather than producing a partial recovery list. This is
 an inventory, not permission to retry: a legacy `PENDING` reservation still
 cannot distinguish a crash before transport from a crash after an external
 effect but before its observation was journaled.
+
+### Durable submission ownership contract
+
+M9b.7 defines the pure application contract that a future durable paper
+submission owner must implement. One attempt context fixes the complete
+instruction, execution scope, timezone-aware observation time, and durable
+submission event identity before any side effect. Those values are stable
+inputs, not regenerated during retry, commit-unknown recovery, or replay.
+
+The result distinguishes facts committed by the current call from exact facts
+replayed from durable history. Both outcomes expose the same canonical
+submission event and report semantics, so a caller cannot mistake a replay for
+permission to execute again. Canonical reconstruction deliberately cannot
+retain the transport-only raw `venue_status`: the durable lifecycle event does
+not store that field, and the contract does not pretend that it does. A durable
+`SubmissionAcknowledged` remains proof of acceptance only; it is never a fill.
+Only a separate `ConfirmedFill` can change order quantity or position state.
+
+The future concrete owner must validate the stable attempt context, acquire the
+relevant stream ownership, apply the paper execution effect, and persist the
+canonical submission facts in one transaction before returning `COMMITTED`.
+An exact previously committed attempt returns `REPLAYED`; any mismatch or
+unknown outcome fails closed for reconciliation. M9b.7 itself is intentionally
+unwired and contains no SQL, repository implementation, venue call, or runtime
+activation. It also does not project balances, fees, realised PnL, trades, or
+open positions, establish a sole-writer mechanism, or fence the legacy writers.
+Those economic projections and ownership gates remain mandatory before cut-over.
 
 ### `JournaledOrderService`
 
@@ -429,7 +458,10 @@ must add an atomic paper execution transaction, an explicit reconciliation
 decision workflow, durable quarantine, runtime composition, and the remaining
 activation gates before `PositionService` can own the runtime boundary. M9b.6's
 query and unresolved-submission inventory make those cases observable but do
-not resolve them or authorize automatic resubmission.
+not resolve them or authorize automatic resubmission. M9b.7 fixes the pure
+attempt/result vocabulary for the future transaction owner, but does not yet
+implement that owner, its economic projections, sole-writer enforcement, or
+the required legacy-writer fence.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

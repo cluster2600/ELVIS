@@ -1188,6 +1188,7 @@ def test_order_lifecycle_only_approved_modules_consume_contract() -> None:
             consumers.append(source_path.relative_to(root))
 
     assert sorted(consumers) == [
+        Path("trading/application/durable_submission.py"),
         Path("trading/application/journaled_order_service.py"),
         Path("trading/persistence/journal_codec.py"),
         Path("trading/persistence/order_position_journal.py"),

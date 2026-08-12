@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.6 unresolved-submission read model) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 pure durable-submission owner contract) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1747,6 +1747,88 @@ integration tests and all 40 tests in the isolated PostgreSQL suite. Black,
 isort, flake8, Python 3.10 compilation, and the diff check pass. The complete
 non-PostgreSQL suite passes 1,563 tests, skips 50, deselects 43, and passes 7
 subtests under `Pacific/Honolulu`.
+
+### M9b.7 pure durable-submission owner contract
+
+M9b.7 adds only `trading.application.durable_submission`, a pure contract for
+the future transaction-owning paper executor. It does not add SQL, a repository
+implementation, venue I/O, or runtime wiring. One immutable attempt context
+binds the complete `PositionInstruction`, execution scope, timezone-aware
+observation time, and durable submission event identity before any side effect.
+A future owner must reuse that exact context for the initial operation,
+commit-unknown recovery, and replay instead of sampling a new time or inventing
+a new event identity.
+
+The contract distinguishes `COMMITTED`, meaning the current call durably
+established the returned facts, from `REPLAYED`, meaning an exact prior commit
+was rediscovered without another execution effect. Both dispositions carry the
+same canonical durable event/report meaning. The lifecycle event is the durable
+source of truth, so canonical report reconstruction intentionally loses the raw
+transport `venue_status`; callers must not present that non-persisted field as
+a replayed fact. In particular, a canonical acknowledgement remains only an
+ACK. It does not create a `ConfirmedFill`, change filled quantity, or project a
+position.
+
+The future concrete owner is expected to validate the stable attempt context,
+serialize on the relevant stream, apply the paper execution effect, and append
+the canonical submission and independently confirmed fill facts in one database
+transaction. Only after commit may it return `COMMITTED`; an exact existing
+durable attempt returns `REPLAYED`, while mismatched or indeterminate state
+remains reconciliation work. This slice does not yet implement that transaction
+or its repository.
+
+Activation remains blocked on the economic side of the operation: balances,
+fees, realised PnL, legacy trade rows, and open-position projections are not
+part of this pure contract. M9b.7 also does not make the future owner the sole
+writer and does not fence the existing executor, inline exit path, Balanced
+Starter, or other legacy database writers. Those ownership and parity gates
+must be implemented and verified before runtime composition.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  tests/test_domain_contracts.py \
+  tests/test_journaled_order_service.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_durable_submission.py
+.venv/bin/black --target-version py310 --check \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+.venv/bin/flake8 \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused application/domain suite passes 497 tests, and the pure contract
+passes 109 tests under Python 3.10. Black, isort, flake8, Python 3.10
+compilation, and the diff check pass. The complete non-PostgreSQL suite passes
+1,672 tests, skips 50, deselects 43, and passes 7 subtests under
+`Pacific/Honolulu`.
 
 ## Cut-over policy
 
