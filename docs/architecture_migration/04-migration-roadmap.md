@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.12c strict dormant paper-account provision/replay repository; no settlement writer, account transaction owner, or runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.12d verified dormant account-first atomic owner; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -2834,6 +2834,199 @@ order-journal command passes 338 tests under each interpreter, and the complete
 PostgreSQL 15 suite passes 97 tests. Black, isort, flake8, Python 3.10
 compilation, and the diff check pass. The complete non-PostgreSQL gate passes
 2,090 tests, skips 50, deselects 100, and passes 7 subtests under
+`Pacific/Honolulu`. Pytest exits successfully; the legacy background threads
+still emit their known post-success logging errors after the result.
+
+### M9b.12d atomic paper-account submission owner
+
+M9b.12d adds the application vocabulary for the first transaction boundary that
+can own both migration `0002` journal facts and migration `0003` account facts:
+
+- `PaperAccountSubmissionContext` binds one exact `SubmissionAttemptContext`,
+  durable account key, and version-1 `PaperLinearInstrument` snapshot;
+- `DurablePaperAccountSubmissionReceipt` binds the context to the exact durable
+  submission receipt and one positive consecutive account version per fill;
+- `PaperAccountSubmissionRejected` carries the rejected fill event identity and
+  non-empty derived account-admission reasons;
+- `PaperAccountSubmissionResult` is exactly the receipt-or-rejection union and
+  `PaperAccountSubmissionOwner.execute(context, /)` is its positional-only port;
+  and
+- `PaperAccountSubmissionCommitUnknown` and
+  `PaperAccountSubmissionReconciliationRequired` preserve the full context and
+  require explicit reconciliation.
+
+The concrete, still-unwired adapter is
+`trading.persistence.atomic_paper_account_owner.PostgresAtomicPaperAccountOwner`.
+It receives one fresh-connection factory and a `PaperSubmissionPlanner`; it does
+not call the earlier public atomic owner's `execute` method. The account must be
+provisioned first. Each invocation owns one `READ COMMITTED` transaction and
+uses the single global lock order: strict `paper_account_streams` replay under
+`FOR UPDATE`, followed by creation/lock and strict replay of the target
+`position_streams` row.
+
+If the client order already has an exact account manifest, the owner validates
+the complete opening generation, context, instruction, instrument, ACK/fill
+history, contiguous position/account ranges, settlement hashes, postings, and
+materialized projections. It then returns a `REPLAYED` receipt with zero planner
+calls and zero DML. Any migration-`0002` order history without that manifest,
+including the terminal shape formerly replayable by the position-only owner,
+raises `PaperAccountSubmissionReconciliationRequired` before planning. The same
+fail-closed result applies to missing, incomplete, corrupt, or incompatible
+manifest history; old facts are never adopted as atomically accounted facts.
+
+For a new order, the planner runs once while both rows remain locked. The owner
+validates the journal/position transition, builds each `PaperFillRecord`, FIFO
+economic transition, quote settlement, and account admission in causal order,
+and performs no externally visible action. If any admission is `REJECTED`, it
+rolls back the whole transaction and returns `PaperAccountSubmissionRejected`;
+all journal and account tables remain byte-for-byte unchanged. If all admissions
+are `APPLIED`, the same transaction writes the order, ACK and confirmed fills,
+exact batch manifest, compact settlements, postings, balances, margin
+reservations, and both stream tails. Deferred constraints are forced immediate,
+and a strict account/journal replay must match before the transaction commits
+once.
+
+Pre-commit failures roll back and remain known failures. If PostgreSQL may have
+committed but its acknowledgement is lost, the owner raises
+`PaperAccountSubmissionCommitUnknown` with the complete context; it never reports
+success or retries planning internally. A later exact call can resolve the
+outcome only through the no-DML manifest replay path. Concurrent exact calls must
+therefore yield one commit and one replay, and every failure injected after a DML
+statement must leave the complete journal/account snapshot unchanged unless the
+single commit itself became unknown.
+
+This slice is deliberately not exported from the lightweight persistence facade
+and has no runtime consumer. It adds no venue execution, legacy-table SQL,
+compatibility projection, rotating owner generation, readiness check, durable
+quarantine workflow, sole-writer fence, shadow mode, or cut-over. The legacy
+runtime remains authoritative.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_paper_account_submission.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_submission.py
+.venv/bin/python -m pytest -q tests/test_atomic_paper_account_owner.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_atomic_paper_account_owner.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_order_position_journal.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<disposable-postgres-15-admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_economics.py \
+  tests/test_paper_settlement.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_economics.py \
+  tests/test_paper_settlement.py \
+  tests/test_position_lifecycle.py
+.venv/bin/flake8 \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_economics.py \
+  tests/test_paper_settlement.py \
+  tests/test_position_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/persistence/atomic_paper_account_owner.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/postgres/test_atomic_paper_account_owner_postgres.py \
+  tests/test_atomic_paper_submission_owner.py \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_order_position_journal.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_economics.py \
+  tests/test_paper_settlement.py \
+  tests/test_position_lifecycle.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The pure account-submission contract suite passes 22 tests and the owner-unit
+suite passes 12 tests under each supported Python interpreter. The PostgreSQL
+15 owner matrix passes 13 tests under each interpreter, including exact replay
+with zero DML, a rejection at the second fill with zero durable mutation,
+account-before-position locking, exact-call and cross-position concurrency,
+mandatory reconciliation for old/incomplete/corrupt or context-incompatible
+manifest history, rollback after every traced DML mutation, deferred-constraint
+flushing, commit-unknown recovery, and absence of legacy-table SQL. The exact
+adjacent command passes 469 tests under each interpreter, and the complete
+PostgreSQL 15 suite passes 110 tests. Black, isort, flake8, Python 3.10
+compilation, and the diff check pass. The complete non-PostgreSQL gate passes
+2,124 tests, skips 50, deselects 113, and passes 7 subtests under
 `Pacific/Honolulu`. Pytest exits successfully; the legacy background threads
 still emit their known post-success logging errors after the result.
 

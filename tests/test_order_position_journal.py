@@ -1265,7 +1265,8 @@ def test_repository_has_one_persistence_consumer_and_stays_unwired():
         scanned.append(source_path.relative_to(root))
         if _uses_order_position_journal(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
-    assert consumers == [
+    assert sorted(consumers) == [
+        Path("trading/persistence/atomic_paper_account_owner.py"),
         Path("trading/persistence/atomic_paper_submission_owner.py"),
         Path("trading/persistence/paper_account_journal.py"),
     ]

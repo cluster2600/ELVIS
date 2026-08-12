@@ -1345,7 +1345,8 @@ def test_durable_submission_has_one_persistence_consumer_and_stays_pure() -> Non
         if _uses_durable_submission(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == [
+    assert sorted(consumers) == [
+        Path("trading/persistence/atomic_paper_account_owner.py"),
         Path("trading/persistence/atomic_paper_submission_owner.py"),
     ]
     assert {Path("main.py"), Path("core/bootstrap.py")} <= set(scanned)

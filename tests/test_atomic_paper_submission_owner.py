@@ -440,7 +440,9 @@ def test_atomic_owner_is_unwired_and_uses_only_approved_boundaries() -> None:
             continue
         if _uses_atomic_owner(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
-    assert consumers == []
+    assert consumers == [
+        Path("trading/persistence/atomic_paper_account_owner.py"),
+    ]
 
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
     imports = set()

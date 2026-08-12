@@ -234,7 +234,11 @@ relations. M9b.12c adds the strict, still-unwired
 `PostgresPaperAccountJournal`: one-commit empty-opening provision plus exact
 retry, and complete account replay or scoped listing from a read-only stable
 snapshot. It does not write a settlement, own an order/account transaction, or
-enter runtime composition.
+enter runtime composition. M9b.12d fixes the application contract for one
+accounted paper submission and adds the still-unwired concrete
+`PostgresAtomicPaperAccountOwner`. That owner must lock the provisioned account
+before the position and either replay one exact manifest, reject with no durable
+mutation, or commit the journal batch and every account fact together.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -807,6 +811,74 @@ or create a non-empty account. Full referenced-position replay and the current
 N+1 query shape are acceptable while the repository is unwired; bounded replay,
 snapshots, and measured optimization remain later work.
 
+M9b.12d defines the application boundary that can consume that repository and
+schema without weakening their provenance rules. The frozen application values
+exported by `trading.application` are:
+
+- `PaperAccountSubmissionContext(attempt, account_key, instrument)`, which binds
+  the exact `SubmissionAttemptContext` to one durable account key and one
+  `PaperLinearInstrument` snapshot whose symbol must match the instruction;
+- `DurablePaperAccountSubmissionReceipt(context, submission, account_versions)`,
+  which carries the exact `DurableSubmissionReceipt` plus one positive,
+  consecutive account version for every durable fill and derives its committed
+  or replayed disposition from that submission receipt; and
+- `PaperAccountSubmissionRejected(context, rejected_event_id, reasons)`, which
+  identifies the first derived fill admission that failed and preserves the
+  non-empty rejection reasons after the transaction leaves no durable batch
+  mutation.
+
+`PaperAccountSubmissionResult` is exactly the receipt-or-rejection union, and
+`PaperAccountSubmissionOwner.execute(context, /)` is the positional-only port.
+`PaperAccountSubmissionCommitUnknown` and
+`PaperAccountSubmissionReconciliationRequired` retain the complete context,
+expose its client-order ID, and explicitly require reconciliation. A commit
+acknowledgement loss is therefore not reported as either a receipt or a
+rejection, while incompatible durable history is not sent back through the
+planner.
+
+The concrete boundary is the direct, non-facade
+`trading.persistence.atomic_paper_account_owner.PostgresAtomicPaperAccountOwner`.
+It accepts an injected fresh-connection factory and the existing pure
+`PaperSubmissionPlanner`, and exposes only `execute(context, /)`. The account
+must already have been explicitly provisioned. One `READ COMMITTED` transaction
+locks and strictly replays its `paper_account_streams` row first, then creates or
+locks and replays the target `position_streams` row. This account-before-position
+order is mandatory for every new accounted writer; the older position-only
+owner is not composed beneath it.
+
+While both locks are held, an exact target manifest is decoded and fully replayed
+through the M9b.12c repository rules. It returns a replay receipt without
+calling the planner or executing DML only when the stored opening generation,
+attempt/instruction, instrument, ACK, fills, account-version range, settlement
+hashes, postings, and projections all match the requested context. Any order
+history from migration `0002` that has no account manifest -- including a
+shape-compatible terminal ACK/full-fill batch -- remains unowned and raises
+`PaperAccountSubmissionReconciliationRequired`. Missing, incomplete, corrupt,
+or context-incompatible manifest history does the same; it is never adopted,
+replanned, or repaired automatically.
+
+For a genuinely new order, the planner runs once under both locks and all
+position, FIFO-economics, quote-settlement, and account-admission transitions
+are derived in memory first. If any fill admission is `REJECTED`, the complete
+transaction rolls back and returns `PaperAccountSubmissionRejected`; no order,
+event, manifest, settlement, posting, balance, reservation, or stream-version
+change may survive. If every admission is `APPLIED`, the same transaction writes
+the instruction and consecutive ACK/fill events, one exact batch manifest, each
+compact settlement and posting, the complete balance/reservation projections,
+and the new account and position stream tails. It forces deferred constraints
+immediate and strictly replays the final journal/account state before one commit.
+A failure before commit is known not to have committed; loss of the commit
+acknowledgement raises `PaperAccountSubmissionCommitUnknown(context)`, and an
+exact subsequent call resolves only by manifest replay.
+
+M9b.12d remains dormant. It performs no venue or legacy-table call, is not
+exported from the lightweight persistence facade, and has no runtime consumer,
+readiness gate, rotating generation, durable quarantine workflow, compatibility
+projection, sole-writer fence, shadow activation, or cut-over authority. Its
+application-contract, owner-unit, PostgreSQL concurrency/fault matrix, adjacent
+regression, and full non-PostgreSQL gates are complete; those proofs do not make
+the dormant adapter runtime-ready.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -953,14 +1025,17 @@ settlement row is its manifest-fill row and points to the exact confirmed-fill
 journal fact. M9b.12c's dormant `PostgresPaperAccountJournal` provisions only
 an empty opening and strictly proves manifest completeness, codec/journal/
 settlement replay, and every materialized account projection before replay or
-listing returns. It does not append those settlement facts. None of these
-slices establishes an active transaction owner, rotating runtime generation,
-readiness gate, or legacy fence.
+listing returns. It does not append those settlement facts. M9b.12d adds the
+dormant integrated writer contract and concrete `PostgresAtomicPaperAccountOwner`:
+one account-first/position-second transaction can replay an exact manifest,
+return a zero-mutation account rejection, or commit journal, manifest,
+settlement, posting, and materialized account facts together. It still does not
+establish active runtime ownership, a rotating generation, readiness gate, or
+legacy fence.
 
-Cut-over still requires: an integrated owner that advances durable
-account-version, balance, reservation, and posting storage atomically with the
-journal batch; persisted instrument
-identity and version plus price, fee, tick, lot, and opening-capital provenance;
+Cut-over still requires: completion and soak evidence for the dormant integrated
+owner; persisted instrument identity and version plus price, fee, tick, lot, and
+opening-capital provenance;
 funding, borrowing, liquidation, and unrealised mark-to-market rules;
 generation and execution-scope provenance; atomic legacy compatibility
 projections where they remain necessary; durable reconciliation and quarantine

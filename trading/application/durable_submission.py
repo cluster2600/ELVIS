@@ -15,6 +15,7 @@ from trading.domain.order_lifecycle import (
     SubmissionFailed,
 )
 from trading.domain.orders import RetrySafety, SubmissionReport, SubmissionStatus
+from trading.domain.paper_settlement import PaperLinearInstrument
 from trading.domain.positions import PositionInstruction
 
 _FIRST_SUBMISSION_EVENT_ID = "submission-attempt-1"
@@ -366,6 +367,184 @@ class DurableSubmissionOwner(Protocol):
 
 @protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
+class PaperAccountSubmissionContext:
+    """Bind one durable attempt to its paper account and instrument snapshot."""
+
+    attempt: SubmissionAttemptContext
+    account_key: str
+    instrument: PaperLinearInstrument
+
+    def __post_init__(self) -> None:
+        if type(self.attempt) is not SubmissionAttemptContext:
+            raise TypeError("attempt must be a SubmissionAttemptContext")
+        _require_identifier("account_key", self.account_key)
+        if type(self.instrument) is not PaperLinearInstrument:
+            raise TypeError("instrument must be a PaperLinearInstrument")
+        _require_identifier(
+            "instrument.base_asset",
+            self.instrument.base_asset,
+            _SYMBOL_MAX_LENGTH,
+        )
+        _require_identifier(
+            "instrument.quote_asset",
+            self.instrument.quote_asset,
+            _SYMBOL_MAX_LENGTH,
+        )
+        if self.instrument.symbol != self.attempt.instruction.order_intent.symbol:
+            raise ValueError("instrument symbol must match the instruction")
+
+    @property
+    def execution_scope(self) -> str:
+        """Return the scope selected by the underlying submission attempt."""
+        return self.attempt.execution_scope
+
+    @property
+    def client_order_id(self) -> str:
+        """Return the stable order identity selected by the attempt."""
+        return self.attempt.client_order_id
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class DurablePaperAccountSubmissionReceipt:
+    """One atomically durable journal and paper-account batch."""
+
+    context: PaperAccountSubmissionContext
+    submission: DurableSubmissionReceipt
+    account_versions: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.context) is not PaperAccountSubmissionContext:
+            raise TypeError("context must be a PaperAccountSubmissionContext")
+        if type(self.submission) is not DurableSubmissionReceipt:
+            raise TypeError("submission must be a DurableSubmissionReceipt")
+        if self.submission.attempt is not self.context.attempt:
+            raise ValueError("submission attempt must match the account context")
+        if type(self.account_versions) is not tuple:
+            raise TypeError("account_versions must be an exact tuple")
+        if len(self.account_versions) != len(self.submission.fills):
+            raise ValueError("each durable fill requires one account version")
+        if not self.account_versions:
+            raise ValueError("an account submission requires at least one fill")
+        for version in self.account_versions:
+            if isinstance(version, bool) or not isinstance(version, int):
+                raise TypeError("account versions must be integers")
+            if version < 1 or version > _POSTGRES_BIGINT_MAX:
+                raise ValueError("account version is outside durable storage bounds")
+        if self.account_versions != tuple(
+            range(
+                self.account_versions[0],
+                self.account_versions[0] + len(self.account_versions),
+            )
+        ):
+            raise ValueError("account versions must be strictly consecutive")
+
+    @property
+    def disposition(self) -> DurableSubmissionDisposition:
+        """Return whether the atomically owned batch was committed or replayed."""
+        return self.submission.disposition
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperAccountSubmissionRejected:
+    """A fully derived account rejection that left no durable batch facts."""
+
+    context: PaperAccountSubmissionContext
+    rejected_event_id: str
+    reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.context) is not PaperAccountSubmissionContext:
+            raise TypeError("context must be a PaperAccountSubmissionContext")
+        _require_identifier("rejected_event_id", self.rejected_event_id)
+        if type(self.reasons) is not tuple:
+            raise TypeError("reasons must be an exact tuple")
+        if not self.reasons:
+            raise ValueError("a rejected submission requires at least one reason")
+        for reason in self.reasons:
+            _require_identifier("reason", reason)
+
+
+PaperAccountSubmissionResult = (
+    DurablePaperAccountSubmissionReceipt | PaperAccountSubmissionRejected
+)
+
+
+class PaperAccountSubmissionOwner(Protocol):
+    """Atomic owner of one journal and paper-account submission batch."""
+
+    def execute(
+        self,
+        context: PaperAccountSubmissionContext,
+        /,
+    ) -> PaperAccountSubmissionResult:
+        """Commit, replay, or reject one fully derived paper-account batch."""
+        ...
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperAccountSubmissionCommitUnknown(RuntimeError):
+    """Preserve the full account context after a lost commit acknowledgement."""
+
+    context: PaperAccountSubmissionContext
+
+    def __post_init__(self) -> None:
+        if type(self.context) is not PaperAccountSubmissionContext:
+            raise TypeError("context must be a PaperAccountSubmissionContext")
+        RuntimeError.__init__(
+            self,
+            "durable paper-account submission commit outcome is unknown",
+        )
+
+    def __reduce__(self) -> tuple[object, tuple[PaperAccountSubmissionContext]]:
+        """Reconstruct the typed exception from its full context."""
+        return (type(self), (self.context,))
+
+    @property
+    def client_order_id(self) -> str:
+        """Expose the stable order identity needed by reconciliation."""
+        return self.context.client_order_id
+
+    @property
+    def requires_reconciliation(self) -> bool:
+        """An unacknowledged commit must be resolved before any retry."""
+        return True
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperAccountSubmissionReconciliationRequired(RuntimeError):
+    """Preserve the full context for a batch that cannot be exactly replayed."""
+
+    context: PaperAccountSubmissionContext
+
+    def __post_init__(self) -> None:
+        if type(self.context) is not PaperAccountSubmissionContext:
+            raise TypeError("context must be a PaperAccountSubmissionContext")
+        RuntimeError.__init__(
+            self,
+            "durable paper-account submission history requires reconciliation",
+        )
+
+    def __reduce__(self) -> tuple[object, tuple[PaperAccountSubmissionContext]]:
+        """Reconstruct the typed exception from its full context."""
+        return (type(self), (self.context,))
+
+    @property
+    def client_order_id(self) -> str:
+        """Expose the stable order identity needed by reconciliation."""
+        return self.context.client_order_id
+
+    @property
+    def requires_reconciliation(self) -> bool:
+        """The caller must reconcile instead of planning another submission."""
+        return True
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
 class SubmissionCommitUnknown(RuntimeError):
     """Preserve an attempt whose durable commit acknowledgement was lost."""
 
@@ -423,10 +602,17 @@ class SubmissionReconciliationRequired(RuntimeError):
 
 __all__ = [
     "DurableLifecycleReceipt",
+    "DurablePaperAccountSubmissionReceipt",
     "DurableSubmissionDisposition",
     "DurableSubmissionOwner",
     "DurableSubmissionReceipt",
     "PaperPlannedFill",
+    "PaperAccountSubmissionCommitUnknown",
+    "PaperAccountSubmissionContext",
+    "PaperAccountSubmissionOwner",
+    "PaperAccountSubmissionReconciliationRequired",
+    "PaperAccountSubmissionRejected",
+    "PaperAccountSubmissionResult",
     "PaperSubmissionPlan",
     "PaperSubmissionPlanner",
     "SubmissionAttemptContext",
