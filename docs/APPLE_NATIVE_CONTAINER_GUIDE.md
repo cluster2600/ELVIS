@@ -1,5 +1,10 @@
 # 🍎 ELVIS Trading Bot - Apple Native Container Guide
 
+> **Compatibility-runtime guide.** This Apple Container workflow does not
+> provision V2 database identities or perform a generation-bound cut-over. See
+> the [V2 architecture](V2_ARCHITECTURE.md); a healthy container is not V2
+> activation proof.
+
 ## Using Apple's Container CLI Tool
 
 You have Apple's native `container` CLI installed! This guide shows you how to run ELVIS using Apple's container system directly instead of Docker.

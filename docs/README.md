@@ -1,6 +1,40 @@
-# ELVIS Trading Bot Documentation
+# ELVIS documentation
 
-## 📚 Documentation Index
+ELVIS documentation is now organised around the in-progress V2 architecture
+programme. The compatibility paper runtime is still authoritative; V2 durable
+owners and activation capabilities are not composed into deployment, and
+`ACTIVE` remains a **NO-GO**.
+
+## Start here
+
+1. [V2 architecture](V2_ARCHITECTURE.md) — concise explanation of the new
+   approach, data flow, implementation state, migration phases, and operator
+   safety contract.
+2. [Architecture migration](architecture_migration/README.md) — evidence,
+   detailed target contracts, and the authoritative execution ledger.
+3. [Compatibility-runtime architecture](architecture.md) — verified topology
+   of the runtime that remains active during migration.
+
+## Documentation authority matrix
+
+| Document class | Purpose | Authority |
+|---|---|---|
+| [V2 overview](V2_ARCHITECTURE.md) | V2 intent, boundaries, and reader map | Canonical overview |
+| [Target architecture](architecture_migration/03-target-architecture.md) | Detailed V2 component and data contracts | Canonical design |
+| [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Slice status, verification, rollback, and cut-over gates | Canonical status |
+| [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) | Immutable audited baseline | Historical evidence |
+| [Runtime architecture](architecture.md), [components](COMPONENTS.md), and [system topology](ELVIS_SYSTEM_ARCHITECTURE.md) | Current compatibility-runtime references | Legacy operational context |
+| [Deployment guide](DEPLOYMENT.md) | Existing Compose/Ansible workflow | Legacy deployment only; not V2 cut-over |
+| `docs/archive/` | Superseded reports and completion claims | Historical only |
+
+Source code and the roadmap's latest committed record win if a legacy guide
+disagrees. A successful test, generated artefact, or healthy compatibility
+container is not proof of a V2 deployment or activation.
+
+## Compatibility-runtime documentation
+
+The material below describes current features and operations while V2 is being
+built. It does not grant V2 runtime authority.
 
 ### 🔐 Security & Configuration
 - **[SECURITY.md](../SECURITY.md)** - Secrets handling with HashiCorp Vault / OpenBao and local fallback

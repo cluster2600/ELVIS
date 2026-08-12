@@ -1,5 +1,10 @@
 # Reference architecture analysis
 
+> **V2 design input:** this comparison records the evidence used to select the
+> ELVIS V2 approach. The reference projects were studied read-only; their code
+> and topologies were not transplanted. The selected design is documented in
+> the [target architecture](03-target-architecture.md).
+
 ## Method and limits
 
 The four repositories were cloned read-only and reviewed at the revisions in

@@ -1,5 +1,11 @@
 # ELVIS repository analysis
 
+> **V2 evidence role:** this is the immutable pre-migration baseline captured at
+> the pinned revision below. It explains why V2 was started; it is not the
+> current V2 implementation status. Use the [V2 overview](../V2_ARCHITECTURE.md)
+> for the new approach and the [roadmap](04-migration-roadmap.md) for current
+> status.
+
 ## Scope and method
 
 This audit covers every first-party Python package, the entry point, tests,

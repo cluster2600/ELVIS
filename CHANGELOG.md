@@ -1,3 +1,19 @@
+## ELVIS V2 architecture programme (in progress)
+
+Development is under way on `codex/elvis-architecture-migration`. This is a
+branch programme announcement, not a release, tag, deployment, or activation.
+
+V2 introduces pure typed decisions, immutable journal and replay contracts,
+atomic order/position/account owners, a generation-bound legacy-writer fence,
+locked activation capabilities, and an offline least-authority PostgreSQL
+bootstrap. The durable path remains dormant. Dedicated deployment identities,
+fail-closed composition, reconciliation/shadow evidence, rollback rehearsal,
+soak, and explicit operator approval still block cut-over; `ACTIVE` is a
+**NO-GO**.
+
+See the [V2 architecture overview](docs/V2_ARCHITECTURE.md) and authoritative
+[migration roadmap](docs/architecture_migration/04-migration-roadmap.md).
+
 ## [v0.3.0] - 2026-07-12 - Root reorganization, profitability roadmap, py3.10/3.14 container split
 
 ### Repository layout

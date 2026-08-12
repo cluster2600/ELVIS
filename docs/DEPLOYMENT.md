@@ -1,6 +1,14 @@
 # ELVIS Deployment Guide (Ansible + Docker)
 
 > Extracted from the original README during the 2026-07 root cleanup; content preserved verbatim.
+>
+> **V2 deployment warning:** these commands deploy the current compatibility
+> stack. They do not provision the dedicated V2 runtime identities, establish
+> the exclusive database-administration window, remove runtime DDL, or perform
+> a generation-bound cut-over. A healthy service is not proof of V2 readiness.
+> Follow the pending gates in the
+> [V2 migration roadmap](architecture_migration/04-migration-roadmap.md);
+> `ACTIVE` remains a **NO-GO**.
 
 ## Deployment with Ansible
 
@@ -181,4 +189,3 @@ After successful Ansible deployment:
 For detailed Ansible documentation, see [ansible/README.md](../ansible/README.md).
 
 ---
-

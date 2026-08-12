@@ -1,8 +1,15 @@
-# ELVIS Architecture (verified 2026-07-12)
+# ELVIS compatibility-runtime architecture (verified 2026-07-12)
 
 Diagrams below reflect the **actual** code after the doc-audit fixes and the
 2026-07 root reorganization — every module, class, and path shown exists and
 is import-verified.
+
+> This is the audited legacy/runtime-compatibility topology, retained while
+> ELVIS V2 is migrated in reversible slices. It is not the V2 target and does
+> not prove V2 activation. See the [V2 architecture](V2_ARCHITECTURE.md) for the
+> new approach and the
+> [migration roadmap](architecture_migration/04-migration-roadmap.md) for
+> current authority. `ACTIVE` remains a **NO-GO**.
 
 ## System / runtime flow
 

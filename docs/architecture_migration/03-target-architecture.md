@@ -1,4 +1,11 @@
-# ELVIS target architecture
+# ELVIS V2 target architecture
+
+> **Design authority, not deployment proof.** This document defines the
+> detailed V2 contracts. Some components are implemented and active at narrow
+> compatibility boundaries; the durable owners, fence, activation, and
+> least-authority bootstrap remain dormant. The
+> [migration roadmap](04-migration-roadmap.md) is authoritative for current
+> implementation state. `ACTIVE` remains a **NO-GO**.
 
 ## Decision
 
@@ -1372,6 +1379,29 @@ Reconciliation is intentionally resumable across operator passes. On a fresh
 database, the first pass creates all seven roles as `NOLOGIN` with null
 passwords and returns `CREDENTIALS_REQUIRED` without creating `np` or applying
 a migration. Credentials and `LOGIN` are provisioned outside this component.
+Before that first cluster-global role mutation, the same advisory-locked
+transaction performs a read-only catalog admission. It accepts only a closed,
+empty fresh database, the exact prepared fresh-resume state, an exact
+checksummed historical adoption, or the exact final catalog. A missing or
+partial ledger, hostile pre-existing schema, mixed authority, or catalog drift
+raises a typed error and creates no managed role.
+The closed-database evidence includes the exact built-in PL/pgSQL extension,
+all built-in language rows, referenced PL/pgSQL and access-method handler
+routines, and the PL/pgSQL dependency graph. Their authority-bearing owners
+must be the independently authenticated admin. It also requires an empty
+`public` object namespace, no unexpected `np` or `pg_catalog` roots, and no
+event trigger, foreign-data wrapper/server/mapping, publication/subscription,
+user cast/transform, default ACL, security label, relevant setting/parameter
+ACL, or large object. This prevents a database-level hook or schema-scoped
+object from surviving into the migration transaction under an otherwise
+plausible ledger. An existing volume whose old shared superuser owns the
+built-in PL/pgSQL baseline is rejected rather than silently repaired; its
+ownership transition requires a separately reviewed offline rehearsal on a
+clone or a fresh admin-owned target.
+This ordering assumes the c3 operator has established an exclusive DDL and
+role-administration window. PostgreSQL's advisory lock serializes cooperating
+bootstrap calls only; it cannot prevent a concurrent superuser from changing
+the catalog. Without that external quiescence the bootstrap must not be run.
 The next pass authenticates six fresh, idle connections as the declared
 backend identities, requires a non-null and non-expired PostgreSQL password
 state, applies the exact packaged migration ledger through the
@@ -1396,12 +1426,13 @@ role. It checks the migration ledger and schema marker, relation columns
 including typmods and collations, constraints, canonical indexes and their
 security-relevant properties, owned sequences, functions, owners, grants,
 column/default ACLs, database/schema ACLs, unexpected schemas or public
-routines, and large objects. In the reconciled catalog, legacy runtime receives
-only the legacy-table matrix. Atomic runtime receives the journal/account
-matrix plus the narrow runtime-control/generation read and row-lock column
-privileges required by its transaction protocol. Readiness has read-only
-authority, trainer has `SELECT` on `trades`, and activation alone owns and can
-execute the two c1 capabilities. Every durable phase—roles, migration
+routines or standalone catalog roots, database-scoped hooks, and large objects.
+In the reconciled catalog, legacy runtime receives only the legacy-table matrix.
+Atomic runtime receives the journal/account matrix plus the narrow
+runtime-control/generation read and row-lock column privileges required by its
+transaction protocol. Readiness has read-only authority, trainer has `SELECT`
+on `trades`, and activation alone owns and can execute the two c1 capabilities.
+Every durable phase—roles, migration
 authority, packaged migrations, old-role demotion, and final catalog—resolves a
 failed commit through an independent phase-specific readback. Any non-exact or
 unreadable result is a typed commit-unknown or drift failure, never an inferred
@@ -1411,8 +1442,9 @@ This bootstrap has no CLI, environment lookup, startup hook, container wiring,
 credential writer, session terminator, activation call, or runtime consumer.
 M9b.14c3 must supply the offline deployment workflow: Compose/Ansible role and
 SCRAM-secret provisioning, restrictive HBA/network policy, credential rotation,
-real-volume rehearsal, and removal of migration or other DDL authority from
-runtime processes. M9b.14d must then compose the dedicated runtime identities
+real-volume rehearsal, an exclusive DDL/role-administration window, and removal
+of migration or other DDL authority from runtime processes. M9b.14d must then
+compose the dedicated runtime identities
 with fail-closed startup and health gates while keeping bootstrap and activation
 offline. Reconciliation, bounded replay, side-effect-free shadow comparison,
 stale-writer removal, tested pause/rollback, soak evidence, and explicit

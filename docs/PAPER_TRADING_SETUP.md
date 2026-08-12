@@ -1,5 +1,11 @@
 # Paper Trading Setup Documentation
 
+> **Compatibility-runtime guide.** This setup starts the current paper runtime;
+> it does not compose or activate the dormant V2 durable owner. See the
+> [V2 architecture](V2_ARCHITECTURE.md) and its
+> [cut-over gates](architecture_migration/04-migration-roadmap.md). Paper remains
+> the only executable mode and `ACTIVE` remains a **NO-GO**.
+
 ## Overview
 
 The ELVIS trading bot supports paper trading mode with multi-asset balances. In paper trading mode, the bot starts with **$1000 USDT** and **$1000 BNB** for a total portfolio value of **$2000**.

@@ -1,5 +1,10 @@
 # ELVIS Trading Bot - Apple Container System Setup
 
+> **Compatibility-runtime guide.** This Docker workflow does not provision V2
+> database identities or perform a generation-bound cut-over. See the
+> [V2 architecture](V2_ARCHITECTURE.md); a healthy container is not V2
+> activation proof.
+
 ## Overview
 
 This guide helps you run the **ELVIS Trading Bot** (Enhanced Leveraged Virtual Investment System) on macOS using Docker images optimized for Apple Silicon (M1/M2/M3) and Intel Macs.

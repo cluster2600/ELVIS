@@ -1,20 +1,41 @@
-# ELVIS architecture migration
+# ELVIS V2 architecture migration
 
-This directory is the decision record and execution ledger for the incremental
-ELVIS architecture migration. It deliberately separates observed facts, design
-decisions, and future work so that a proposed architecture is never confused
-with code that is already running.
+This directory is the evidence, decision record, and execution ledger for the
+incremental ELVIS V2 architecture programme. V2 is a new modular-monolith
+approach built around pure typed decisions, immutable journal facts, atomic
+state owners, a generation-bound activation fence, and least-authority
+PostgreSQL identities.
+
+> **Programme status:** in progress on
+> `codex/elvis-architecture-migration`; not released, deployed, or activated.
+> The compatibility paper runtime remains authoritative and `ACTIVE` remains a
+> **NO-GO**. See the concise [V2 overview](../V2_ARCHITECTURE.md) before using
+> the detailed records below.
+
+The documents deliberately separate observed facts, selected design,
+implemented-but-dormant components, and future work. A proposed or tested
+architecture must never be confused with code that is composed into the
+running bot.
 
 ## Documents
 
-1. [ELVIS repository analysis](01-elvis-repository-analysis.md) — measured
-   baseline, current component map, dependency analysis, and failure modes.
+1. [ELVIS repository analysis](01-elvis-repository-analysis.md) — immutable
+   pre-V2 baseline, component map, dependency analysis, and failure modes.
 2. [Reference architecture analysis](02-reference-architectures.md) — source
-   review of OpenMarket, NautilusTrader, Hummingbot, and Freqtrade.
+   review that informed V2 without copying their topology or code.
 3. [Target architecture](03-target-architecture.md) — the deliberately small
-   modular-monolith design selected for ELVIS.
+   V2 modular-monolith design and its detailed contracts.
 4. [Migration roadmap](04-migration-roadmap.md) — atomic migration slices,
-   gates, rollback rules, and current status.
+   verification gates, rollback rules, and authoritative current status.
+
+## V2 status at a glance
+
+| Layer | State | Meaning |
+|---|---|---|
+| Typed domain, order service, feature contracts, and selected policy/risk boundaries | Implemented incrementally | Some boundaries serve the compatibility runtime |
+| Durable journals, replay, account ledger, atomic owners, readiness, fence, generations, activation, and role/catalog bootstrap | Implemented and tested | Dormant; no running consumer or authority |
+| Offline deployment orchestration, dedicated credentials, restrictive database/network policy, and fail-closed composition | Pending | Blocks V2 runtime authority |
+| Shadow comparison, reconciliation, rollback rehearsal, soak, and approval | Pending evidence | Blocks `ACTIVE` |
 
 ## Evidence snapshot
 
@@ -33,10 +54,14 @@ the migration adopts architectural ideas only.
 
 ## Status vocabulary
 
-- **Observed**: verified in source or by a command recorded in the repository
-  analysis.
-- **Implemented**: present on this branch and covered by the stated checks.
+- **Observed**: verified in source or by a recorded command.
+- **Implemented**: present on this branch and covered by the stated checks; this
+  does not imply deployment or runtime composition.
+- **Dormant**: implemented but unreachable from the production composition
+  root and without runtime authority.
 - **Planned**: accepted direction, not yet implemented.
 - **Removed**: deleted only after its replacement is active and verified.
 
-The roadmap is the authoritative status page.
+The roadmap is the authoritative status page. The repository remains the source
+of truth, and an explicit operator decision is required for every deployment or
+cut-over action.

@@ -1,5 +1,11 @@
 # ELVIS Trading Bot - Ansible Deployment
 
+> **Compatibility-runtime guide.** This automation does not provision the
+> dedicated ELVIS V2 database identities, remove runtime DDL, or perform a
+> generation-bound cut-over. See the
+> [V2 architecture](../docs/V2_ARCHITECTURE.md) and
+> [migration roadmap](../docs/architecture_migration/04-migration-roadmap.md).
+
 This directory contains Ansible playbooks and configuration files to automate the installation and setup of the ELVIS Trading Bot and all its dependencies.
 
 ## Quick Start

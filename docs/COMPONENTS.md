@@ -1,6 +1,11 @@
 # ELVIS Components Reference
 
 > Extracted from the original README during the 2026-07 root cleanup; content preserved verbatim.
+>
+> **Legacy component catalogue:** this material describes the compatibility
+> runtime and may include historical detail. It is not the canonical V2
+> component model. See the [V2 architecture](V2_ARCHITECTURE.md), then the
+> [detailed target](architecture_migration/03-target-architecture.md).
 
 ## System Architecture
 

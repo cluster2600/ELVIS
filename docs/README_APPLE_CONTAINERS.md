@@ -1,5 +1,10 @@
 # 🍎 ELVIS Trading Bot - Apple Container System
 
+> **Compatibility-runtime guide.** These commands run the existing container
+> stack, not the dormant V2 authority path. See the
+> [V2 architecture](V2_ARCHITECTURE.md) and
+> [migration roadmap](architecture_migration/04-migration-roadmap.md).
+
 ## Quick Start Guide
 
 ELVIS (Enhanced Leveraged Virtual Investment System) is now fully containerized and optimized for Apple's Container application and Apple Silicon Macs.

@@ -1,4 +1,10 @@
-# ELVIS migration roadmap
+# ELVIS V2 migration roadmap
+
+> **Authoritative programme status.** V2 is being built incrementally on
+> `codex/elvis-architecture-migration`; it is not a released or deployed runtime.
+> Implemented-but-dormant components do not hold production authority. The
+> compatibility paper runtime remains authoritative and `ACTIVE` remains a
+> **NO-GO** until the cut-over gates in this ledger are complete.
 
 ## Migration contract
 
@@ -12,8 +18,9 @@ Every slice must be independently reviewable and reversible:
 6. update this status ledger and relevant operator documentation; and
 7. create one explicit commit containing only that slice.
 
-No slice enables unattended live trading, changes secrets, deploys, or pushes.
-A load-bearing legacy path is deleted only after its replacement passes parity
+No implementation slice enables unattended live trading, changes secrets, or
+deploys. Git publication is a separate, explicit repository action. A
+load-bearing legacy path is deleted only after its replacement passes parity
 checks. A path proven synthetic, non-deployable, and inactive may instead be
 retired after an explicit audit, zero-call regression tests, and a documented
 rollback decision that does not restore unsafe behaviour.
@@ -4093,7 +4100,7 @@ with 50 skipped, 352 deselected, 293 warnings, and 7 subtests. Black targeting
 Python 3.10, isort, flake8 with an 88-character limit, Python 3.10 compilation,
 and `git diff --check` were green on the final slice.
 
-### M9b.14c2 dormant role and catalog bootstrap
+### M9b.14c2-c3a dormant role/catalog bootstrap and pre-role admission
 
 M9b.14c2 adds the operator-driven
 `trading.persistence.postgres_bootstrap` boundary. Its context, receipts, and
@@ -4120,6 +4127,32 @@ checksummed ledger and one declared migration authority owning the complete
 historical catalog. Partial history, unledgered legacy relations, mixed owners,
 unexpected schemas, public routines, large objects, or surplus grants are
 drift and are not repaired.
+
+Catalog admission now precedes every cluster-global managed-role mutation under
+the same advisory lock. It accepts only a closed empty fresh database, the
+exact prepared fresh-resume state, an exact checksummed historical adoption,
+or the exact terminal catalog. A missing or partial ledger, hostile `np`
+schema, mixed owner, surplus authority, or unreadable catalog fails with the
+existing typed error taxonomy before `CREATE ROLE`, `COMMENT ON ROLE`, or role
+membership grants can execute. Already staged exact `NOLOGIN` roles are not
+silently deleted if a later operator presents an inadmissible volume.
+The admission inventory proves the exact built-in PL/pgSQL extension, all
+built-in language rows, referenced PL/pgSQL and access-method handler routines,
+and the PL/pgSQL dependency graph. These authority-bearing objects must belong
+to the independently authenticated admin. It closes the `public`, prepared
+`np`, and user-created `pg_catalog` roots and rejects database-scoped event
+triggers, foreign-data wrappers/servers/mappings, publications/subscriptions,
+user casts/transforms, default ACLs, relevant settings/parameter ACLs, security
+labels, and large objects. Therefore a hook or standalone catalog object cannot
+be hidden behind an empty relation inventory and reach the migration phase.
+An existing volume whose former shared superuser owns the PL/pgSQL baseline is
+rejected rather than silently repaired; remediation belongs to a separately
+reviewed offline rehearsal on a clone or a fresh admin-owned target.
+The advisory lock coordinates only bootstrap processes that honor it. This
+ordering is valid only inside a c3 operator-enforced exclusive DDL and
+role-administration window; a concurrent superuser can otherwise mutate the
+catalog between evidence collection and role creation, so running without that
+quiescence remains a **NO-GO**.
 
 Old shared-runtime retirement is a separate durable barrier. With explicit
 demotion intent, memberships must already be absent; one pass proves the
@@ -4149,15 +4182,17 @@ consumer, activation call, or new runtime DDL path. The existing composed
 runtime DDL path remains present and is an explicit later blocker. M9b.14c3
 must provide the offline
 orchestration, SCRAM credential provisioning and rotation, restrictive HBA and
-network policy, real existing-volume rehearsal, and removal of DDL/migration
-authority from runtime services. M9b.14d must compose the dedicated runtime
+network policy, real existing-volume rehearsal, an exclusive DDL/admin window,
+and removal of DDL/migration authority from runtime services. M9b.14d must
+compose the dedicated runtime
 roles behind fail-closed startup and health checks. Bounded replay,
 reconciliation/quarantine, side-effect-free shadow comparison, stale-writer
 removal, tested pause/rollback, soak evidence, and explicit operator approval
 remain cut-over blockers. No credential has been deployed and no production
 volume has been migrated; `ACTIVE` remains an explicit **NO-GO**.
 
-Literal M9b.14c2 verification commands:
+Reproducible M9b.14c2-c3a verification commands use an operator-supplied,
+disposable PostgreSQL 15 admin DSN:
 
 ```bash
 .venv/bin/python -m pytest -q tests/test_postgres_bootstrap.py
@@ -4168,30 +4203,25 @@ Literal M9b.14c2 verification commands:
 /usr/local/bin/python3.10 -m pytest -q \
   tests/test_postgres_bootstrap.py \
   tests/test_paper_account_readiness_repository.py
-ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
-  ELVIS_TEST_POSTGRES_REQUIRED=1 \
-  .venv/bin/python -m pytest -q \
+export ELVIS_TEST_POSTGRES_ADMIN_DSN='<disposable PostgreSQL 15 admin DSN>'
+export ELVIS_TEST_POSTGRES_REQUIRED=1
+.venv/bin/python -m pytest -q \
   tests/postgres/test_postgres_bootstrap_postgres.py
-ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
-  ELVIS_TEST_POSTGRES_REQUIRED=1 \
-  /usr/local/bin/python3.10 -m pytest -q \
+/usr/local/bin/python3.10 -m pytest -q \
   tests/postgres/test_postgres_bootstrap_postgres.py
-ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
-  ELVIS_TEST_POSTGRES_REQUIRED=1 \
-  .venv/bin/python -m pytest -q tests/postgres
-TZ=Pacific/Honolulu .venv/bin/python -m pytest -q -m 'not postgres'
+.venv/bin/python -m pytest -q tests/postgres
+.venv/bin/python -m pytest -q --ignore=tests/postgres
 git diff --check
 ```
 
-The focused bootstrap suite passed 77 tests under each Python 3.14 and Python
-3.10 interpreter. The adjacent bootstrap/readiness-catalog command passed 191
+The focused bootstrap suite passed 86 tests under each Python 3.14 and Python
+3.10 interpreter. The adjacent bootstrap/readiness-catalog command passed 200
 tests under each interpreter. The dedicated PostgreSQL 15 bootstrap suite
-passed 86 tests under each interpreter. Separately, the
-PostgreSQL 15 readiness-trigger suite passed 33 tests; that is an adjacent
-trigger-integrity regression result, not part of the 86-test c2 total. The
-complete PostgreSQL 15 suite passed 439 tests. The full non-PostgreSQL
-Honolulu run passed 2,552 tests, with 50 skipped, 439 deselected, 284 warnings,
-and 7 subtests.
+passed 110 tests under each interpreter. The complete PostgreSQL 15 suite
+passed 463 tests. The full non-PostgreSQL run passed 2,561 tests, with 50
+skipped, 280 warnings, and 7 subtests. Black targeting Python 3.10, isort,
+flake8's fatal-error selectors, Python 3.10 compilation, relative Markdown-link
+validation, and `git diff --check` were green on the final c3a tree.
 
 ## Cut-over policy
 
