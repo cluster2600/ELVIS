@@ -680,6 +680,43 @@ def test_first_run_creates_only_marked_roles_and_stops_before_catalog(
         connection.close()
 
 
+def test_exact_existing_volume_is_admitted_before_role_staging(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = False
+    try:
+        assert apply_migrations(connection, load_migrations()) == (
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+    finally:
+        connection.close()
+
+    adoption = PostgresBootstrapAdoption(
+        migration_authority_role=cluster.admin_role,
+        allowed_historical_owner_roles=(cluster.admin_role,),
+    )
+    context = cluster.context(adoption=adoption)
+    before = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
+
+    receipt = cluster.bootstrap(with_credentials=False).reconcile(context)
+
+    assert receipt.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
+    assert receipt.verified_role_probes == ()
+    assert receipt.pending_role_credentials == cluster.roles.login_roles
+    assert tuple(row[0] for row in _role_rows(cluster)) == tuple(
+        sorted(cluster.roles.all)
+    )
+    assert _authority_snapshot(cluster)[1:] == before[1:]
+
+
 def test_fresh_database_owner_drift_fails_before_roles_or_schema_mutation(
     bootstrap_cluster,
 ):
@@ -2179,6 +2216,541 @@ def test_hostile_session_search_path_catalog_is_rejected_without_mutation(
 
 
 @pytest.mark.parametrize(
+    ("object_kind", "create_sql", "exists_sql"),
+    [
+        (
+            "collation",
+            "CREATE COLLATION public.bootstrap_public_collation "
+            "(provider = libc, locale = 'C')",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_collation collation_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = collation_row.collnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND collation_row.collname = 'bootstrap_public_collation'"
+            ")",
+        ),
+        (
+            "operator",
+            "CREATE OPERATOR public.=== ("
+            "LEFTARG = integer, RIGHTARG = integer, "
+            "FUNCTION = pg_catalog.int4eq"
+            ")",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_operator operator_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = operator_row.oprnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND operator_row.oprname = '==='"
+            ")",
+        ),
+        (
+            "operator_class",
+            "CREATE OPERATOR CLASS public.bootstrap_public_int_hash_ops "
+            "FOR TYPE integer USING hash AS "
+            "OPERATOR 1 pg_catalog.= (integer, integer), "
+            "FUNCTION 1 pg_catalog.hashint4(integer)",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_opclass opclass_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = opclass_row.opcnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND opclass_row.opcname = 'bootstrap_public_int_hash_ops'"
+            ")",
+        ),
+        (
+            "operator_family",
+            "CREATE OPERATOR FAMILY public.bootstrap_public_int_hash_family "
+            "USING hash",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_opfamily opfamily_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = opfamily_row.opfnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND opfamily_row.opfname = 'bootstrap_public_int_hash_family'"
+            ")",
+        ),
+        (
+            "conversion",
+            "CREATE CONVERSION public.bootstrap_public_utf8_to_latin1 "
+            "FOR 'UTF8' TO 'LATIN1' FROM pg_catalog.utf8_to_iso8859_1",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_conversion conversion_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = conversion_row.connamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND conversion_row.conname = 'bootstrap_public_utf8_to_latin1'"
+            ")",
+        ),
+        (
+            "text_search_configuration",
+            "CREATE TEXT SEARCH CONFIGURATION "
+            "public.bootstrap_public_ts_configuration "
+            "(COPY = pg_catalog.simple)",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_ts_config config_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = config_row.cfgnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND config_row.cfgname = 'bootstrap_public_ts_configuration'"
+            ")",
+        ),
+        (
+            "text_search_dictionary",
+            "CREATE TEXT SEARCH DICTIONARY "
+            "public.bootstrap_public_ts_dictionary "
+            "(TEMPLATE = pg_catalog.simple)",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_ts_dict dictionary_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = dictionary_row.dictnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND dictionary_row.dictname = 'bootstrap_public_ts_dictionary'"
+            ")",
+        ),
+        (
+            "text_search_parser",
+            "CREATE TEXT SEARCH PARSER public.bootstrap_public_ts_parser ("
+            "START = pg_catalog.prsd_start, "
+            "GETTOKEN = pg_catalog.prsd_nexttoken, "
+            "END = pg_catalog.prsd_end, "
+            "LEXTYPES = pg_catalog.prsd_lextype, "
+            "HEADLINE = pg_catalog.prsd_headline"
+            ")",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_ts_parser parser_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = parser_row.prsnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND parser_row.prsname = 'bootstrap_public_ts_parser'"
+            ")",
+        ),
+        (
+            "text_search_template",
+            "CREATE TEXT SEARCH TEMPLATE public.bootstrap_public_ts_template ("
+            "INIT = pg_catalog.dsimple_init, "
+            "LEXIZE = pg_catalog.dsimple_lexize"
+            ")",
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_ts_template template_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = template_row.tmplnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND template_row.tmplname = 'bootstrap_public_ts_template'"
+            ")",
+        ),
+        (
+            "statistics",
+            (
+                "CREATE TEMP TABLE bootstrap_public_statistics_source "
+                "(first_value INTEGER, second_value INTEGER)",
+                "CREATE STATISTICS public.bootstrap_public_statistics "
+                "(dependencies) ON first_value, second_value "
+                "FROM bootstrap_public_statistics_source",
+            ),
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_statistic_ext statistics_row "
+            "JOIN pg_namespace namespace_row "
+            "ON namespace_row.oid = statistics_row.stxnamespace "
+            "WHERE namespace_row.nspname = 'public' "
+            "AND statistics_row.stxname = 'bootstrap_public_statistics'"
+            ")",
+        ),
+    ],
+)
+def test_public_standalone_catalog_object_is_rejected_before_managed_roles(
+    bootstrap_cluster,
+    object_kind,
+    create_sql,
+    exists_sql,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            statements = (create_sql,) if isinstance(create_sql, str) else create_sql
+            for statement in statements:
+                cursor.execute(statement)
+            cursor.execute(exists_sql)
+            assert cursor.fetchone() == (True,), object_kind
+
+        assert _role_rows(cluster) == ()
+
+        with pytest.raises(
+            PostgresBootstrapDriftError,
+            match="catalog|public object",
+        ):
+            cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+        assert _role_rows(cluster) == ()
+        with connection.cursor() as cursor:
+            cursor.execute(exists_sql)
+            assert cursor.fetchone() == (True,), object_kind
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    ("object_kind", "create_statements", "exists_sql"),
+    [
+        (
+            "event_trigger",
+            (
+                "CREATE FUNCTION "
+                "pg_catalog.bootstrap_untrusted_event_trigger() "
+                "RETURNS event_trigger LANGUAGE plpgsql "
+                "AS $$ BEGIN END $$",
+                "CREATE EVENT TRIGGER bootstrap_untrusted_event_trigger "
+                "ON ddl_command_start EXECUTE FUNCTION "
+                "pg_catalog.bootstrap_untrusted_event_trigger()",
+            ),
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_event_trigger "
+            "WHERE evtname = 'bootstrap_untrusted_event_trigger'"
+            ")",
+        ),
+        (
+            "foreign_data_wrapper",
+            (
+                "CREATE FOREIGN DATA WRAPPER bootstrap_untrusted_fdw "
+                "NO HANDLER NO VALIDATOR",
+            ),
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_foreign_data_wrapper "
+            "WHERE fdwname = 'bootstrap_untrusted_fdw'"
+            ")",
+        ),
+        (
+            "publication",
+            ("CREATE PUBLICATION bootstrap_untrusted_publication",),
+            "SELECT EXISTS ("
+            "SELECT 1 FROM pg_publication "
+            "WHERE pubname = 'bootstrap_untrusted_publication'"
+            ")",
+        ),
+    ],
+)
+def test_database_scoped_catalog_object_is_rejected_before_managed_roles(
+    bootstrap_cluster,
+    object_kind,
+    create_statements,
+    exists_sql,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            for statement in create_statements:
+                cursor.execute(statement)
+            cursor.execute(exists_sql)
+            assert cursor.fetchone() == (True,), object_kind
+    finally:
+        connection.close()
+
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(
+        PostgresBootstrapDriftError,
+        match="catalog|database|object",
+    ):
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+    assert _role_rows(cluster) == ()
+    connection = cluster.admin_factory()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(exists_sql)
+            assert cursor.fetchone() == (True,), object_kind
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "drift_kind",
+    [
+        "plpgsql_validator_attribute",
+        "bthandler_attribute",
+        "plpgsql_validator_extension_membership",
+    ],
+)
+def test_builtin_routine_or_extension_membership_drift_is_rejected_before_roles(
+    bootstrap_cluster,
+    drift_kind,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            if drift_kind == "plpgsql_validator_attribute":
+                cursor.execute(
+                    "UPDATE pg_catalog.pg_proc SET prosecdef = TRUE "
+                    "WHERE oid = "
+                    "'pg_catalog.plpgsql_validator(oid)'::regprocedure "
+                    "RETURNING prosecdef"
+                )
+                assert cursor.fetchone() == (True,)
+            elif drift_kind == "bthandler_attribute":
+                cursor.execute(
+                    "UPDATE pg_catalog.pg_proc SET proleakproof = TRUE "
+                    "WHERE oid = "
+                    "'pg_catalog.bthandler(internal)'::regprocedure "
+                    "RETURNING proleakproof"
+                )
+                assert cursor.fetchone() == (True,)
+            else:
+                cursor.execute(
+                    "DELETE FROM pg_catalog.pg_depend dependency_row "
+                    "WHERE dependency_row.classid = 'pg_proc'::regclass "
+                    "AND dependency_row.objid = "
+                    "'pg_catalog.plpgsql_validator(oid)'::regprocedure "
+                    "AND dependency_row.refclassid = 'pg_extension'::regclass "
+                    "AND dependency_row.refobjid = ("
+                    "SELECT extension_row.oid FROM pg_extension extension_row "
+                    "WHERE extension_row.extname = 'plpgsql'"
+                    ") AND dependency_row.deptype = 'e' "
+                    "RETURNING dependency_row.deptype"
+                )
+                assert cursor.fetchone() == ("e",)
+    finally:
+        connection.close()
+
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog"):
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+    assert _role_rows(cluster) == ()
+
+
+def test_dependency_free_user_cast_is_rejected_before_managed_roles(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'CREATE CAST (boolean AS "char") ' "WITHOUT FUNCTION AS ASSIGNMENT"
+            )
+            cursor.execute(
+                "SELECT cast_row.oid, COUNT(dependency_row.*) "
+                "FROM pg_cast cast_row "
+                "LEFT JOIN pg_depend dependency_row "
+                "ON dependency_row.classid = 'pg_cast'::regclass "
+                "AND dependency_row.objid = cast_row.oid "
+                "WHERE cast_row.castsource = 'boolean'::regtype "
+                "AND cast_row.casttarget = '\"char\"'::regtype "
+                "GROUP BY cast_row.oid"
+            )
+            cast_oid, dependency_count = cursor.fetchone()
+            assert type(cast_oid) is int
+            assert dependency_count == 0
+    finally:
+        connection.close()
+
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog"):
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+    assert _role_rows(cluster) == ()
+
+
+def test_user_routine_in_pg_catalog_is_rejected_before_managed_roles(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE FUNCTION "
+                "pg_catalog.bootstrap_untrusted_catalog_routine(integer) "
+                "RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT $1'"
+            )
+            cursor.execute(
+                "SELECT pg_get_userbyid(proowner) FROM pg_proc "
+                "WHERE oid = "
+                "'pg_catalog.bootstrap_untrusted_catalog_routine(integer)'"
+                "::regprocedure"
+            )
+            assert cursor.fetchone() == (cluster.admin_role,)
+    finally:
+        connection.close()
+
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog"):
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+    assert _role_rows(cluster) == ()
+
+
+def test_nonprocedural_language_owner_drift_is_rejected_before_managed_roles(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    cluster.create_auxiliary_login(cluster.outsider)
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER LANGUAGE sql OWNER TO {}").format(
+                    sql.Identifier(cluster.outsider)
+                )
+            )
+            cursor.execute(
+                "SELECT lanispl, pg_get_userbyid(lanowner) "
+                "FROM pg_language WHERE lanname = 'sql'"
+            )
+            assert cursor.fetchone() == (False, cluster.outsider)
+    finally:
+        connection.close()
+
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog"):
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
+
+    assert _role_rows(cluster) == ()
+
+
+def test_prepared_fresh_schema_object_is_rejected_before_role_mutation(
+    bootstrap_cluster,
+    monkeypatch,
+):
+    cluster = bootstrap_cluster
+    context = cluster.context()
+    first = cluster.bootstrap(with_credentials=False).reconcile(context)
+    assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
+    cluster.provision_managed_passwords()
+    interrupted = cluster.bootstrap(with_credentials=True)
+
+    class SimulatedProcessStop(Exception):
+        pass
+
+    def stop_before_migrations(_context):
+        raise SimulatedProcessStop
+
+    monkeypatch.setattr(
+        interrupted,
+        "_apply_packaged_migrations",
+        stop_before_migrations,
+    )
+    with pytest.raises(SimulatedProcessStop):
+        interrupted.reconcile(context)
+
+    expected_marker = f"elvis-postgres-bootstrap-schema:v1:{cluster.database}"
+    exact_roles = _role_rows(cluster)
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_get_userbyid(nspowner), "
+                "obj_description(oid, 'pg_namespace') "
+                "FROM pg_namespace WHERE nspname = 'np'"
+            )
+            assert cursor.fetchone() == (cluster.roles.schema_owner, expected_marker)
+            cursor.execute("SELECT to_regclass('np.schema_migrations')")
+            assert cursor.fetchone() == (None,)
+            cursor.execute(
+                "CREATE TYPE np.bootstrap_prepared_fresh_enum AS ENUM ('sentinel')"
+            )
+    finally:
+        connection.close()
+
+    with pytest.raises(
+        PostgresBootstrapDriftError,
+        match="catalog|object|type",
+    ):
+        cluster.bootstrap(with_credentials=False).reconcile(context)
+
+    assert _role_rows(cluster) == exact_roles
+    connection = cluster.admin_factory()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT to_regtype('np.bootstrap_prepared_fresh_enum')::text"
+            )
+            assert cursor.fetchone() == ("np.bootstrap_prepared_fresh_enum",)
+            cursor.execute(
+                "SELECT obj_description(oid, 'pg_namespace') "
+                "FROM pg_namespace WHERE nspname = 'np'"
+            )
+            assert cursor.fetchone() == (expected_marker,)
+    finally:
+        connection.close()
+
+
+def test_prepared_fresh_public_create_acl_is_rejected_before_migrations(
+    bootstrap_cluster,
+    monkeypatch,
+):
+    cluster = bootstrap_cluster
+    context = cluster.context()
+    first = cluster.bootstrap(with_credentials=False).reconcile(context)
+    assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
+    cluster.provision_managed_passwords()
+    interrupted = cluster.bootstrap(with_credentials=True)
+
+    class SimulatedProcessStop(Exception):
+        pass
+
+    def stop_before_migrations(_context):
+        raise SimulatedProcessStop
+
+    monkeypatch.setattr(
+        interrupted,
+        "_apply_packaged_migrations",
+        stop_before_migrations,
+    )
+    with pytest.raises(SimulatedProcessStop):
+        interrupted.reconcile(context)
+
+    exact_roles = _role_rows(cluster)
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('np.schema_migrations')")
+            assert cursor.fetchone() == (None,)
+            cursor.execute("GRANT CREATE ON SCHEMA np TO PUBLIC")
+            cursor.execute(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM pg_namespace namespace_row "
+                "CROSS JOIN LATERAL aclexplode(namespace_row.nspacl) acl_row "
+                "WHERE namespace_row.nspname = 'np' "
+                "AND acl_row.grantee = 0 "
+                "AND acl_row.privilege_type = 'CREATE'"
+                ")"
+            )
+            assert cursor.fetchone() == (True,)
+    finally:
+        connection.close()
+
+    before = _authority_snapshot(cluster)
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog|schema|authority"):
+        cluster.bootstrap(with_credentials=False).reconcile(context)
+
+    assert _role_rows(cluster) == exact_roles
+    assert _authority_snapshot(cluster) == before
+    connection = cluster.admin_factory()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('np.schema_migrations')")
+            assert cursor.fetchone() == (None,)
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
     "outside_catalog_drift",
     ["schema", "security_definer", "public_acl"],
 )
@@ -2244,7 +2816,10 @@ def test_unexpected_user_schema_or_public_routine_is_rejected_without_repair(
     finally:
         connection.close()
 
-    with pytest.raises(PostgresBootstrapDriftError, match="catalog|schema"):
+    with pytest.raises(
+        PostgresBootstrapDriftError,
+        match="catalog|schema|public object",
+    ):
         cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
 
     assert _authority_snapshot(cluster) == before
@@ -2603,23 +3178,127 @@ def test_existing_volume_rejects_pending_or_drifted_migration_history(
         allowed_historical_owner_roles=(cluster.admin_role,),
     )
     context = cluster.context(adoption=adoption)
-    assert (
-        cluster.bootstrap(with_credentials=False).reconcile(context).status
-        is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-    )
-    cluster.provision_managed_passwords()
+    before = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
 
     with pytest.raises(PostgresBootstrapMigrationError, match="history"):
-        cluster.bootstrap(with_credentials=True).reconcile(context)
+        cluster.bootstrap(with_credentials=False).reconcile(context)
 
+    assert _role_rows(cluster) == ()
+    assert _authority_snapshot(cluster) == before
+
+
+def test_migration_authority_cannot_own_plpgsql_before_role_staging(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    cluster.create_auxiliary_login(cluster.old_runtime)
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(cluster.database),
+                    sql.Identifier(cluster.old_runtime),
+                )
+            )
+    finally:
+        connection.close()
+
+    old_connection = cluster.role_factory(cluster.old_runtime)()
+    old_connection.autocommit = False
+    try:
+        assert apply_migrations(old_connection, load_migrations()) == (
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+    finally:
+        old_connection.close()
+
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER LANGUAGE plpgsql OWNER TO {}").format(
+                    sql.Identifier(cluster.old_runtime)
+                )
+            )
+            cursor.execute(
+                "SELECT pg_get_userbyid(lanowner) "
+                "FROM pg_language WHERE lanname = 'plpgsql'"
+            )
+            assert cursor.fetchone() == (cluster.old_runtime,)
+    finally:
+        connection.close()
+
+    adoption = PostgresBootstrapAdoption(
+        migration_authority_role=cluster.old_runtime,
+        allowed_historical_owner_roles=(cluster.old_runtime,),
+    )
+    context = cluster.context(adoption=adoption)
+    before = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog|language|owner"):
+        cluster.bootstrap(with_credentials=False).reconcile(context)
+
+    assert _role_rows(cluster) == ()
+    assert _authority_snapshot(cluster) == before
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT pg_get_userbyid(nspowner) FROM pg_namespace "
-                "WHERE nspname = 'np'"
+                "SELECT pg_get_userbyid(lanowner) "
+                "FROM pg_language WHERE lanname = 'plpgsql'"
             )
-            assert cursor.fetchone() == (cluster.admin_role,)
+            assert cursor.fetchone() == (cluster.old_runtime,)
+    finally:
+        connection.close()
+
+
+def test_migration_authority_plpgsql_owner_never_returns_false_complete(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
+    cluster.create_auxiliary_login(cluster.old_runtime)
+    exact_roles = _role_rows(cluster)
+    connection = cluster.admin_factory()
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER LANGUAGE plpgsql OWNER TO {}").format(
+                    sql.Identifier(cluster.old_runtime)
+                )
+            )
+    finally:
+        connection.close()
+
+    adoption = PostgresBootstrapAdoption(
+        migration_authority_role=cluster.old_runtime,
+        allowed_historical_owner_roles=(cluster.old_runtime,),
+    )
+    context = cluster.context(adoption=adoption)
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog|language|owner"):
+        cluster.bootstrap(with_credentials=True).reconcile(context)
+
+    assert _role_rows(cluster) == exact_roles
+    connection = cluster.admin_factory()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_get_userbyid(lanowner) "
+                "FROM pg_language WHERE lanname = 'plpgsql'"
+            )
+            assert cursor.fetchone() == (cluster.old_runtime,)
     finally:
         connection.close()
 
@@ -2688,16 +3367,13 @@ def test_adoption_requires_migration_authority_to_own_schema_and_ledger(
         allowed_historical_owner_roles=(cluster.old_runtime,),
     )
     context = cluster.context(adoption=adoption)
-    assert (
-        cluster.bootstrap(with_credentials=False).reconcile(context).status
-        is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-    )
-    cluster.provision_managed_passwords()
     before = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
 
     with pytest.raises(PostgresBootstrapDriftError, match="owner|authority|catalog"):
-        cluster.bootstrap(with_credentials=True).reconcile(context)
+        cluster.bootstrap(with_credentials=False).reconcile(context)
 
+    assert _role_rows(cluster) == ()
     assert _authority_snapshot(cluster) == before
     connection = cluster.admin_factory()
     try:
@@ -2820,18 +3496,13 @@ def test_legacy_tables_without_migration_ledger_are_rejected_without_mutation(
         allowed_historical_owner_roles=(cluster.admin_role,),
     )
     context = cluster.context(adoption=adoption)
-    assert (
-        cluster.bootstrap(with_credentials=False).reconcile(context).status
-        is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-    )
-    cluster.provision_managed_passwords()
-    after_roles = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
 
     with pytest.raises(PostgresBootstrapMigrationError, match="history"):
-        cluster.bootstrap(with_credentials=True).reconcile(context)
+        cluster.bootstrap(with_credentials=False).reconcile(context)
 
-    assert _authority_snapshot(cluster) == after_roles
-    assert after_roles[1:] == before[1:]
+    assert _role_rows(cluster) == ()
+    assert _authority_snapshot(cluster) == before
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
@@ -2855,15 +3526,14 @@ def test_fresh_context_rejects_preexisting_np_schema_without_owner_mutation(
             cursor.execute("CREATE TABLE np.preexisting_sentinel (id INTEGER)")
     finally:
         connection.close()
-    assert (
-        cluster.bootstrap(with_credentials=False).reconcile(cluster.context()).status
-        is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-    )
-    cluster.provision_managed_passwords()
+    before = _authority_snapshot(cluster)
+    assert _role_rows(cluster) == ()
 
     with pytest.raises(PostgresBootstrapDriftError, match="catalog|objects|owners"):
-        cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
+        cluster.bootstrap(with_credentials=False).reconcile(cluster.context())
 
+    assert _role_rows(cluster) == ()
+    assert _authority_snapshot(cluster) == before
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
@@ -2889,6 +3559,7 @@ def test_fresh_bootstrap_resumes_after_migration_authority_commit(
         is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
     )
     cluster.provision_managed_passwords()
+    exact_roles = _role_rows(cluster)
     interrupted = cluster.bootstrap(with_credentials=True)
 
     class SimulatedProcessStop(Exception):
@@ -2922,6 +3593,7 @@ def test_fresh_bootstrap_resumes_after_migration_authority_commit(
 
     assert receipt.status is PostgresBootstrapStatus.COMPLETE
     assert receipt.migration_versions == (1, 2, 3, 4, 5, 6)
+    assert _role_rows(cluster) == exact_roles
 
 
 def test_existing_volume_requires_explicit_quiescence_before_old_role_demotion(

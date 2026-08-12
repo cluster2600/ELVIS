@@ -98,6 +98,385 @@ _EXPECTED_FUNCTION_IDENTITIES = (
     ("enforce_legacy_paper_runtime_fence", "", "f"),
     ("reject_paper_runtime_generation_mutation", "", "f"),
 )
+_EXPECTED_ACCESS_METHOD_EVIDENCE = (
+    ("brin", "i", "brinhandler(internal)"),
+    ("btree", "i", "bthandler(internal)"),
+    ("gin", "i", "ginhandler(internal)"),
+    ("gist", "i", "gisthandler(internal)"),
+    ("hash", "i", "hashhandler(internal)"),
+    ("heap", "t", "heap_tableam_handler(internal)"),
+    ("spgist", "i", "spghandler(internal)"),
+)
+_EXPECTED_LANGUAGE_EVIDENCE_WITHOUT_OWNER = (
+    ("c", False, False, "", "", "pg_catalog.fmgr_c_validator(oid)", True),
+    (
+        "internal",
+        False,
+        False,
+        "",
+        "",
+        "pg_catalog.fmgr_internal_validator(oid)",
+        True,
+    ),
+    (
+        "plpgsql",
+        True,
+        True,
+        "pg_catalog.plpgsql_call_handler()",
+        "pg_catalog.plpgsql_inline_handler(internal)",
+        "pg_catalog.plpgsql_validator(oid)",
+        True,
+    ),
+    ("sql", False, True, "", "", "pg_catalog.fmgr_sql_validator(oid)", True),
+)
+_EXPECTED_HANDLER_PROCEDURE_EVIDENCE_WITHOUT_OWNER = (
+    (
+        "pg_catalog",
+        "brinhandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "brinhandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "bthandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "bthandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "ginhandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "ginhandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "gisthandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "gisthandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "hashhandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "hashhandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "heap_tableam_handler",
+        "internal",
+        "table_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "heap_tableam_handler",
+        "",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "plpgsql_call_handler",
+        "",
+        "language_handler",
+        "c",
+        "f",
+        "v",
+        "u",
+        False,
+        False,
+        False,
+        False,
+        0,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "plpgsql_call_handler",
+        "$libdir/plpgsql",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "plpgsql_inline_handler",
+        "internal",
+        "void",
+        "c",
+        "f",
+        "v",
+        "u",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "plpgsql_inline_handler",
+        "$libdir/plpgsql",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "plpgsql_validator",
+        "oid",
+        "void",
+        "c",
+        "f",
+        "v",
+        "u",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "plpgsql_validator",
+        "$libdir/plpgsql",
+        True,
+        True,
+        True,
+    ),
+    (
+        "pg_catalog",
+        "spghandler",
+        "internal",
+        "index_am_handler",
+        "internal",
+        "f",
+        "v",
+        "s",
+        True,
+        False,
+        False,
+        False,
+        1,
+        0,
+        True,
+        True,
+        1.0,
+        0.0,
+        True,
+        True,
+        True,
+        True,
+        True,
+        "spghandler",
+        "",
+        True,
+        True,
+        True,
+    ),
+)
+_EXPECTED_PLPGSQL_DEPENDENCY_EVIDENCE = (
+    ("extension_member", "pg_language", "", "plpgsql", "e"),
+    (
+        "extension_member",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_call_handler()",
+        "e",
+    ),
+    (
+        "extension_member",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_inline_handler(internal)",
+        "e",
+    ),
+    (
+        "extension_member",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_validator(oid)",
+        "e",
+    ),
+    ("language_dependency", "pg_extension", "", "plpgsql", "e"),
+    (
+        "language_dependency",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_call_handler()",
+        "n",
+    ),
+    (
+        "language_dependency",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_inline_handler(internal)",
+        "n",
+    ),
+    (
+        "language_dependency",
+        "pg_proc",
+        "pg_catalog",
+        "plpgsql_validator(oid)",
+        "n",
+    ),
+)
 _REQUIRED_STANDALONE_INDEXES = frozenset(
     {
         "idx_model_predictions_scored",
@@ -504,11 +883,439 @@ FROM (
     WHERE namespace_row.nspname = 'public'
       AND type_row.typrelid = 0
       AND type_row.typelem = 0
+    UNION ALL
+    SELECT 'collation'::text, collation_row.collname::text
+    FROM pg_collation collation_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = collation_row.collnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'operator'::text, operator_row.oprname::text
+    FROM pg_operator operator_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = operator_row.oprnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'operator_class'::text, opclass_row.opcname::text
+    FROM pg_opclass opclass_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = opclass_row.opcnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'operator_family'::text, opfamily_row.opfname::text
+    FROM pg_opfamily opfamily_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = opfamily_row.opfnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'conversion'::text, conversion_row.conname::text
+    FROM pg_conversion conversion_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = conversion_row.connamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'text_search_configuration'::text, config_row.cfgname::text
+    FROM pg_ts_config config_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = config_row.cfgnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'text_search_dictionary'::text, dictionary_row.dictname::text
+    FROM pg_ts_dict dictionary_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = dictionary_row.dictnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'text_search_parser'::text, parser_row.prsname::text
+    FROM pg_ts_parser parser_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = parser_row.prsnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'text_search_template'::text, template_row.tmplname::text
+    FROM pg_ts_template template_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = template_row.tmplnamespace
+    WHERE namespace_row.nspname = 'public'
+    UNION ALL
+    SELECT 'statistics'::text, statistics_row.stxname::text
+    FROM pg_statistic_ext statistics_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = statistics_row.stxnamespace
+    WHERE namespace_row.nspname = 'public'
 ) evidence
 ORDER BY object_kind, object_name
 """
 _SELECT_LARGE_OBJECT_COUNT_SQL = """
 SELECT COUNT(*) FROM pg_largeobject_metadata
+"""
+_SELECT_EXTENSION_EVIDENCE_SQL = """
+SELECT
+    extension_row.extname,
+    extension_row.extversion,
+    extension_row.extrelocatable,
+    namespace_row.nspname,
+    pg_get_userbyid(extension_row.extowner),
+    extension_row.extconfig IS NULL,
+    extension_row.extcondition IS NULL
+FROM pg_extension extension_row
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = extension_row.extnamespace
+ORDER BY extension_row.extname
+"""
+_SELECT_LANGUAGE_EVIDENCE_SQL = """
+SELECT
+    language_row.lanname,
+    pg_get_userbyid(language_row.lanowner),
+    language_row.lanispl,
+    language_row.lanpltrusted,
+    CASE
+        WHEN language_row.lanplcallfoid = 0 THEN ''
+        ELSE call_namespace.nspname || '.' || call_function.proname || '('
+             || pg_get_function_identity_arguments(call_function.oid) || ')'
+    END,
+    CASE
+        WHEN language_row.laninline = 0 THEN ''
+        ELSE inline_namespace.nspname || '.' || inline_function.proname || '('
+             || pg_get_function_identity_arguments(inline_function.oid) || ')'
+    END,
+    CASE
+        WHEN language_row.lanvalidator = 0 THEN ''
+        ELSE validator_namespace.nspname || '.' || validator_function.proname || '('
+             || pg_get_function_identity_arguments(validator_function.oid) || ')'
+    END,
+    language_row.lanacl IS NULL
+FROM pg_language language_row
+LEFT JOIN pg_proc call_function
+  ON call_function.oid = language_row.lanplcallfoid
+LEFT JOIN pg_namespace call_namespace
+  ON call_namespace.oid = call_function.pronamespace
+LEFT JOIN pg_proc inline_function
+  ON inline_function.oid = language_row.laninline
+LEFT JOIN pg_namespace inline_namespace
+  ON inline_namespace.oid = inline_function.pronamespace
+LEFT JOIN pg_proc validator_function
+  ON validator_function.oid = language_row.lanvalidator
+LEFT JOIN pg_namespace validator_namespace
+  ON validator_namespace.oid = validator_function.pronamespace
+ORDER BY language_row.lanname
+"""
+_SELECT_ACCESS_METHOD_EVIDENCE_SQL = """
+SELECT
+    access_method.amname,
+    access_method.amtype,
+    access_method.amhandler::regprocedure::text
+FROM pg_am access_method
+ORDER BY access_method.amname
+"""
+_SELECT_HANDLER_PROCEDURE_EVIDENCE_SQL = """
+WITH handler_oids AS (
+    SELECT language_row.lanplcallfoid AS oid
+    FROM pg_language language_row
+    WHERE language_row.lanname = 'plpgsql'
+    UNION
+    SELECT language_row.laninline
+    FROM pg_language language_row
+    WHERE language_row.lanname = 'plpgsql'
+    UNION
+    SELECT language_row.lanvalidator
+    FROM pg_language language_row
+    WHERE language_row.lanname = 'plpgsql'
+    UNION
+    SELECT access_method.amhandler FROM pg_am access_method
+)
+SELECT
+    namespace_row.nspname,
+    function_row.proname,
+    pg_get_function_identity_arguments(function_row.oid),
+    format_type(function_row.prorettype, NULL),
+    pg_get_userbyid(function_row.proowner),
+    language_row.lanname,
+    function_row.prokind,
+    function_row.provolatile,
+    function_row.proparallel,
+    function_row.proisstrict,
+    function_row.prosecdef,
+    function_row.proleakproof,
+    function_row.proretset,
+    function_row.pronargs,
+    function_row.pronargdefaults,
+    function_row.provariadic = 0,
+    function_row.prosupport = 0,
+    function_row.procost::double precision,
+    function_row.prorows::double precision,
+    function_row.proallargtypes IS NULL,
+    function_row.proargmodes IS NULL,
+    function_row.proargnames IS NULL,
+    function_row.proargdefaults IS NULL,
+    function_row.protrftypes IS NULL,
+    function_row.prosrc,
+    COALESCE(function_row.probin, ''),
+    function_row.prosqlbody IS NULL,
+    function_row.proconfig IS NULL,
+    function_row.proacl IS NULL
+FROM pg_proc function_row
+JOIN handler_oids ON handler_oids.oid = function_row.oid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = function_row.pronamespace
+JOIN pg_language language_row ON language_row.oid = function_row.prolang
+ORDER BY
+    namespace_row.nspname,
+    function_row.proname,
+    pg_get_function_identity_arguments(function_row.oid)
+"""
+_SELECT_PLPGSQL_DEPENDENCY_EVIDENCE_SQL = """
+WITH plpgsql_extension AS (
+    SELECT extension_row.oid
+    FROM pg_extension extension_row
+    WHERE extension_row.extname = 'plpgsql'
+), plpgsql_language AS (
+    SELECT language_row.oid
+    FROM pg_language language_row
+    WHERE language_row.lanname = 'plpgsql'
+), evidence AS (
+    SELECT
+        'extension_member'::text AS evidence_kind,
+        dependency_row.classid::regclass::text AS object_class,
+        CASE
+            WHEN function_row.oid IS NULL THEN ''
+            ELSE function_namespace.nspname
+        END AS namespace_name,
+        CASE
+            WHEN function_row.oid IS NOT NULL
+                THEN function_row.proname || '('
+                     || pg_get_function_identity_arguments(function_row.oid) || ')'
+            WHEN language_row.oid IS NOT NULL THEN language_row.lanname
+            ELSE dependency_row.objid::text
+        END AS object_identity,
+        dependency_row.deptype
+    FROM pg_depend dependency_row
+    JOIN plpgsql_extension
+      ON dependency_row.refclassid = 'pg_extension'::regclass
+     AND dependency_row.refobjid = plpgsql_extension.oid
+    LEFT JOIN pg_proc function_row
+      ON dependency_row.classid = 'pg_proc'::regclass
+     AND function_row.oid = dependency_row.objid
+    LEFT JOIN pg_namespace function_namespace
+      ON function_namespace.oid = function_row.pronamespace
+    LEFT JOIN pg_language language_row
+      ON dependency_row.classid = 'pg_language'::regclass
+     AND language_row.oid = dependency_row.objid
+    UNION ALL
+    SELECT
+        'language_dependency'::text,
+        dependency_row.refclassid::regclass::text,
+        CASE
+            WHEN function_row.oid IS NULL THEN ''
+            ELSE function_namespace.nspname
+        END,
+        CASE
+            WHEN function_row.oid IS NOT NULL
+                THEN function_row.proname || '('
+                     || pg_get_function_identity_arguments(function_row.oid) || ')'
+            WHEN extension_row.oid IS NOT NULL THEN extension_row.extname
+            ELSE dependency_row.refobjid::text
+        END,
+        dependency_row.deptype
+    FROM pg_depend dependency_row
+    JOIN plpgsql_language
+      ON dependency_row.classid = 'pg_language'::regclass
+     AND dependency_row.objid = plpgsql_language.oid
+    LEFT JOIN pg_proc function_row
+      ON dependency_row.refclassid = 'pg_proc'::regclass
+     AND function_row.oid = dependency_row.refobjid
+    LEFT JOIN pg_namespace function_namespace
+      ON function_namespace.oid = function_row.pronamespace
+    LEFT JOIN pg_extension extension_row
+      ON dependency_row.refclassid = 'pg_extension'::regclass
+     AND extension_row.oid = dependency_row.refobjid
+)
+SELECT
+    evidence_kind,
+    object_class,
+    namespace_name,
+    object_identity,
+    deptype
+FROM evidence
+ORDER BY 1, 2, 3, 4, 5
+"""
+_SELECT_UNEXPECTED_PG_CATALOG_OBJECTS_SQL = """
+SELECT object_kind, object_name
+FROM (
+    SELECT 'relation'::text AS object_kind, table_row.relname::text AS object_name
+    FROM pg_class table_row
+    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND table_row.oid >= 16384
+    UNION ALL
+    SELECT 'routine'::text, function_row.proname::text
+    FROM pg_proc function_row
+    JOIN pg_namespace namespace_row ON namespace_row.oid = function_row.pronamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND function_row.oid >= 16384
+    UNION ALL
+    SELECT 'type'::text, type_row.typname::text
+    FROM pg_type type_row
+    JOIN pg_namespace namespace_row ON namespace_row.oid = type_row.typnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND type_row.oid >= 16384
+      AND type_row.typrelid = 0
+      AND type_row.typelem = 0
+    UNION ALL
+    SELECT 'collation'::text, collation_row.collname::text
+    FROM pg_collation collation_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = collation_row.collnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND collation_row.oid >= 16384
+    UNION ALL
+    SELECT 'operator'::text, operator_row.oprname::text
+    FROM pg_operator operator_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = operator_row.oprnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND operator_row.oid >= 16384
+    UNION ALL
+    SELECT 'operator_class'::text, opclass_row.opcname::text
+    FROM pg_opclass opclass_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = opclass_row.opcnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND opclass_row.oid >= 16384
+    UNION ALL
+    SELECT 'operator_family'::text, opfamily_row.opfname::text
+    FROM pg_opfamily opfamily_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = opfamily_row.opfnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND opfamily_row.oid >= 16384
+    UNION ALL
+    SELECT 'conversion'::text, conversion_row.conname::text
+    FROM pg_conversion conversion_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = conversion_row.connamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND conversion_row.oid >= 16384
+    UNION ALL
+    SELECT 'text_search_configuration'::text, config_row.cfgname::text
+    FROM pg_ts_config config_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = config_row.cfgnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND config_row.oid >= 16384
+    UNION ALL
+    SELECT 'text_search_dictionary'::text, dictionary_row.dictname::text
+    FROM pg_ts_dict dictionary_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = dictionary_row.dictnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND dictionary_row.oid >= 16384
+    UNION ALL
+    SELECT 'text_search_parser'::text, parser_row.prsname::text
+    FROM pg_ts_parser parser_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = parser_row.prsnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND parser_row.oid >= 16384
+    UNION ALL
+    SELECT 'text_search_template'::text, template_row.tmplname::text
+    FROM pg_ts_template template_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = template_row.tmplnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND template_row.oid >= 16384
+    UNION ALL
+    SELECT 'statistics'::text, statistics_row.stxname::text
+    FROM pg_statistic_ext statistics_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = statistics_row.stxnamespace
+    WHERE namespace_row.nspname = 'pg_catalog'
+      AND statistics_row.oid >= 16384
+) evidence
+ORDER BY object_kind, object_name
+"""
+_SELECT_UNEXPECTED_DATABASE_OBJECTS_SQL = """
+SELECT object_kind, object_name
+FROM (
+    SELECT 'event_trigger'::text AS object_kind, trigger_row.evtname::text AS object_name
+    FROM pg_event_trigger trigger_row
+    UNION ALL
+    SELECT 'foreign_data_wrapper'::text, wrapper_row.fdwname::text
+    FROM pg_foreign_data_wrapper wrapper_row
+    UNION ALL
+    SELECT 'foreign_server'::text, server_row.srvname::text
+    FROM pg_foreign_server server_row
+    UNION ALL
+    SELECT 'user_mapping'::text, mapping_row.oid::text
+    FROM pg_user_mapping mapping_row
+    UNION ALL
+    SELECT 'publication'::text, publication_row.pubname::text
+    FROM pg_publication publication_row
+    UNION ALL
+    SELECT 'subscription'::text, subscription_row.subname::text
+    FROM pg_subscription subscription_row
+    WHERE subscription_row.subdbid = (
+        SELECT database_row.oid
+        FROM pg_database database_row
+        WHERE database_row.datname = current_database()
+    )
+    UNION ALL
+    SELECT 'default_acl'::text, default_acl.oid::text
+    FROM pg_default_acl default_acl
+    UNION ALL
+    SELECT 'user_cast'::text, cast_row.oid::text
+    FROM pg_cast cast_row
+    WHERE cast_row.oid >= 16384
+    UNION ALL
+    SELECT 'transform'::text, transform_row.oid::text
+    FROM pg_transform transform_row
+    UNION ALL
+    SELECT 'security_label'::text, label_row.objoid::text
+    FROM pg_seclabel label_row
+) evidence
+ORDER BY object_kind, object_name
+"""
+_SELECT_RELEVANT_DATABASE_SETTINGS_SQL = """
+SELECT
+    COALESCE(database_row.datname, ''),
+    COALESCE(role_row.rolname, ''),
+    setting_row.setconfig
+FROM pg_db_role_setting setting_row
+LEFT JOIN pg_database database_row ON database_row.oid = setting_row.setdatabase
+LEFT JOIN pg_roles role_row ON role_row.oid = setting_row.setrole
+WHERE (setting_row.setdatabase = 0 OR database_row.datname = current_database())
+  AND (setting_row.setrole = 0 OR role_row.rolname = ANY(%s))
+ORDER BY 1, 2
+"""
+_SELECT_RELEVANT_SHARED_SECURITY_LABELS_SQL = """
+SELECT label_row.classoid::regclass::text, label_row.objoid, label_row.provider
+FROM pg_shseclabel label_row
+WHERE (
+    label_row.classoid = 'pg_database'::regclass
+    AND label_row.objoid = (
+        SELECT database_row.oid
+        FROM pg_database database_row
+        WHERE database_row.datname = current_database()
+    )
+) OR (
+    label_row.classoid = 'pg_authid'::regclass
+    AND label_row.objoid = ANY(
+        SELECT role_row.oid FROM pg_roles role_row WHERE role_row.rolname = ANY(%s)
+    )
+)
+ORDER BY 1, 2, 3
+"""
+_SELECT_RELEVANT_PARAMETER_ACLS_SQL = """
+SELECT
+    parameter_acl.parname,
+    COALESCE(grantee_role.rolname, 'PUBLIC'),
+    exploded_acl.privilege_type,
+    exploded_acl.is_grantable
+FROM pg_parameter_acl parameter_acl
+CROSS JOIN LATERAL aclexplode(parameter_acl.paracl) exploded_acl
+LEFT JOIN pg_roles grantee_role ON grantee_role.oid = exploded_acl.grantee
+WHERE exploded_acl.grantee = 0 OR grantee_role.rolname = ANY(%s)
+ORDER BY 1, 2, 3
 """
 _SELECT_UNEXPECTED_NP_CATALOG_OBJECTS_SQL = """
 SELECT object_kind, object_name
@@ -543,10 +1350,46 @@ FROM (
       ON namespace_row.oid = opclass_row.opcnamespace
     WHERE namespace_row.nspname = 'np'
     UNION ALL
+    SELECT 'operator_family'::text, opfamily_row.opfname::text
+    FROM pg_opfamily opfamily_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = opfamily_row.opfnamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
     SELECT 'conversion'::text, conversion_row.conname::text
     FROM pg_conversion conversion_row
     JOIN pg_namespace namespace_row
       ON namespace_row.oid = conversion_row.connamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
+    SELECT 'text_search_configuration'::text, config_row.cfgname::text
+    FROM pg_ts_config config_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = config_row.cfgnamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
+    SELECT 'text_search_dictionary'::text, dictionary_row.dictname::text
+    FROM pg_ts_dict dictionary_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = dictionary_row.dictnamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
+    SELECT 'text_search_parser'::text, parser_row.prsname::text
+    FROM pg_ts_parser parser_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = parser_row.prsnamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
+    SELECT 'text_search_template'::text, template_row.tmplname::text
+    FROM pg_ts_template template_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = template_row.tmplnamespace
+    WHERE namespace_row.nspname = 'np'
+    UNION ALL
+    SELECT 'statistics'::text, statistics_row.stxname::text
+    FROM pg_statistic_ext statistics_row
+    JOIN pg_namespace namespace_row
+      ON namespace_row.oid = statistics_row.stxnamespace
     WHERE namespace_row.nspname = 'np'
 ) evidence
 ORDER BY object_kind, object_name
@@ -1778,6 +2621,240 @@ class PostgresBootstrap:
             )
         )
 
+    @classmethod
+    def _database_catalog_is_admissible(
+        cls,
+        cursor: object,
+        context: PostgresBootstrapContext,
+    ) -> bool:
+        relevant_roles = [context.admin_role, *context.roles.all]
+        if context.adoption is not None:
+            relevant_roles.extend(context.adoption.allowed_historical_owner_roles)
+
+        cursor.execute(_SELECT_EXTENSION_EVIDENCE_SQL)
+        extension_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if extension_rows != (
+            (
+                "plpgsql",
+                "1.0",
+                False,
+                "pg_catalog",
+                context.admin_role,
+                True,
+                True,
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_LANGUAGE_EVIDENCE_SQL)
+        language_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if any(len(row) != 8 or row[1] != context.admin_role for row in language_rows):
+            return False
+        language_without_owner = tuple((row[0], *row[2:]) for row in language_rows)
+        if language_without_owner != _EXPECTED_LANGUAGE_EVIDENCE_WITHOUT_OWNER:
+            return False
+
+        cursor.execute(_SELECT_HANDLER_PROCEDURE_EVIDENCE_SQL)
+        handler_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if any(len(row) != 29 or row[4] != context.admin_role for row in handler_rows):
+            return False
+        handler_rows_without_owner = tuple((*row[:4], *row[5:]) for row in handler_rows)
+        if handler_rows_without_owner != (
+            _EXPECTED_HANDLER_PROCEDURE_EVIDENCE_WITHOUT_OWNER
+        ):
+            return False
+
+        cursor.execute(_SELECT_ACCESS_METHOD_EVIDENCE_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            _EXPECTED_ACCESS_METHOD_EVIDENCE
+        ):
+            return False
+        cursor.execute(_SELECT_PLPGSQL_DEPENDENCY_EVIDENCE_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            _EXPECTED_PLPGSQL_DEPENDENCY_EVIDENCE
+        ):
+            return False
+        cursor.execute(_SELECT_UNEXPECTED_PG_CATALOG_OBJECTS_SQL)
+        if cursor.fetchall():
+            return False
+        cursor.execute(_SELECT_UNEXPECTED_DATABASE_OBJECTS_SQL)
+        if cursor.fetchall():
+            return False
+        cursor.execute(
+            _SELECT_RELEVANT_DATABASE_SETTINGS_SQL,
+            (relevant_roles,),
+        )
+        if cursor.fetchall():
+            return False
+        cursor.execute(
+            _SELECT_RELEVANT_SHARED_SECURITY_LABELS_SQL,
+            (relevant_roles,),
+        )
+        if cursor.fetchall():
+            return False
+        cursor.execute(
+            _SELECT_RELEVANT_PARAMETER_ACLS_SQL,
+            (relevant_roles,),
+        )
+        return not cursor.fetchall()
+
+    @classmethod
+    def _require_pre_role_catalog_admissible(
+        cls,
+        cursor: object,
+        context: PostgresBootstrapContext,
+    ) -> None:
+        """Reject an invalid target before creating cluster-global roles."""
+        inspection_failed = False
+        try:
+            cls._inspect_pre_role_catalog(cursor, context)
+        except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+            raise
+        except Exception:
+            inspection_failed = True
+        if inspection_failed:
+            raise PostgresBootstrapStorageError(
+                "pre-role PostgreSQL catalog admission failed"
+            )
+
+    @classmethod
+    def _inspect_pre_role_catalog(
+        cls,
+        cursor: object,
+        context: PostgresBootstrapContext,
+    ) -> None:
+        if not cls._database_catalog_is_admissible(cursor, context):
+            raise PostgresBootstrapDriftError(
+                "target database catalog is not admissible before role "
+                "reconciliation"
+            )
+        cursor.execute(_SELECT_PUBLIC_SCHEMA_ACL_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            ("pg_database_owner", "PUBLIC", "USAGE", False),
+            ("pg_database_owner", "pg_database_owner", "CREATE", False),
+            ("pg_database_owner", "pg_database_owner", "USAGE", False),
+        ):
+            raise PostgresBootstrapDriftError(
+                "public schema authority is not admissible before role reconciliation"
+            )
+        cursor.execute(_SELECT_UNEXPECTED_USER_SCHEMAS_SQL)
+        if cursor.fetchall():
+            raise PostgresBootstrapDriftError(
+                "target database has an unexpected user schema"
+            )
+        cursor.execute(_SELECT_UNEXPECTED_PUBLIC_OBJECTS_SQL)
+        if cursor.fetchall():
+            raise PostgresBootstrapDriftError(
+                "target database has an unexpected public object"
+            )
+        cursor.execute(_SELECT_LARGE_OBJECT_COUNT_SQL)
+        large_object_count = _one_row(cursor.fetchone(), 1, "large object inventory")[0]
+        if type(large_object_count) is not int or large_object_count != 0:
+            raise PostgresBootstrapDriftError(
+                "target database has an unexpected large object"
+            )
+        cursor.execute(_SELECT_SCHEMA_AUTHORITY_SQL)
+        schema_rows = tuple(tuple(row) for row in cursor.fetchall())
+        adoption = context.adoption
+        if adoption is None:
+            if not schema_rows:
+                cursor.execute(_SELECT_DATABASE_ACL_GRANTEES_SQL)
+                database_acl = tuple(tuple(row) for row in cursor.fetchall())
+                if database_acl != tuple(
+                    sorted(
+                        (
+                            (context.admin_role, "PUBLIC", "CONNECT", False),
+                            (
+                                context.admin_role,
+                                "PUBLIC",
+                                "TEMPORARY",
+                                False,
+                            ),
+                        )
+                    )
+                ):
+                    raise PostgresBootstrapDriftError(
+                        "fresh database authority is not admissible before role "
+                        "reconciliation"
+                    )
+                return
+            if schema_rows != (
+                (context.roles.schema_owner, cls._schema_marker(context)),
+            ):
+                raise PostgresBootstrapDriftError(
+                    "fresh bootstrap catalog has an unexpected np schema owner"
+                )
+            cursor.execute(_SELECT_SCHEMA_OBJECTS_SQL)
+            existing_objects = tuple(cursor.fetchall())
+            if not existing_objects:
+                cursor.execute(_SELECT_SCHEMA_FUNCTIONS_SQL)
+                if cursor.fetchall():
+                    raise PostgresBootstrapDriftError(
+                        "prepared fresh schema contains unexpected routines"
+                    )
+                cursor.execute(
+                    _SELECT_UNEXPECTED_NP_CATALOG_OBJECTS_SQL,
+                    (list(_AUTHORITY_TABLES),),
+                )
+                if cursor.fetchall():
+                    raise PostgresBootstrapDriftError(
+                        "prepared fresh schema contains unexpected catalog objects"
+                    )
+                cursor.execute(_SELECT_SCHEMA_ACL_GRANTEES_SQL)
+                if cursor.fetchall():
+                    raise PostgresBootstrapDriftError(
+                        "prepared fresh schema contains unexpected authority"
+                    )
+                cursor.execute(_SELECT_DATABASE_ACL_GRANTEES_SQL)
+                database_acl = tuple(tuple(row) for row in cursor.fetchall())
+                expected_acl = tuple(
+                    sorted(
+                        (
+                            (context.admin_role, "PUBLIC", "CONNECT", False),
+                            (
+                                context.admin_role,
+                                "PUBLIC",
+                                "TEMPORARY",
+                                False,
+                            ),
+                            (
+                                context.admin_role,
+                                context.roles.schema_owner,
+                                "CREATE",
+                                False,
+                            ),
+                        )
+                    )
+                )
+                if database_acl != expected_acl:
+                    raise PostgresBootstrapDriftError(
+                        "fresh migration authority is not admissible before role "
+                        "reconciliation"
+                    )
+                return
+            if not cls._pre_role_migration_history_is_exact(cursor):
+                raise PostgresBootstrapMigrationError(
+                    "fresh PostgreSQL migration history is not exact"
+                )
+        else:
+            if not cls._pre_role_migration_history_is_exact(cursor):
+                raise PostgresBootstrapMigrationError(
+                    "existing PostgreSQL migration history is not exact"
+                )
+        if not cls._catalog_shape_is_expected(
+            cursor,
+            context,
+            allow_historical_owners=True,
+        ):
+            raise PostgresBootstrapDriftError(
+                "PostgreSQL catalog is not admissible before role reconciliation"
+            )
+        if not _activation_catalog_is_authoritative(cursor):
+            raise PostgresBootstrapDriftError(
+                "PostgreSQL catalog authority is not admissible before role "
+                "reconciliation"
+            )
+
     def _reconcile_roles(self, context: PostgresBootstrapContext) -> None:
         connection = _fresh_connection(
             self._admin_connection_factory,
@@ -1802,6 +2879,7 @@ class PostgresBootstrap:
                         allow_absent=True,
                         allow_staged_no_login=True,
                     )
+                    self._require_pre_role_catalog_admissible(cursor, context)
                     if not exact:
                         self._create_managed_roles(cursor, context)
                         self._managed_roles_are_exact(
@@ -1811,7 +2889,7 @@ class PostgresBootstrap:
                             allow_staged_no_login=True,
                         )
                         mutated = True
-            except PostgresBootstrapDriftError:
+            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
                 _rollback_quietly(connection)
                 raise
             except Exception:
@@ -1997,6 +3075,17 @@ class PostgresBootstrap:
             rows = tuple(tuple(row) for row in cursor.fetchall())
         except Exception:
             return False
+        return rows == cls._expected_migration_rows()
+
+    @classmethod
+    def _pre_role_migration_history_is_exact(cls, cursor: object) -> bool:
+        try:
+            cursor.execute(_SELECT_APPLIED_MIGRATIONS_SQL)
+            rows = tuple(tuple(row) for row in cursor.fetchall())
+        except psycopg2.Error as exc:
+            if getattr(exc, "pgcode", None) == "42P01":
+                return False
+            raise
         return rows == cls._expected_migration_rows()
 
     def _prepare_fresh_migration_authority(
@@ -2592,6 +3681,8 @@ class PostgresBootstrap:
         *,
         allow_historical_owners: bool,
     ) -> bool:
+        if not cls._database_catalog_is_admissible(cursor, context):
+            return False
         managed_or_historical = list(context.roles.all)
         if context.adoption is not None:
             managed_or_historical.extend(

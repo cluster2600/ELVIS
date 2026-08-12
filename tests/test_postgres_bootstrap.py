@@ -1,7 +1,7 @@
 """Unit contract checks for the dormant PostgreSQL authority bootstrap."""
 
 from dataclasses import fields
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from psycopg2.extensions import (
@@ -11,6 +11,7 @@ from psycopg2.extensions import (
     TRANSACTION_STATUS_INTRANS,
 )
 
+from trading.persistence import postgres_bootstrap as postgres_bootstrap_module
 from trading.persistence.migration_runner import MigrationApplyError
 from trading.persistence.postgres_bootstrap import (
     PostgresBootstrap,
@@ -121,6 +122,57 @@ def managed_role_rows(
     return tuple(sorted(rows))
 
 
+def admissible_database_catalog_rows(
+    context: PostgresBootstrapContext,
+    command: str,
+):
+    if "WITH plpgsql_extension AS" in command:
+        return postgres_bootstrap_module._EXPECTED_PLPGSQL_DEPENDENCY_EVIDENCE
+    if "FROM pg_extension extension_row" in command:
+        return (
+            (
+                "plpgsql",
+                "1.0",
+                False,
+                "pg_catalog",
+                context.admin_role,
+                True,
+                True,
+            ),
+        )
+    if (
+        "FROM pg_language language_row" in command
+        and "LEFT JOIN pg_proc call_function" in command
+    ):
+        return tuple(
+            (row[0], context.admin_role, *row[1:])
+            for row in (
+                postgres_bootstrap_module._EXPECTED_LANGUAGE_EVIDENCE_WITHOUT_OWNER
+            )
+        )
+    if "WITH handler_oids AS" in command:
+        return tuple(
+            (*row[:4], context.admin_role, *row[4:])
+            for row in (
+                postgres_bootstrap_module._EXPECTED_HANDLER_PROCEDURE_EVIDENCE_WITHOUT_OWNER
+            )
+        )
+    if "FROM pg_am access_method" in command:
+        return postgres_bootstrap_module._EXPECTED_ACCESS_METHOD_EVIDENCE
+    if (
+        "namespace_row.nspname = 'pg_catalog'" in command
+        and "AS object_kind" in command
+    ):
+        return ()
+    if "FROM pg_event_trigger trigger_row" in command:
+        return ()
+    if "FROM pg_shseclabel label_row" in command:
+        return ()
+    if "FROM pg_parameter_acl parameter_acl" in command:
+        return ()
+    return None
+
+
 def scripted_admin_connection(
     context: PostgresBootstrapContext,
     *,
@@ -135,6 +187,8 @@ def scripted_admin_connection(
 
     def fetchone():
         command = str(cursor.execute.call_args.args[0])
+        if "FROM pg_largeobject_metadata" in command:
+            return (0,)
         if "FROM pg_database database_row" in command:
             return (context.admin_role,)
         return (
@@ -149,6 +203,29 @@ def scripted_admin_connection(
     def fetchall():
         nonlocal last_role_rows
         command = str(cursor.execute.call_args.args[0])
+        database_catalog_rows = admissible_database_catalog_rows(context, command)
+        if database_catalog_rows is not None:
+            return database_catalog_rows
+        if "namespace_row.nspname = 'public'" in command and "aclexplode" in command:
+            return (
+                ("pg_database_owner", "PUBLIC", "USAGE", False),
+                ("pg_database_owner", "pg_database_owner", "CREATE", False),
+                ("pg_database_owner", "pg_database_owner", "USAGE", False),
+            )
+        if "namespace_row.nspname NOT IN ('np', 'public'" in command:
+            return ()
+        if (
+            "AS object_kind" in command
+            and "namespace_row.nspname = 'public'" in command
+        ):
+            return ()
+        if "obj_description(namespace_row.oid, 'pg_namespace')" in command:
+            return ()
+        if "database_acl.grantor" in command:
+            return (
+                (context.admin_role, "PUBLIC", "CONNECT", False),
+                (context.admin_role, "PUBLIC", "TEMPORARY", False),
+            )
         if "FROM pg_roles role_row" in command:
             last_role_rows = next(rows)
             return last_role_rows
@@ -465,6 +542,249 @@ def test_commit_unknown_error_reports_only_the_durable_phase() -> None:
 
     assert error.phase is PostgresBootstrapPhase.CATALOG
     assert str(error) == "bootstrap catalog commit outcome is unknown"
+
+
+def test_pre_role_catalog_admission_runs_after_role_read_before_creation() -> None:
+    context = make_context()
+    connection = make_connection()
+    cursor = connection.cursor.return_value.__enter__.return_value
+    bootstrap = PostgresBootstrap(lambda: connection)
+    ordered = MagicMock()
+
+    with (
+        patch.object(
+            bootstrap,
+            "_require_admin_identity",
+        ) as identity,
+        patch.object(
+            bootstrap,
+            "_managed_roles_are_exact",
+            side_effect=(False, True),
+        ) as roles,
+        patch.object(
+            bootstrap,
+            "_require_pre_role_catalog_admissible",
+        ) as admission,
+        patch.object(
+            bootstrap,
+            "_create_managed_roles",
+        ) as create,
+    ):
+        ordered.attach_mock(identity, "identity")
+        ordered.attach_mock(roles, "roles")
+        ordered.attach_mock(admission, "admission")
+        ordered.attach_mock(create, "create")
+
+        bootstrap._reconcile_roles(context)
+
+    assert ordered.mock_calls == [
+        call.identity(cursor, context),
+        call.roles(
+            cursor,
+            context,
+            allow_absent=True,
+            allow_staged_no_login=True,
+        ),
+        call.admission(cursor, context),
+        call.create(cursor, context),
+        call.roles(
+            cursor,
+            context,
+            allow_absent=False,
+            allow_staged_no_login=True,
+        ),
+    ]
+    connection.commit.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "admission_error",
+    [
+        PostgresBootstrapMigrationError("existing migration history is not exact"),
+        PostgresBootstrapDriftError("existing PostgreSQL catalog has drifted"),
+    ],
+)
+def test_pre_role_catalog_rejection_short_circuits_all_role_mutation(
+    admission_error,
+) -> None:
+    context = make_context()
+    connection = make_connection()
+    bootstrap = PostgresBootstrap(lambda: connection)
+
+    with (
+        patch.object(bootstrap, "_require_admin_identity"),
+        patch.object(
+            bootstrap,
+            "_managed_roles_are_exact",
+            return_value=False,
+        ),
+        patch.object(
+            bootstrap,
+            "_require_pre_role_catalog_admissible",
+            side_effect=admission_error,
+        ) as admission,
+        patch.object(bootstrap, "_create_managed_roles") as create,
+        pytest.raises(type(admission_error)) as caught,
+    ):
+        bootstrap._reconcile_roles(context)
+
+    assert caught.value is admission_error
+    admission.assert_called_once_with(
+        connection.cursor.return_value.__enter__.return_value,
+        context,
+    )
+    create.assert_not_called()
+    connection.rollback.assert_called_once_with()
+    connection.commit.assert_not_called()
+
+
+def test_exact_role_rerun_still_requires_pre_role_catalog_admission() -> None:
+    context = make_context()
+    connection = make_connection()
+    bootstrap = PostgresBootstrap(lambda: connection)
+
+    with (
+        patch.object(bootstrap, "_require_admin_identity"),
+        patch.object(
+            bootstrap,
+            "_managed_roles_are_exact",
+            return_value=True,
+        ),
+        patch.object(
+            bootstrap,
+            "_require_pre_role_catalog_admissible",
+        ) as admission,
+        patch.object(bootstrap, "_create_managed_roles") as create,
+    ):
+        bootstrap._reconcile_roles(context)
+
+    admission.assert_called_once_with(
+        connection.cursor.return_value.__enter__.return_value,
+        context,
+    )
+    create.assert_not_called()
+    connection.rollback.assert_called_once_with()
+    connection.commit.assert_not_called()
+
+
+def test_pre_role_catalog_query_failure_is_fully_redacted() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+    sentinel = "SENTINEL-PRE-ROLE-CATALOG-SECRET"
+    cursor.execute.side_effect = RuntimeError(
+        f"catalog query leaked credential {sentinel}"
+    )
+
+    with pytest.raises(PostgresBootstrapStorageError) as caught:
+        PostgresBootstrap(lambda: object())._require_pre_role_catalog_admissible(
+            cursor,
+            context,
+        )
+
+    assert caught.value.__cause__ is None
+    assert_secret_absent_from_exception_graph(caught.value, sentinel)
+
+
+def test_database_catalog_rejection_is_the_first_pre_role_admission_gate() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+
+    with (
+        patch.object(
+            PostgresBootstrap,
+            "_database_catalog_is_admissible",
+            return_value=False,
+        ) as database_catalog,
+        pytest.raises(PostgresBootstrapDriftError, match="database catalog"),
+    ):
+        PostgresBootstrap._inspect_pre_role_catalog(cursor, context)
+
+    database_catalog.assert_called_once_with(cursor, context)
+    cursor.execute.assert_not_called()
+
+
+def test_database_catalog_query_failure_preserves_storage_taxonomy() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+    sentinel = "SENTINEL-DATABASE-CATALOG-SECRET"
+
+    with (
+        patch.object(
+            PostgresBootstrap,
+            "_database_catalog_is_admissible",
+            side_effect=RuntimeError(f"catalog evidence leaked {sentinel}"),
+        ),
+        pytest.raises(PostgresBootstrapStorageError) as caught,
+    ):
+        PostgresBootstrap._require_pre_role_catalog_admissible(cursor, context)
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert_secret_absent_from_exception_graph(caught.value, sentinel)
+
+
+def test_terminal_catalog_shape_fails_closed_on_database_catalog_drift() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+
+    with patch.object(
+        PostgresBootstrap,
+        "_database_catalog_is_admissible",
+        return_value=False,
+    ) as database_catalog:
+        assert (
+            PostgresBootstrap._catalog_shape_is_expected(
+                cursor,
+                context,
+                allow_historical_owners=False,
+            )
+            is False
+        )
+
+    database_catalog.assert_called_once_with(cursor, context)
+    cursor.execute.assert_not_called()
+
+
+def test_pre_role_migration_ledger_query_failure_is_storage_not_drift() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+    sentinel = "SENTINEL-PRE-ROLE-LEDGER-SECRET"
+
+    def execute(command, *args) -> None:
+        if "FROM np.schema_migrations" in str(command):
+            raise RuntimeError(f"ledger query leaked credential {sentinel}")
+
+    def fetchall():
+        command = str(cursor.execute.call_args.args[0])
+        database_catalog_rows = admissible_database_catalog_rows(context, command)
+        if database_catalog_rows is not None:
+            return database_catalog_rows
+        if "FROM pg_db_role_setting setting_row" in command:
+            return ()
+        if "namespace_row.nspname = 'public'" in command and "aclexplode" in command:
+            return (
+                ("pg_database_owner", "PUBLIC", "USAGE", False),
+                ("pg_database_owner", "pg_database_owner", "CREATE", False),
+                ("pg_database_owner", "pg_database_owner", "USAGE", False),
+            )
+        if "obj_description(namespace_row.oid, 'pg_namespace')" in command:
+            return ((context.adoption.migration_authority_role, None),)
+        return ()
+
+    cursor.execute.side_effect = execute
+    cursor.fetchall.side_effect = fetchall
+    cursor.fetchone.return_value = (0,)
+
+    with pytest.raises(PostgresBootstrapStorageError) as caught:
+        PostgresBootstrap(lambda: object())._require_pre_role_catalog_admissible(
+            cursor,
+            context,
+        )
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert not isinstance(caught.value, PostgresBootstrapMigrationError)
+    assert_secret_absent_from_exception_graph(caught.value, sentinel)
 
 
 @pytest.mark.parametrize(
