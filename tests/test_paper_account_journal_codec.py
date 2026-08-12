@@ -1428,7 +1428,8 @@ def test_account_codec_has_no_runtime_consumer() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "persistence" / "paper_account_journal_codec.py"
     facade_path = root / "trading" / "persistence" / "__init__.py"
-    allowed_consumers = {facade_path}
+    repository_path = root / "trading" / "persistence" / "paper_account_journal.py"
+    allowed_consumers = {facade_path, repository_path}
     ignored_parts = {".git", ".venv", "__pycache__", "build", "dist", "tests"}
     consumers = []
 

@@ -754,6 +754,7 @@ def test_paper_settlement_is_pure_and_has_no_runtime_consumer() -> None:
     facade_path = root / "trading" / "domain" / "__init__.py"
     accounting_path = root / "trading" / "domain" / "paper_accounting.py"
     codec_path = root / "trading" / "persistence" / "paper_account_journal_codec.py"
+    repository_path = root / "trading" / "persistence" / "paper_account_journal.py"
     consumers = []
     for source_path in root.rglob("*.py"):
         if (
@@ -763,6 +764,7 @@ def test_paper_settlement_is_pure_and_has_no_runtime_consumer() -> None:
                 facade_path,
                 accounting_path,
                 codec_path,
+                repository_path,
             }
             or "tests" in source_path.parts
             or ".venv" in source_path.parts

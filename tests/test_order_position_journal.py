@@ -1267,6 +1267,7 @@ def test_repository_has_one_persistence_consumer_and_stays_unwired():
             consumers.append(source_path.relative_to(root))
     assert consumers == [
         Path("trading/persistence/atomic_paper_submission_owner.py"),
+        Path("trading/persistence/paper_account_journal.py"),
     ]
     assert {
         Path("main.py"),

@@ -230,8 +230,11 @@ M9b.12a adds the pure, unwired
 version-1 envelopes for an explicitly scoped empty-account opening, one newly
 applied settlement, and the ACK/full-fill batch that binds journal facts to
 account facts. M9b.12b adds dormant migration `0003` with six account-ledger
-relations, but still adds no repository, transaction owner, or runtime
-composition.
+relations. M9b.12c adds the strict, still-unwired
+`PostgresPaperAccountJournal`: one-commit empty-opening provision plus exact
+retry, and complete account replay or scoped listing from a read-only stable
+snapshot. It does not write a settlement, own an order/account transaction, or
+enter runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -669,7 +672,7 @@ event-payload SHA-256, and account-settlement-payload SHA-256. Fill position
 versions must immediately and contiguously follow the ACK; fill account
 versions must be contiguous; and event and trade identities must be unique.
 The encoded batch duplicates the first/last account versions, last position
-version, and fill count so a future repository can index and cross-check the
+version, and fill count so the M9b.12c repository can index and cross-check the
 complete range. This marker distinguishes eligible owner-produced accounting
 facts from a merely shape-compatible terminal history in migration `0002`; it
 does not retroactively confer atomic provenance on that older history.
@@ -732,10 +735,10 @@ match those rows. A manifest without settlements is therefore structurally
 valid at this schema-only boundary. SQL also does not recanonicalize JSON or
 exact `Decimal` strings, replay settlement causality, prove cross-batch account
 version contiguity, equate the stream version/state with the settlement tail,
-or prove balance/reservation/posting conservation. The future repository must
-lock the account before the position, decode and recompute the M9b.12a
-envelopes, validate complete manifest membership and every projection, and
-quarantine any mismatch before replay or activation.
+or prove balance/reservation/posting conservation. M9b.12c supplies that strict
+read-side proof and quarantines mismatches before returning an account. The
+future integrated writer must additionally lock the account before the
+position and commit journal plus account facts atomically.
 
 M9b.12b creates no seed, opening-capital default, backfill, trigger, DML,
 destructive or legacy-table statement. It adds no repository, transaction
@@ -743,6 +746,66 @@ owner, provisioning command, runtime consumer, readiness gate, reconciliation
 workflow, legacy projection, generation control, or sole-writer fence. It does
 not confer account provenance on older version-2 histories, which still require
 reconciliation.
+
+M9b.12c consumes that dormant schema through the direct, deliberately
+non-facade module `trading.persistence.paper_account_journal`. Its public
+surface is intentionally narrow:
+
+- `provision_account(*, execution_scope, owner_generation, account)` returns a
+  `ProvisionedPaperAccount` only after commit, with a `CREATED` or `EXISTING`
+  `ProvisionDisposition` and the complete `ReplayedPaperAccount`;
+- `replay_account(*, execution_scope, account_key)` reconstructs one exact
+  account; and
+- `list_accounts(*, execution_scope)` returns account-key-sorted replay results
+  all-or-nothing from the same database snapshot.
+
+`ReplayedPaperAccount` carries the durable execution scope, immutable opening
+generation and opening hash, the reconstructed `PaperAccount`, and its ordered
+`PaperAccountBatchManifest` tuple. `ProvisionedPaperAccount` exposes the
+disposition and current replay, with convenience accessors for the created
+flag, account, scope, and generation. Failures are explicit:
+`PaperAccountInputError` rejects invalid or non-empty openings before I/O;
+`PaperAccountStorageError` means the operation is known not to have committed;
+`PaperAccountCommitUnknown` carries scope, account key, and generation and
+requires reconciliation after a lost commit acknowledgement;
+`PaperAccountNotFoundError` reports an absent account;
+`PaperAccountConflictError` classifies `EXECUTION_SCOPE`, `OWNER_GENERATION`,
+or `OPENING_IDENTITY`; and `PaperAccountReplayError` quarantines durable facts
+that cannot reconstruct exactly. All derive from `PaperAccountJournalError`.
+
+Provision is the only write in this slice. It accepts only the explicit empty
+M9b.11 account, inserts the immutable stream and opening-balance projection in
+one `READ COMMITTED` transaction, then strictly replays them before one commit.
+An exact retry locks the existing account row, replays the same opening, and
+returns `EXISTING` without changing durable facts; concurrent exact callers
+therefore converge on one opening. A scope, generation, or opening-envelope
+conflict rolls back. If commit acknowledgement itself fails, the repository
+does not guess whether the commit landed: it raises `PaperAccountCommitUnknown`
+and an exact retry/replay is the reconciliation path.
+
+Both read methods use one `REPEATABLE READ READ ONLY` transaction and return no
+partial projection. Replay decodes and rehashes the opening, every owner-batch,
+and every compact settlement; requires a contiguous account-version prefix and
+complete manifest fill ordinals/ranges; and cross-checks instruction, ACK, and
+confirmed-fill identity and hashes against a full replay of the referenced
+version-2 order/position journal. It then rebuilds `PositionFill`, FIFO paper
+economics, quote settlement, and M9b.11 admission in causal order. Stored
+settlement payloads and derived postings must equal that replay, while the
+materialized stream version/state, exact canonical-Decimal balances, and margin
+reservations must equal the resulting account. Every order in a referenced
+position history must belong to the account's manifests, so an older unclaimed
+history is rejected rather than silently adopted. `list_accounts` applies the
+same proof to every account in one stable snapshot and fails the whole result
+if any account is corrupt.
+
+This remains a dormant correctness boundary. It has no settlement or posting
+write API, no integrated account-first/position-second owner, no execution or
+legacy write, no runtime consumer, no readiness or cut-over gate, and no
+durable quarantine workflow. `owner_generation` remains immutable provisioning
+provenance, not a rotating fence. Provision cannot adopt existing order history
+or create a non-empty account. Full referenced-position replay and the current
+N+1 query shape are acceptable while the repository is unwired; bounded replay,
+snapshots, and measured optimization remain later work.
 
 ## Runtime and configuration
 
@@ -887,13 +950,16 @@ across exact contiguous position/account ranges. M9b.12b's dormant migration
 `0003` stores those envelopes and projections in six account relations. Its
 manifest points to the exact opening version/hash, instruction, and ACK; each
 settlement row is its manifest-fill row and points to the exact confirmed-fill
-journal fact. The schema provides row-level relational integrity but leaves
-manifest completeness, codec replay, projection validation, and quarantine to
-the future repository. Neither slice establishes an active transaction owner,
-runtime generation, readiness gate, or legacy fence.
+journal fact. M9b.12c's dormant `PostgresPaperAccountJournal` provisions only
+an empty opening and strictly proves manifest completeness, codec/journal/
+settlement replay, and every materialized account projection before replay or
+listing returns. It does not append those settlement facts. None of these
+slices establishes an active transaction owner, rotating runtime generation,
+readiness gate, or legacy fence.
 
-Cut-over still requires: durable account-version, balance, reservation, and
-posting storage atomically owned with the journal batch; persisted instrument
+Cut-over still requires: an integrated owner that advances durable
+account-version, balance, reservation, and posting storage atomically with the
+journal batch; persisted instrument
 identity and version plus price, fee, tick, lot, and opening-capital provenance;
 funding, borrowing, liquidation, and unrealised mark-to-market rules;
 generation and execution-scope provenance; atomic legacy compatibility
