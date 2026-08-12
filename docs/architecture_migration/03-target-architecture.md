@@ -188,7 +188,9 @@ Successive migration slices introduce small immutable values:
 - `TakeProfitProfile` and `PositionExitContext`: the resolved entry-time exit
   policy retained for the lifetime of a position key;
 - `Position`: an immutable projection of confirmed fills with exact opened,
-  reduced, and remaining quantities; and
+  reduced, and remaining quantities;
+- `PaperAccount`: an immutable, account-global projection of exact balances,
+  per-position margin reservations, applied settlements, and solvency state; and
 - `CycleOutcome`: terminal result and per-stage timings.
 
 M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
@@ -219,6 +221,10 @@ acknowledgement, and exact full-fill suffix in one PostgreSQL transaction; an
 exact prior terminal batch is replayed without planning. It uses migration
 `0002_order_position_journal.sql` unchanged and adds no account/economic
 projection or runtime composition.
+M9b.11 adds the pure `trading.domain.paper_accounting` account fold: global
+settlement ordering, exact available/reserved balances, quantum-ceiling margin,
+derived postings, admission, replay, and insolvency semantics. It adds no SQL,
+durable account owner, or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -526,6 +532,84 @@ PnL. It adds no ledger table, SQL repository, PostgreSQL transaction owner,
 legacy projection, runtime consumer, or writer fence. Those stateful and
 operational boundaries require later contracts and persistence work.
 
+M9b.11 adds that next semantic layer under
+`trading.domain.paper_accounting`, without making it durable or active.
+`PaperAccountPolicy(account_key, collateral_asset, margin_quantum)` fixes one
+isolated account's collateral denomination and exact positive margin quantum.
+`PaperAccountBalance` exposes exact `available` and non-negative `reserved`
+amounts per asset; `PaperMarginReservation` binds the current positive
+collateral reservation to one position. `PaperAccount` retains canonical
+opening balances, current balances, sorted reservations, exact settlement
+records, and derived `ACTIVE` or `INSOLVENT` state. Opening balances are a
+unique asset-sorted tuple, include the collateral asset, start non-negative and
+unreserved, and are not disguised as synthetic settlement records.
+
+`new_paper_account(policy, opening_balances) -> PaperAccount` is the canonical
+empty-account factory. `admit_paper_settlement(account, account_version,
+settlement) -> PaperAccountAdmission` folds one exact, newly `APPLIED` M9b.9
+settlement.
+Each accepted `PaperAccountSettlementRecord` consumes the next positive
+`account_version` in the exact contiguous account-global prefix. This sequence
+is deliberately distinct from `PaperFillRecord.position_version`: position
+versions establish order/position-stream causality, while account versions
+serialize settlements from every position sharing collateral. An account
+version therefore must never be inferred from a position version. That global
+order prevents two positions from spending the same projected collateral only
+when a future durable owner serializes it; the pure function alone is not a
+concurrency lock.
+
+For each position, the first account settlement must begin a new settlement
+chain and every later settlement must continue the exact prior checkpoint.
+Account records have unique composite event and fill identities. Reusing an
+existing account version with the exact same settlement yields
+`PaperAccountAdmissionDisposition.REPLAYED`, the current account object, no
+postings, and no repeated economic effect, even when later account records
+already exist. A conflicting payload at that version, the same fill/event
+identity at another account version, a sequence gap, or a broken position
+chain raises `InvalidPaperAccountTransition`. A rejected admission returns
+`REJECTED`, the unchanged account, no postings, and does not consume the
+candidate account version.
+
+The target margin for a position is calculated from the complete after-
+settlement FIFO projection as
+`ceil(open_cost / leverage / margin_quantum) * margin_quantum`. The implementation
+uses an exact integer ratio rather than ambient `Decimal` precision or rounding,
+so every non-zero requirement rounds upward to the explicit policy quantum.
+Scale-in and reduction recompute that target; their delta reserves or releases
+margin without incremental rounding drift, and a fully closed position removes
+its reservation.
+
+`PaperAccountPosting` records a non-zero signed movement in either
+`AVAILABLE` or `RESERVED_MARGIN`. Settlement cash deltas affect `AVAILABLE` in
+their explicit asset; a margin delta produces equal and opposite collateral
+postings between the two buckets. Consequently, the sum of postings for each
+asset equals that settlement's cash delta for the asset, while margin movement
+has zero per-asset net effect. Foreign-asset fees debit their own balance and
+are never converted. Zero postings are omitted, reserved balances cannot become
+negative, and every returned posting, balance, reservation, disposition, and
+reason is re-derived by `PaperAccountAdmission`, so callers cannot forge an
+approved result.
+
+An `OPEN` settlement is `APPLIED` only if all resulting available asset
+balances remain non-negative and the prior account is `ACTIVE`; otherwise it
+is rejected with explicit reasons. `REDUCE_ONLY` remains applicable so that a
+position can close and its exact loss/fees can be recognized even when this
+makes an available balance negative. Any negative available balance derives
+`PaperAccountState.INSOLVENT`, which blocks later `OPEN` exposure. This is an
+admission projection over already explicit candidate settlement facts, not
+permission to call a venue or a pre-trade authorization until it is composed
+inside the future atomic owner.
+
+M9b.11 is pure and unwired. It imports only standard-library and domain code
+and adds no SQL, migration, account/posting repository, PostgreSQL lock,
+transaction, execution call, price/fee source, clock, legacy projection,
+telemetry, or runtime consumer. Persistence must later store and atomically
+advance the account-global version, balances/reservations/postings, instrument
+provenance, and the order/fill journal in one owned transaction. Funding,
+borrowing, liquidation, unrealised mark-to-market PnL, durable opening-capital
+provenance, reconciliation/quarantine, sole-writer fencing, shadow parity, and
+cut-over remain outside this slice.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -656,16 +740,19 @@ requires no SQL or schema migration of its own. M9b.10a supplies the stable
 candidate ACK/full-fill plan, while M9b.10b makes only that plan durable. An
 existing `PENDING`, ACK-only, partial, interleaved, or otherwise unsupported
 stream remains mandatory reconciliation rather than a planner or append input.
-None of these slices activates runtime ownership or fences the legacy writers.
+M9b.11 adds the pure account-global sequence, margin/admission, posting,
+balance, replay, and insolvency rules over exact M9b.9 settlements, but does not
+persist or transact them. None of these slices activates runtime ownership or
+fences the legacy writers.
 
-Cut-over still requires: durable balance/posting ownership and margin/admission
-policy; persisted instrument identity and version plus price, fee, tick, and
-lot-rule snapshot provenance; funding, borrowing, liquidation, and unrealised
-mark-to-market rules; generation and execution-scope provenance; atomic legacy
-compatibility projections where they remain necessary; durable reconciliation
-and quarantine for unsupported, unresolved, or incompatible pre-atomic
-histories; startup migration/readiness checks and an explicit repository
-factory; bounded replay
+Cut-over still requires: durable account-version, balance, reservation, and
+posting storage atomically owned with the journal batch; persisted instrument
+identity and version plus price, fee, tick, lot, and opening-capital provenance;
+funding, borrowing, liquidation, and unrealised mark-to-market rules;
+generation and execution-scope provenance; atomic legacy compatibility
+projections where they remain necessary; durable reconciliation and quarantine
+for unsupported, unresolved, or incompatible pre-atomic histories; startup
+migration/readiness checks and an explicit repository factory; bounded replay
 or snapshots; a proved sole-writer fence over every legacy executor and
 database writer; side-effect-free shadow parity; and an explicit cut-over
 decision.

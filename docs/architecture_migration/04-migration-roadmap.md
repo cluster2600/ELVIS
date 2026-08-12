@@ -30,8 +30,8 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; no runtime cut-over) |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.10b unwired atomic terminal paper owner; M9b.11 account contract is not durable; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1987,9 +1987,10 @@ reserve or release margin, decide account admission, enforce buying power,
 model funding, borrowing, liquidation, or unrealised mark-to-market PnL, or
 select/observe fills. It adds no SQL, migration, repository, PostgreSQL lock,
 transaction owner, legacy `trades`/`open_positions` projection, runtime wiring,
-sole-writer fence, readiness policy, or reconciliation workflow. A later
-account-aware design must define those invariants before these deltas can become
-durable postings or authorise execution.
+sole-writer fence, readiness policy, or reconciliation workflow. M9b.11 now
+defines the pure account fold over these deltas, but they still cannot become
+durable postings or authorise execution until a later transactional owner
+persists and serializes those invariants.
 
 Verification at implementation time:
 
@@ -2105,7 +2106,8 @@ It has no batch manifest and proves no durable balance, posting, margin,
 instrument-snapshot, or legacy-projection invariant. M9b.10b does not change
 that migration. Activation remains blocked on all of the following:
 
-- durable balance/posting ownership and margin/admission policy;
+- durable account-version, balance, reservation, and posting ownership that
+  applies the M9b.11 margin/admission policy atomically with the journal batch;
 - persisted instrument identity/version and explicit price, fee, tick, and
   lot-rule snapshot provenance;
 - funding, borrowing, liquidation, and unrealised mark-to-market rules;
@@ -2116,7 +2118,6 @@ that migration. Activation remains blocked on all of the following:
 - bounded replay or snapshots;
 - a proved sole-writer fence over the legacy executor, inline exits, Balanced
   Starter, and every other legacy database writer;
-- PostgreSQL rollback, concurrency, exact-replay, and commit-unknown tests; and
 - side-effect-free shadow parity followed by an explicit cut-over decision.
 
 Verification commands for this slice:
@@ -2322,6 +2323,138 @@ under each supported Python interpreter, and the complete isolated PostgreSQL
 Python 3.10 compilation, and the diff check pass. The complete non-PostgreSQL
 suite passes 1,847 tests, skips 50, deselects 66, and passes 7 subtests under
 `Pacific/Honolulu`.
+
+### M9b.11 pure global paper-account accounting
+
+M9b.11 adds `trading.domain.paper_accounting` and its domain-facade exports.
+The slice is an immutable, pure fold from exact M9b.9 `PaperSettlement` facts
+to account admission, postings, balances, margin reservations, and solvency. It
+does not extend migration `0002`, add another migration, or wire a production
+consumer.
+
+`PaperAccountPolicy(account_key, collateral_asset, margin_quantum)` fixes the
+identity, denomination, and exact positive reservation quantum for one isolated
+paper account. `PaperAccountBalance(asset, available, reserved)` separates
+available funds from non-negative reserved margin. `PaperMarginReservation`
+binds the current positive collateral requirement to one position key.
+`new_paper_account(policy, opening_balances)` requires one exact, unique,
+asset-sorted tuple of solvent, unreserved opening balances containing the
+collateral asset. The resulting `PaperAccount` starts `ACTIVE` with no synthetic
+settlement record or reservation.
+
+`PaperAccountSettlementRecord(account_version, settlement)` couples each newly
+applied settlement to a positive account-global version. Applied versions form
+the exact contiguous prefix `1..len(records)` across every position sharing the
+account. This `account_version` is independent of each fill's durable
+`position_version`: the latter orders a single position stream, whereas the
+former serializes collateral consumption globally. Rejected candidates do not
+consume the next account version.
+
+`admit_paper_settlement(account, account_version, settlement)` returns a
+`PaperAccountAdmission` with three exact dispositions:
+`PaperAccountAdmissionDisposition.APPLIED`, `REPLAYED`, or `REJECTED`. An exact
+settlement found at its existing account version replays against the current
+account with no posting or duplicate effect, including after later records.
+Conflicting data at an existing version, a reused event/fill identity at
+another version, a sequence gap/regression, or a broken per-position settlement
+chain fails closed as `InvalidPaperAccountTransition`. A funding/admission
+rejection returns the same account object, no postings, explicit `reasons`, and
+leaves that version available for another candidate.
+
+For each admitted settlement, the target reservation is computed from the
+complete after-settlement FIFO projection:
+
+```text
+target_margin = ceil(open_cost / leverage / margin_quantum) * margin_quantum
+margin_delta  = target_margin - current_position_reservation
+```
+
+The ceiling is implemented as an exact bounded integer ratio and therefore
+does not inherit ambient `Decimal` precision, rounding mode, or traps. Every
+non-zero requirement rounds upward to the explicit policy quantum. Scale-in and
+reduction recompute the target from surviving FIFO lots, avoiding accumulated
+rounding drift; an exact close releases the full reservation and removes its
+`PaperMarginReservation`.
+
+`PaperAccountPosting(asset, bucket, amount)` records only non-zero exact signed
+movements. Settlement `cash_deltas` post to `AVAILABLE` in their own asset.
+Margin movement creates equal and opposite collateral postings between
+`PaperAccountPostingBucket.AVAILABLE` and `RESERVED_MARGIN`. For every asset,
+the total posting amount therefore equals the corresponding settlement cash
+delta; internal reservation movement conserves the asset total. A quote fee and
+margin reservation are considered together. For `OPEN`, a foreign-asset fee
+must be funded; every such fee is debited in its explicit asset without
+conversion. Reserved balances cannot become negative and zero movements are
+omitted.
+
+An `OPEN` settlement is applied only when the prior account is `ACTIVE` and all
+resulting available asset balances stay non-negative. Otherwise it returns
+`REJECTED` without mutation. A `REDUCE_ONLY` settlement may still apply so a
+position can close and its exact realised loss or fees can be recognized. If
+that produces any negative available balance, the derived state becomes
+`PaperAccountState.INSOLVENT`; subsequent `OPEN` exposure is rejected. Direct
+`PaperAccount` and `PaperAccountAdmission` construction replays and re-derives
+all balances, reservations, records, postings, disposition, state, and reasons,
+so a caller cannot forge an applied outcome. The policy retains the supplied
+exact `Decimal` quantum rather than silently rewriting it.
+
+This is not yet the durable account owner required by M9b.10b activation. The
+module performs no I/O and imports only standard-library and domain code. It
+contains no SQL, schema, repository, lock, transaction, price source, clock,
+venue call, legacy-table projection, telemetry, or runtime composition. A
+future PostgreSQL slice must make account-version allocation, journal facts,
+settlement records, postings, balances, and reservations one atomic transaction
+under a single account writer. Until then, two concurrent pure evaluations can
+both see the same available collateral and neither may authorize execution.
+
+Activation also remains blocked on persisted instrument/version and price,
+fee, tick, lot, and opening-capital provenance; funding, borrowing,
+liquidation, and unrealised mark-to-market policy; generation/scope fences;
+durable reconciliation and quarantine; startup migration/readiness and a
+repository factory; bounded replay or snapshots; atomic compatibility
+projections if retained; a proved legacy sole-writer fence; shadow parity; and
+an explicit cut-over decision.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_paper_accounting.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py \
+  tests/test_domain_contracts.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_paper_accounting.py
+.venv/bin/black --target-version py310 --check \
+  trading/domain/paper_accounting.py \
+  trading/domain/__init__.py \
+  tests/test_paper_accounting.py
+.venv/bin/isort --check-only \
+  trading/domain/paper_accounting.py \
+  trading/domain/__init__.py \
+  tests/test_paper_accounting.py
+.venv/bin/flake8 \
+  trading/domain/paper_accounting.py \
+  trading/domain/__init__.py \
+  tests/test_paper_accounting.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/domain/paper_accounting.py \
+  trading/domain/__init__.py \
+  tests/test_paper_accounting.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The dedicated paper-accounting suite passes 63 tests under both supported
+Python interpreters. The exact focused accounting, settlement, economics,
+position, order, and domain command above passes 515 tests. Black, isort,
+flake8, Python 3.10 compilation, and the diff check pass. The complete M9b.11
+non-PostgreSQL gate passes 1,910 tests, skips 50, deselects 66, and passes 7
+subtests under `Pacific/Honolulu`.
 
 ## Cut-over policy
 
