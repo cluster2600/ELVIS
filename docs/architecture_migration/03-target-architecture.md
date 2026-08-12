@@ -195,10 +195,11 @@ M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
 `OrderIntent`, and `SubmissionReport`. M7a adds the correlated `RiskDecision`
 contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
 runtime. M8b adds pure `PositionInstruction`, `PositionFill`, and `Position`
-transitions without a production consumer. M9b.1 prepares the durable journal
-schema only. Its codecs, repository, replay service, runtime `PositionService`,
-the pre-trade service, and `CycleOutcome` remain later slices; they are not
-placeholder classes in the current package.
+transitions without a runtime consumer. M9b.1 prepares the durable journal
+schema, and M9b.2 adds its pure, lossless persistence codec as the only
+infrastructure consumer of the M8a/M8b journal values. The repository, replay
+service, runtime `PositionService`, pre-trade service, and `CycleOutcome` remain
+later slices; they are not placeholder classes in the current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-
@@ -253,8 +254,8 @@ coordinates those steps itself. A failed registration makes no adapter call;
 an existing unresolved reservation is reconciled and is never automatically
 resubmitted. The transport `SubmissionReport` remains distinct from the
 journal-write disposition, including an unknown commit acknowledgement. M9b.1
-only prepares the tables for this service; no implementation or runtime
-consumer exists yet.
+prepares the tables and M9b.2 prepares their typed codec for this service; the
+service itself and its runtime consumer do not exist yet.
 
 ### `PositionService`
 
@@ -265,7 +266,8 @@ behaviour. M8b supplies its pure confirmed-fill transition contract: an `OPEN`
 fill can create or scale a stable position key, while `REDUCE_ONLY` can only
 reduce the opposite side and can never create or flip a position. That reducer
 does not yet constitute this service, select an exit, calculate cost basis or
-PnL, or perform I/O; no production module consumes it yet.
+PnL, or perform I/O. The pure persistence codec consumes the instruction and
+event values, but no runtime module applies this reducer yet.
 
 ## Runtime and configuration
 
@@ -327,25 +329,42 @@ before external submission. One decision ID may reserve only one order within
 an execution scope. `order_events` reserves a positive, per-position version
 key for future causal allocation; `(client_order_id, trade_id)` remains the
 confirmed-fill identity. The schema scopes venue identities by execution scope
-and symbol, and stores versioned payloads as JSON objects. Exact `Decimal`
-values must be encoded as strings by the future codec rather than as PostgreSQL
-`NUMERIC` or JSON numbers, whose representable range is narrower than the pure
-domain contract.
+and symbol, and stores versioned payloads as JSON objects.
 
 The bounded indexed columns are a persistence representability contract, not a
-new domain invariant: before any submission, the future codec/repository must
-reject an otherwise valid domain value that exceeds those limits. SQL rejects
-empty and ordinary space-padded identifiers; the codec remains responsible for
-the domain's complete clean-text rule, including other whitespace.
+new domain invariant. SQL rejects empty and ordinary space-padded identifiers;
+the persistence boundary remains responsible for the domain's complete clean-
+text and storage-length rules.
 
-This schema is prepared storage, not a journal implementation. No codec,
-repository, replay, register-before-submit service, reconciliation path, or
-runtime consumer exists yet, and the migration runner is still not a startup
-readiness gate. M9b.2 and later slices must validate the envelope and hashes,
-allocate each position version under a stream lock, append facts and update the
-stream atomically, rebuild the exact M8a/M8b projections through their reducers,
-and quarantine unknown or conflicting observations before `PositionService`
-can own the runtime boundary.
+M9b.2 supplies a pure, version-1 codec for `PositionInstruction` and all seven
+M8a lifecycle events. `trading.persistence.journal_codec` exposes immutable
+`EncodedPositionInstruction` and `EncodedOrderLifecycleEvent` records plus
+their explicit encode/decode functions. It serializes exact `Decimal` values
+and leverage as strings, aware timestamps in canonical UTC with a `+00:00`
+offset and six fractional digits, and enums and optional values under an exact
+JSON object shape. Canonical JSON uses sorted keys, compact separators, and
+ASCII escaping; its UTF-8 bytes determine the stored SHA-256 payload digest.
+That digest is evidence of corruption or inconsistency, not an authenticity
+guarantee or MAC. Unknown versions, malformed envelopes, and payload/hash or
+duplicated-column conflicts fail closed with `JournalQuarantineError`; they are
+quarantine inputs and are never coerced into domain values. Version 1 is
+immutable. Any change to its keys, types, canonicalization, or hash contract
+requires a new envelope version and a matching schema migration.
+
+The codec is the sole persistence consumer of these domain journal contracts
+and performs no I/O. There is still no repository, stream lock or
+`position_version` allocator, append transaction, replay path,
+register-before-submit service, reconciliation path, or runtime consumer, and
+the migration runner is not a startup readiness gate. Before any cut-over, the
+execution adapter must guarantee clean Unicode and the schema limits of 255
+characters for every venue order ID and trade ID it emits; detecting an
+unrepresentable identifier only after an external effect is not an acceptable
+activation boundary. The codec rejects NUL characters, isolated Unicode
+surrogates, and over-length domain-sourced identifiers, but this validation
+cannot retroactively make an already accepted venue identifier safe. Later M9b
+slices must add the transactional repository, rebuild the exact M8a/M8b
+projections through their reducers, quarantine failed decodes durably, and
+complete reconciliation before `PositionService` can own the runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

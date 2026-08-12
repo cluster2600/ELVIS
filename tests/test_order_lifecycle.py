@@ -936,7 +936,153 @@ def test_reducer_rejects_unknown_event_and_mismatched_client_id() -> None:
         )
 
 
-def test_order_lifecycle_module_is_pure_and_not_wired_to_production() -> None:
+_ORDER_LIFECYCLE_SYMBOLS = {
+    "CancellationConfirmed",
+    "CancellationRejected",
+    "CancellationRequested",
+    "ConfirmedFill",
+    "InvalidOrderTransition",
+    "OrderLifecycle",
+    "OrderLifecycleEvent",
+    "OrderLifecycleState",
+    "SubmissionAcknowledged",
+    "SubmissionAmbiguous",
+    "SubmissionEvent",
+    "SubmissionFailed",
+    "new_order_lifecycle",
+    "reduce_order_lifecycle",
+    "submission_event_from_report",
+}
+
+
+def _literal_import_target(call: ast.Call) -> str | None:
+    if not call.args or not isinstance(call.args[0], ast.Constant):
+        return None
+    target = call.args[0].value
+    return target if isinstance(target, str) else None
+
+
+def _uses_order_lifecycle_contract(source: str) -> bool:
+    """Detect direct, facade, relative, and literal dynamic imports."""
+    tree = ast.parse(source)
+    importlib_aliases = {"importlib"}
+    import_module_aliases = {"import_module"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in {"trading", "trading.domain"}:
+                    return True
+                if (
+                    alias.name == "trading.domain.order_lifecycle"
+                    or alias.name.startswith("trading.domain.order_lifecycle.")
+                ):
+                    return True
+                if alias.name.startswith("trading.domain.") and alias.asname is None:
+                    # A dotted import without ``as`` binds ``trading`` and can
+                    # therefore reach lifecycle symbols through the facade.
+                    return True
+                if alias.name == "importlib":
+                    importlib_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            imported_names = {alias.name for alias in node.names}
+            module = node.module or ""
+            if module == "importlib" and "import_module" in imported_names:
+                import_module_aliases.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "import_module"
+                )
+            if module == "trading" and "domain" in imported_names:
+                return True
+            if module == "trading.domain.order_lifecycle" or (
+                node.level and module in {"order_lifecycle", "domain.order_lifecycle"}
+            ):
+                return True
+            if module.startswith("trading.domain") or (
+                node.level and module == "domain"
+            ):
+                if imported_names & (
+                    _ORDER_LIFECYCLE_SYMBOLS | {"*", "order_lifecycle"}
+                ):
+                    return True
+            if node.level and not module and "domain" in imported_names:
+                return True
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _literal_import_target(node)
+        if target not in {
+            "trading.domain",
+            "trading.domain.order_lifecycle",
+        }:
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id in (
+            import_module_aliases | {"__import__"}
+        ):
+            return True
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in importlib_aliases
+        ):
+            return True
+
+    return False
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from trading.domain.order_lifecycle import OrderLifecycle",
+        "from trading.domain import OrderLifecycle",
+        "from trading.domain.positions import ConfirmedFill",
+        "import trading.domain.order_lifecycle as lifecycle",
+        "import trading.domain as domain\nvalue = domain.OrderLifecycle",
+        "import trading as trading_alias\nvalue = trading_alias.domain.OrderLifecycle",
+        "import trading.domain.orders\nvalue = trading.domain.OrderLifecycle",
+        "from ..domain import OrderLifecycle",
+        "from ..domain.order_lifecycle import OrderLifecycle",
+        (
+            "from importlib import import_module as load\n"
+            "load('trading.domain.order_lifecycle')"
+        ),
+        (
+            "import importlib as loader\n"
+            "loader.import_module('trading.domain.order_lifecycle')"
+        ),
+        "from trading import domain as d\nvalue = getattr(d, 'OrderLifecycle')",
+        (
+            "from importlib import import_module as load\n"
+            "domain = load('trading.domain')\n"
+            "value = getattr(domain, 'OrderLifecycle')"
+        ),
+    ],
+)
+def test_order_consumer_detector_rejects_facade_and_indirect_imports(
+    source: str,
+) -> None:
+    assert _uses_order_lifecycle_contract(source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from trading.domain import Position",
+        "import trading.domain.positions as positions",
+        "from trading.domain.positions import Position",
+        "from importlib import import_module as load\nload('trading.domain.positions')",
+    ],
+)
+def test_order_consumer_detector_allows_explicit_unrelated_domain_imports(
+    source: str,
+) -> None:
+    assert not _uses_order_lifecycle_contract(source)
+
+
+def test_order_lifecycle_module_is_pure_and_only_codec_consumes_contract() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "domain" / "order_lifecycle.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -955,23 +1101,6 @@ def test_order_lifecycle_module_is_pure_and_not_wired_to_production() -> None:
         and not module.startswith("trading.domain")
     } == set()
 
-    lifecycle_symbols = {
-        "CancellationConfirmed",
-        "CancellationRejected",
-        "CancellationRequested",
-        "ConfirmedFill",
-        "InvalidOrderTransition",
-        "OrderLifecycle",
-        "OrderLifecycleEvent",
-        "OrderLifecycleState",
-        "SubmissionAcknowledged",
-        "SubmissionAmbiguous",
-        "SubmissionEvent",
-        "SubmissionFailed",
-        "new_order_lifecycle",
-        "reduce_order_lifecycle",
-        "submission_event_from_report",
-    }
     consumers = []
     excluded = {
         module_path,
@@ -983,38 +1112,11 @@ def test_order_lifecycle_module_is_pure_and_not_wired_to_production() -> None:
             source_path in excluded
             or "tests" in source_path.parts
             or ".venv" in source_path.parts
+            or "build" in source_path.parts
+            or "dist" in source_path.parts
         ):
             continue
-        source_tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        referenced = {
-            node.id for node in ast.walk(source_tree) if isinstance(node, ast.Name)
-        }
-        referenced.update(
-            node.attr
-            for node in ast.walk(source_tree)
-            if isinstance(node, ast.Attribute)
-        )
-        lifecycle_imports = [
-            node
-            for node in ast.walk(source_tree)
-            if (
-                isinstance(node, ast.Import)
-                and any(
-                    alias.name == "trading.domain.order_lifecycle"
-                    for alias in node.names
-                )
-            )
-            or (
-                isinstance(node, ast.ImportFrom)
-                and node.module
-                in {
-                    "trading.domain",
-                    "trading.domain.order_lifecycle",
-                }
-                and any(alias.name in lifecycle_symbols for alias in node.names)
-            )
-        ]
-        if referenced & lifecycle_symbols or lifecycle_imports:
+        if _uses_order_lifecycle_contract(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == []
+    assert sorted(consumers) == [Path("trading/persistence/journal_codec.py")]
