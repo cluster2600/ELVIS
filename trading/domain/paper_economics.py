@@ -6,7 +6,11 @@ from decimal import Decimal
 from enum import Enum
 
 from trading.domain._decimal import exact_decimal_product, exact_decimal_sum
-from trading.domain._validation import require_clean_text, require_positive_decimal
+from trading.domain._validation import (
+    protect_frozen_dataclass_state,
+    require_clean_text,
+    require_positive_decimal,
+)
 from trading.domain.positions import (
     InvalidPositionTransition,
     Position,
@@ -142,6 +146,7 @@ class InvalidPaperEconomicTransition(ValueError):
     """Raised when a fill contradicts the causal paper-economic history."""
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PaperFillRecord:
     """One confirmed position fill with its durable causal metadata."""
@@ -182,6 +187,7 @@ class PaperFillRecord:
         return (self.position_fill.fill.client_order_id, self.event_id)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PaperCostLot:
     """The unconsumed quantity of one causally ordered opening fill."""
@@ -200,6 +206,7 @@ class PaperCostLot:
         require_positive_decimal("entry_price", self.entry_price)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PaperFeeTotal:
     """An exact cumulative positive fee amount for one asset."""
@@ -388,6 +395,7 @@ def _derive(records: tuple[PaperFillRecord, ...]) -> _DerivedEconomics:
     )
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PaperEconomics:
     """A validated economic projection derived from causal fill records."""

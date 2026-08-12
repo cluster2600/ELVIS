@@ -1,9 +1,37 @@
 """Validation helpers shared by immutable domain values."""
 
 import math
+from dataclasses import fields
 from datetime import datetime
 from decimal import Decimal
 from numbers import Real
+
+
+def protect_frozen_dataclass_state(contract_type: type) -> type:
+    """Reject state mutation while retaining validated copy/pickle restores."""
+    field_names = tuple(field.name for field in fields(contract_type))
+
+    def _validated_setstate(instance: object, state: object) -> None:
+        if any(hasattr(instance, name) for name in field_names):
+            raise TypeError("frozen domain values do not support state mutation")
+        if not isinstance(state, (list, tuple)) or len(state) != len(field_names):
+            raise TypeError("invalid frozen domain state")
+
+        assigned: list[str] = []
+        try:
+            for name, value in zip(field_names, state):
+                object.__setattr__(instance, name, value)
+                assigned.append(name)
+            post_init = getattr(instance, "__post_init__", None)
+            if post_init is not None:
+                post_init()
+        except BaseException:
+            for name in reversed(assigned):
+                object.__delattr__(instance, name)
+            raise
+
+    contract_type.__setstate__ = _validated_setstate
+    return contract_type
 
 
 def require_clean_text(name: str, value: object) -> None:

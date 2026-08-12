@@ -1001,6 +1001,7 @@ def test_position_only_approved_modules_consume_contract() -> None:
         module_path,
         domain_root / "__init__.py",
         domain_root / "paper_economics.py",
+        domain_root / "paper_settlement.py",
     }
     for source_path in root.rglob("*.py"):
         if (

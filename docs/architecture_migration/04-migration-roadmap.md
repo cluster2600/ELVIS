@@ -30,8 +30,8 @@ rollback decision that does not restore unsafe behaviour.
 | M5 | Establish versioned feature schemas and validate model artefacts on load | 9/11-feature contracts, incompatible artefact rejection, invalid Ensemble members retired, training/inference round trip | revert only the current contract adapter; never restore invalid loaders | Implemented |
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
-| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission contract; M9b.8 FIFO economics without SQL) |
+| M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission contract; M9b.8 FIFO economics and M9b.9 quote settlement without SQL) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1936,6 +1936,124 @@ interpreters, and the focused domain/application/persistence regression suite
 passes 556 tests. Black, isort, flake8, Python 3.10 compilation, and the diff
 check pass. The complete non-PostgreSQL suite passes 1,747 tests, skips 50,
 deselects 43, and passes 7 subtests under `Pacific/Honolulu`.
+
+### M9b.9 pure linear quote settlement
+
+M9b.9 adds `trading.domain.paper_settlement` and re-exports its public contract
+through the domain facade. `PaperLinearInstrument` makes the instrument model
+explicit: one symbol, distinct base and quote assets, a multiplier of one, and
+linear settlement in the quote asset. This deliberately excludes inverse,
+quanto, multiplier-bearing, and implicitly parsed symbol contracts.
+
+`settle_paper_fill(instrument, before, record)` consumes one already confirmed,
+causally versioned `PaperFillRecord` and an optional prior
+factory-created `PaperSettlementCheckpoint`. That compact checkpoint binds the
+instrument to the prior FIFO economics without retaining a recursive chain of
+settlement results, so a later fill cannot silently renominate the same
+position stream. It neither executes an order nor creates an ACK or fill. The
+returned immutable `PaperSettlement` contains the exact M9b.8 projection at
+`after.economics` and three explicitly denominated delta views:
+
+- `gross_realized_pnl_delta` is the change in cumulative FIFO gross realised
+  PnL and is always a `PaperAssetAmount` in the instrument's quote asset;
+- `fee_debits` contains the positive confirmed fee amount in the fill's exact
+  `fee_asset`; and
+- `cash_deltas` combines those terms by asset as signed amounts: realised PnL
+  in quote and a negative fee in its own asset, with exact zero totals omitted.
+
+No fee-asset conversion occurs. A fee in the quote asset may combine
+algebraically with quote-settled realised PnL; a fee in another asset remains a
+separate debit. Neither case authorises a synthetic cross-asset net PnL, an FX
+rate of one, or a balance mutation. All arithmetic and direct-construction
+validation retain exact `Decimal` payload identity rather than using float,
+tolerance, or numeric equality that discards quantum.
+
+`PaperSettlementDisposition.APPLIED` means a new causal fill was applied. It is
+still `APPLIED` when an opening fill realises zero PnL and has no fee.
+Reapplying the exact record to its existing checkpoint yields `REPLAYED`,
+retains the same checkpoint and `PaperEconomics` object, emits a zero
+quote-denominated gross-PnL delta, and emits no repeated fee debit or cash
+delta. Symbol mismatch, causal conflict, or unrepresentable exact arithmetic
+fails closed as `InvalidPaperSettlement`.
+Direct `PaperSettlement` construction re-derives the after projection,
+disposition, and every delta, preventing a caller from forging the result.
+The M8/M9 causal values reachable from its checkpoint reject generated
+`__setstate__` mutation after construction. Standard copy and pickle
+restoration target a fresh object, revalidate every field, and clean up a
+failed partial restore.
+
+This is a pure semantic slice only. It does not maintain cash or asset balances,
+reserve or release margin, decide account admission, enforce buying power,
+model funding, borrowing, liquidation, or unrealised mark-to-market PnL, or
+select/observe fills. It adds no SQL, migration, repository, PostgreSQL lock,
+transaction owner, legacy `trades`/`open_positions` projection, runtime wiring,
+sole-writer fence, readiness policy, or reconciliation workflow. A later
+account-aware design must define those invariants before these deltas can become
+durable postings or authorise execution.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py \
+  tests/test_domain_contracts.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_paper_settlement.py
+.venv/bin/black --target-version py310 --check \
+  trading/domain/paper_settlement.py \
+  trading/domain/paper_economics.py \
+  trading/domain/positions.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  trading/domain/_validation.py \
+  trading/domain/__init__.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/domain/paper_settlement.py \
+  trading/domain/paper_economics.py \
+  trading/domain/positions.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  trading/domain/_validation.py \
+  trading/domain/__init__.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py
+.venv/bin/flake8 \
+  trading/domain/paper_settlement.py \
+  trading/domain/paper_economics.py \
+  trading/domain/positions.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  trading/domain/_validation.py \
+  trading/domain/__init__.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/domain \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_position_lifecycle.py \
+  tests/test_order_lifecycle.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused M9b.9/domain regression suite passes 452 tests. The settlement
+contract itself passes 50 tests under both supported Python interpreters.
+Black, isort, flake8, Python 3.10 compilation, and the diff check pass. The
+complete non-PostgreSQL suite passes 1,797 tests, skips 50, deselects 43, and
+passes 7 subtests under `Pacific/Honolulu`.
 
 ## Cut-over policy
 

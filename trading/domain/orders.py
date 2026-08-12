@@ -6,6 +6,7 @@ from decimal import Decimal
 from enum import Enum
 
 from trading.domain._validation import (
+    protect_frozen_dataclass_state,
     require_aware_datetime,
     require_clean_text,
     require_optional_clean_text,
@@ -42,6 +43,7 @@ class RetrySafety(str, Enum):
     UNSAFE = "UNSAFE"
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class OrderIntent:
     """A complete, pre-approved request ready for an execution adapter."""

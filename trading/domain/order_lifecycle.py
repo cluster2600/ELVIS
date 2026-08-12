@@ -7,6 +7,7 @@ from enum import Enum
 
 from trading.domain._decimal import exact_decimal_sum
 from trading.domain._validation import (
+    protect_frozen_dataclass_state,
     require_aware_datetime,
     require_clean_text,
     require_non_negative_decimal,
@@ -94,6 +95,7 @@ class SubmissionFailed:
         require_aware_datetime("observed_at", self.observed_at)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class ConfirmedFill:
     """One exact venue fill, independently confirmed from submission."""

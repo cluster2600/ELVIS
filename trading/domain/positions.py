@@ -5,7 +5,11 @@ from decimal import Decimal
 from enum import Enum
 
 from trading.domain._decimal import exact_decimal_sum
-from trading.domain._validation import require_clean_text, require_positive_decimal
+from trading.domain._validation import (
+    protect_frozen_dataclass_state,
+    require_clean_text,
+    require_positive_decimal,
+)
 from trading.domain.order_lifecycle import ConfirmedFill, OrderLifecycle
 from trading.domain.orders import OrderIntent, OrderSide
 
@@ -49,6 +53,7 @@ def _require_fraction(name: str, value: object) -> None:
         raise ValueError(f"{name} must be less than one")
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PositionExitContext:
     """Exit policy resolved once and retained for the position lifetime."""
@@ -67,6 +72,7 @@ class PositionExitContext:
             _require_fraction("trailing_stop_fraction", self.trailing_stop_fraction)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PositionInstruction:
     """An explicit position effect attached to one approved order intent."""
@@ -93,6 +99,7 @@ class PositionInstruction:
             raise ValueError("a REDUCE_ONLY instruction cannot replace exit_context")
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class PositionFill:
     """One confirmed fill coupled to its pre-submission position instruction."""
@@ -147,6 +154,7 @@ def _remaining_quantity(fills: tuple[PositionFill, ...]) -> Decimal:
     return exact_decimal_sum((opened, reduced.copy_negate()))
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class Position:
     """A validated projection of confirmed fills for one stable position key."""

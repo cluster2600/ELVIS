@@ -35,6 +35,15 @@ from trading.domain.paper_economics import (
     new_paper_economics,
     reduce_paper_economics,
 )
+from trading.domain.paper_settlement import (
+    InvalidPaperSettlement,
+    PaperAssetAmount,
+    PaperLinearInstrument,
+    PaperSettlement,
+    PaperSettlementCheckpoint,
+    PaperSettlementDisposition,
+    settle_paper_fill,
+)
 from trading.domain.positions import (
     InvalidPositionTransition,
     Position,
@@ -59,6 +68,7 @@ __all__ = [
     "ConfirmedFill",
     "InvalidOrderTransition",
     "InvalidPaperEconomicTransition",
+    "InvalidPaperSettlement",
     "InvalidPositionTransition",
     "OrderIntent",
     "OrderLifecycle",
@@ -67,10 +77,15 @@ __all__ = [
     "OrderSide",
     "OrderType",
     "PaperCostLot",
+    "PaperAssetAmount",
     "PaperEconomics",
     "PaperFeeTotal",
     "PaperFillRecord",
     "PaperLotMethod",
+    "PaperLinearInstrument",
+    "PaperSettlement",
+    "PaperSettlementCheckpoint",
+    "PaperSettlementDisposition",
     "Position",
     "PositionEffect",
     "PositionExitContext",
@@ -96,5 +111,6 @@ __all__ = [
     "reduce_order_lifecycle",
     "reduce_paper_economics",
     "reduce_position",
+    "settle_paper_fill",
     "submission_event_from_report",
 ]

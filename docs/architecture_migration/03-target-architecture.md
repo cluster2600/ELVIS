@@ -204,6 +204,9 @@ boundary, without implementing SQL, a repository, or runtime composition.
 M9b.8 adds the pure FIFO paper-economics slice: exact lot, open-cost,
 gross-realised-PnL, and per-fee-asset projections from causally versioned
 confirmed fills, still without SQL or runtime composition.
+M9b.9 adds the pure, linear quote-settled transition from one such confirmed
+fill to explicitly denominated realised-PnL, fee-debit, and cash deltas. It
+still adds no account state, SQL, or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -383,6 +386,47 @@ mark-to-market PnL, exit selection, price simulation,
 tick/lot quantisation, and legacy table shapes remain outside this reducer.
 Those require separate policies rather than hidden defaults in arithmetic.
 
+M9b.9 adds `trading.domain.paper_settlement` without turning the economic
+projection into an account. `PaperLinearInstrument` explicitly binds a symbol
+to distinct base and quote assets and admits only multiplier-one linear
+settlement in the quote asset. `settle_paper_fill(instrument, before, record)`
+accepts an already confirmed `PaperFillRecord` and an optional compact
+factory-created `PaperSettlementCheckpoint` that binds the prior FIFO economics
+to its instrument. A change of instrument or denomination therefore fails
+closed without retaining a recursive chain of earlier settlement results. It
+does not submit an order, manufacture an acknowledgement or fill, sample a
+price, or infer an instrument from the symbol spelling. Its
+`PaperSettlement.after.economics` projection is the exact M9b.8 FIFO result
+after applying that record.
+
+For an applied fill, `gross_realized_pnl_delta` is the change in cumulative
+gross realised PnL and is always denominated in the instrument's quote asset.
+Each positive confirmed fee is exposed separately as a positive `fee_debits`
+amount in the fill's exact `fee_asset`. `cash_deltas` then contains the signed
+per-asset combination: gross realised PnL in quote and the fee as a negative
+amount in its own asset. When the fee asset is the quote asset those terms may
+combine; otherwise they remain separate. Zero asset deltas are omitted. No FX,
+token, mark-price, or implicit one-to-one conversion is performed, so these
+deltas cannot be presented as a cross-asset net PnL or an account balance.
+
+`PaperSettlementDisposition.APPLIED` means the causal fill was newly applied,
+even when it realises no PnL and charges no fee. An exact replay returns
+`REPLAYED`, the unchanged `PaperEconomics` object, a zero quote-denominated
+gross-PnL delta, and no repeated fee or cash delta. A mismatched symbol or a
+conflicting economic history fails closed as `InvalidPaperSettlement`.
+`PaperSettlement` re-derives its after-state, disposition, and exact-Decimal
+deltas on direct construction so callers cannot forge a posting-like result.
+The causal value graph also rejects the mutable `__setstate__` hook that Python
+otherwise generates for frozen slotted dataclasses. Copy and pickle restoration
+remain supported only onto a new object and rerun every domain invariant before
+the value becomes observable.
+
+This contract does not maintain balances, reserve or release margin, decide
+admission, model collateral, funding, borrowing, liquidation, or unrealised
+PnL. It adds no ledger table, SQL repository, PostgreSQL transaction owner,
+legacy projection, runtime consumer, or writer fence. Those stateful and
+operational boundaries require later contracts and persistence work.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -506,11 +550,14 @@ not resolve them or authorize automatic resubmission. M9b.7 fixes the pure
 attempt/result vocabulary for the future transaction owner, but does not
 implement that owner. M9b.8 defines the pure FIFO economic fold over the exact
 existing journal facts and therefore requires no SQL or schema migration of its
-own. Neither slice enforces sole ownership or fences the legacy writers. The
-deterministic in-memory projection is not an activation claim. Cut-over still
-requires the exact durable fill ledger, atomic compatibility projections where
-they remain necessary, one transaction owner, startup verification that legacy
-writers are fenced, and PostgreSQL commit-unknown/replay tests.
+own. M9b.9 defines only exact quote-settled deltas over that fold and likewise
+requires no SQL or schema migration of its own. None of these slices enforces
+sole ownership or fences the legacy writers. The deterministic in-memory
+projection and settlement are not an activation claim. Cut-over still requires
+the exact durable fill ledger, durable account and margin policy, atomic
+compatibility projections where they remain necessary, one transaction owner,
+startup verification that legacy writers are fenced, and PostgreSQL
+commit-unknown/replay tests.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.
