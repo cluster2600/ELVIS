@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.5 correlated legacy paper response) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.6 unresolved-submission read model) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -1676,6 +1676,77 @@ legacy `binance_executor.py` still has its documented pre-existing lint debt,
 so this slice does not claim a clean whole-file flake8 result for it. Python
 3.10 compilation and the diff check pass. The isolated non-PostgreSQL suite
 passes 1,552 tests, skips 50, and deselects 38 under `Pacific/Honolulu`.
+
+### M9b.6 unresolved-submission read model
+
+M9b.6 reuses the existing M9b.1 tables and adds no migration. The unwired
+PostgreSQL repository exposes two read-only operations:
+`replay_order(execution_scope, client_order_id)` and
+`list_unresolved_submissions(execution_scope)`. The first resolves the order's
+position key, replays the complete stream, and returns only the exact correlated
+order. The second finds all position streams in one execution scope, replays
+each of them inside the same `REPEATABLE READ READ ONLY` transaction, retains
+only orders in `PENDING` or `RECONCILING`, and returns them in canonical client
+order ID order.
+
+The inventory is all-or-nothing. A missing order raises a typed not-found
+error; a scope mismatch, corrupt envelope, version gap, invalid reducer
+transition, or inconsistent position stream fails closed without returning a
+partial list. Both reads roll back their read-only snapshot and close their
+owned connection; they never call a write operation or assemble results from
+multiple snapshots.
+
+This does not make a `PENDING` order safe to resubmit. Reservations created by
+M9b.4 or found during an in-place migration may represent either no external
+call or an external effect whose observation was lost. Only a future
+transaction-owning paper executor, operating after legacy writers are fenced,
+can define `PENDING` as no committed paper effect and resolve a commit-unknown
+outcome by exact event replay. M9b.6 supplies recovery visibility, not a retry
+policy, durable quarantine, startup readiness, or runtime wiring.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_order_position_journal.py \
+  tests/test_journaled_order_service.py \
+  tests/test_journal_codec.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_order_position_journal.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres \
+  tests/postgres/test_order_position_repository_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py
+.venv/bin/isort --check-only \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py
+.venv/bin/flake8 \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py
+git diff --check
+```
+
+The focused repository/domain suite passes 443 tests, and the repository unit
+suite passes 45 tests under Python 3.10. PostgreSQL 15 passes all 15 repository
+integration tests and all 40 tests in the isolated PostgreSQL suite. Black,
+isort, flake8, Python 3.10 compilation, and the diff check pass. The complete
+non-PostgreSQL suite passes 1,563 tests, skips 50, deselects 43, and passes 7
+subtests under `Pacific/Honolulu`.
 
 ## Cut-over policy
 

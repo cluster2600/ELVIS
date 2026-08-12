@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from threading import Barrier
+from threading import Barrier, Event
 
 import psycopg2
 import pytest
@@ -14,8 +14,16 @@ from trading.domain.order_lifecycle import (
     ConfirmedFill,
     OrderLifecycleState,
     SubmissionAcknowledged,
+    SubmissionAmbiguous,
+    SubmissionFailed,
 )
-from trading.domain.orders import OrderIntent, OrderSide, OrderType
+from trading.domain.orders import (
+    OrderIntent,
+    OrderSide,
+    OrderType,
+    RetrySafety,
+    SubmissionStatus,
+)
 from trading.domain.positions import (
     PositionEffect,
     PositionExitContext,
@@ -29,6 +37,7 @@ from trading.persistence.order_position_journal import (
     JournalCommitUnknown,
     JournalConflictError,
     JournalConflictKind,
+    JournalNotFoundError,
     JournalReplayError,
     PostgresOrderPositionJournal,
     ReservationDisposition,
@@ -678,3 +687,290 @@ def test_replay_fails_closed_on_corruption_or_version_gap(
         assert isinstance(replay_error.value.__cause__, JournalQuarantineError)
     else:
         assert replay_error.value.__cause__ is None
+
+
+def test_replay_order_returns_exact_order_and_rejects_wrong_scope_or_missing_id(
+    migrated_postgres_dsn,
+):
+    journal = _repository(migrated_postgres_dsn)
+    instruction = _instruction()
+    reservation = journal.reserve_instruction(
+        execution_scope=SCOPE,
+        instruction=instruction,
+    )
+
+    replayed = journal.replay_order(
+        execution_scope=SCOPE,
+        client_order_id=instruction.order_intent.client_order_id,
+    )
+
+    assert replayed == reservation.order
+    assert replayed.lifecycle.state is OrderLifecycleState.PENDING
+    assert _stream_rows(migrated_postgres_dsn) == ((0,), [])
+
+    with pytest.raises(JournalConflictError) as wrong_scope:
+        journal.replay_order(
+            execution_scope="paper:other",
+            client_order_id=instruction.order_intent.client_order_id,
+        )
+    assert wrong_scope.value.kind is JournalConflictKind.POSITION_SCOPE
+
+    with pytest.raises(JournalNotFoundError, match="order does not exist"):
+        journal.replay_order(
+            execution_scope=SCOPE,
+            client_order_id="missing-order",
+        )
+
+
+def test_unresolved_inventory_includes_only_pending_and_reconciling_in_stable_order(
+    migrated_postgres_dsn,
+):
+    journal = _repository(migrated_postgres_dsn)
+    pending = _instruction(
+        client_order_id="z-pending",
+        decision_id="decision-pending",
+        position_key="position-z-pending",
+    )
+    reconciling = _instruction(
+        client_order_id="a-reconciling",
+        decision_id="decision-reconciling",
+        position_key="position-a-reconciling",
+    )
+    acknowledged = _instruction(
+        client_order_id="m-acknowledged",
+        decision_id="decision-acknowledged",
+        position_key="position-m-acknowledged",
+    )
+    failed = _instruction(
+        client_order_id="b-failed",
+        decision_id="decision-failed",
+        position_key="position-b-failed",
+    )
+    other_scope = _instruction(
+        client_order_id="other-scope-pending",
+        decision_id="decision-other-scope",
+        position_key="position-other-scope",
+    )
+    for instruction in (pending, reconciling, acknowledged, failed):
+        journal.reserve_instruction(execution_scope=SCOPE, instruction=instruction)
+    journal.reserve_instruction(
+        execution_scope="paper:other",
+        instruction=other_scope,
+    )
+
+    journal.append_event(
+        execution_scope=SCOPE,
+        position_key=reconciling.position_key,
+        event_id="submission-attempt-1",
+        event=SubmissionAmbiguous(
+            client_order_id=reconciling.order_intent.client_order_id,
+            reason="paper outcome requires reconciliation",
+            observed_at=NOW,
+        ),
+    )
+    journal.append_event(
+        execution_scope=SCOPE,
+        position_key=acknowledged.position_key,
+        event_id="submission-attempt-1",
+        event=_ack(acknowledged, venue_order_id="venue-acknowledged"),
+    )
+    journal.append_event(
+        execution_scope=SCOPE,
+        position_key=failed.position_key,
+        event_id="submission-attempt-1",
+        event=SubmissionFailed(
+            client_order_id=failed.order_intent.client_order_id,
+            status=SubmissionStatus.NOT_SENT,
+            retry_safety=RetrySafety.SAFE,
+            reason="paper submission was not attempted",
+            observed_at=NOW,
+        ),
+    )
+
+    unresolved = journal.list_unresolved_submissions(execution_scope=SCOPE)
+
+    assert tuple(
+        order.instruction.order_intent.client_order_id for order in unresolved
+    ) == ("a-reconciling", "z-pending")
+    assert tuple(order.lifecycle.state for order in unresolved) == (
+        OrderLifecycleState.RECONCILING,
+        OrderLifecycleState.PENDING,
+    )
+    assert journal.list_unresolved_submissions(execution_scope="paper:missing") == ()
+
+
+def test_order_and_unresolved_reads_fail_closed_on_corrupt_resolved_stream(
+    migrated_postgres_dsn,
+):
+    journal = _repository(migrated_postgres_dsn)
+    pending = _instruction(
+        client_order_id="a-pending",
+        decision_id="decision-pending",
+        position_key="position-a-pending",
+    )
+    corrupt = _instruction(
+        client_order_id="z-corrupt-acknowledged",
+        decision_id="decision-corrupt-acknowledged",
+        position_key="position-z-corrupt",
+    )
+    journal.reserve_instruction(execution_scope=SCOPE, instruction=pending)
+    journal.reserve_instruction(execution_scope=SCOPE, instruction=corrupt)
+    journal.append_event(
+        execution_scope=SCOPE,
+        position_key=corrupt.position_key,
+        event_id="submission-attempt-1",
+        event=_ack(corrupt, venue_order_id="venue-corrupt"),
+    )
+
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE np.order_events
+                SET event_payload = event_payload || '{"tampered": true}'::jsonb
+                WHERE position_key = %s AND position_version = 1
+                """,
+                (corrupt.position_key,),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(JournalReplayError) as order_error:
+        journal.replay_order(
+            execution_scope=SCOPE,
+            client_order_id=corrupt.order_intent.client_order_id,
+        )
+    assert isinstance(order_error.value.__cause__, JournalQuarantineError)
+
+    with pytest.raises(JournalReplayError) as inventory_error:
+        journal.list_unresolved_submissions(execution_scope=SCOPE)
+    assert isinstance(inventory_error.value.__cause__, JournalQuarantineError)
+
+
+def test_unresolved_inventory_fails_closed_on_an_orphan_stream(
+    migrated_postgres_dsn,
+):
+    journal = _repository(migrated_postgres_dsn)
+    pending = _instruction(
+        client_order_id="order-pending",
+        decision_id="decision-pending",
+        position_key="position-pending",
+    )
+    journal.reserve_instruction(execution_scope=SCOPE, instruction=pending)
+
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO np.position_streams (
+                    position_key,
+                    execution_scope
+                ) VALUES (%s, %s)
+                """,
+                ("position-orphan", SCOPE),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(JournalReplayError, match="no registered order"):
+        journal.list_unresolved_submissions(execution_scope=SCOPE)
+
+
+class _PauseAfterScopeInventoryCursor:
+    def __init__(self, cursor, inventory_selected, writer_committed):
+        self._cursor = cursor
+        self._inventory_selected = inventory_selected
+        self._writer_committed = writer_committed
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def __enter__(self):
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._cursor.__exit__(exc_type, exc_value, traceback)
+
+    def execute(self, query, params=None):
+        if params is None:
+            result = self._cursor.execute(query)
+        else:
+            result = self._cursor.execute(query, params)
+        normalized = " ".join(str(query).split())
+        selects_scope_inventory = (
+            normalized.startswith("SELECT position_key FROM np.position_streams")
+            and "WHERE execution_scope = %s" in normalized
+        )
+        if selects_scope_inventory:
+            self._inventory_selected.set()
+            if not self._writer_committed.wait(timeout=10):
+                raise TimeoutError("concurrent acknowledgement did not commit")
+        return result
+
+
+class _PauseAfterScopeInventoryConnection:
+    def __init__(self, connection, inventory_selected, writer_committed):
+        self._connection = connection
+        self._inventory_selected = inventory_selected
+        self._writer_committed = writer_committed
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def cursor(self):
+        return _PauseAfterScopeInventoryCursor(
+            self._connection.cursor(),
+            self._inventory_selected,
+            self._writer_committed,
+        )
+
+
+def test_unresolved_inventory_uses_one_repeatable_read_snapshot(
+    migrated_postgres_dsn,
+):
+    normal = _repository(migrated_postgres_dsn)
+    first = _instruction(
+        client_order_id="order-first",
+        decision_id="decision-first",
+        position_key="position-first",
+    )
+    normal.reserve_instruction(execution_scope=SCOPE, instruction=first)
+    inventory_selected = Event()
+    writer_committed = Event()
+    snapshot_reader = PostgresOrderPositionJournal(
+        lambda: _PauseAfterScopeInventoryConnection(
+            _connect(migrated_postgres_dsn),
+            inventory_selected,
+            writer_committed,
+        )
+    )
+
+    def acknowledge_after_inventory():
+        if not inventory_selected.wait(timeout=10):
+            raise TimeoutError("scope inventory was not selected")
+        try:
+            return normal.append_event(
+                execution_scope=SCOPE,
+                position_key=first.position_key,
+                event_id="submission-attempt-1",
+                event=_ack(first, venue_order_id="venue-first"),
+            )
+        finally:
+            writer_committed.set()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(acknowledge_after_inventory)
+        first_snapshot = snapshot_reader.list_unresolved_submissions(
+            execution_scope=SCOPE
+        )
+        assert future.result(timeout=20).disposition is EventAppendDisposition.APPENDED
+
+    assert tuple(
+        order.instruction.order_intent.client_order_id for order in first_snapshot
+    ) == ("order-first",)
+    assert normal.list_unresolved_submissions(execution_scope=SCOPE) == ()

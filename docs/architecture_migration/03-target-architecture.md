@@ -257,6 +257,16 @@ or a query-by-client-ID implementation. Legacy executor callers that do not
 provide a client ID remain supported but cannot satisfy the typed adapter's
 correlation check.
 
+M9b.6 adds the first restart-facing read boundary without changing schema or
+runtime composition. The repository can replay one exact order by
+`(execution_scope, client_order_id)` and can enumerate submission work whose
+lifecycle is exactly `PENDING` or `RECONCILING`. Both operations rebuild whole
+position streams from one repeatable-read, read-only snapshot; corrupt history
+fails the whole request rather than producing a partial recovery list. This is
+an inventory, not permission to retry: a legacy `PENDING` reservation still
+cannot distinguish a crash before transport from a crash after an external
+effect but before its observation was journaled.
+
 ### `JournaledOrderService`
 
 M9b.4 supplies the unwired durable wrapper. It accepts one
@@ -415,9 +425,11 @@ detecting an unrepresentable identifier only after an external effect is not an
 acceptable activation boundary. The codec rejects NUL characters, isolated
 Unicode surrogates, and over-length identifiers, but this validation cannot
 retroactively make an already accepted venue identifier safe. Later M9b slices
-must add an atomic paper receipt, query/reconciliation, durable quarantine,
-runtime composition, and the remaining activation gates before
-`PositionService` can own the runtime boundary.
+must add an atomic paper execution transaction, an explicit reconciliation
+decision workflow, durable quarantine, runtime composition, and the remaining
+activation gates before `PositionService` can own the runtime boundary. M9b.6's
+query and unresolved-submission inventory make those cases observable but do
+not resolve them or authorize automatic resubmission.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

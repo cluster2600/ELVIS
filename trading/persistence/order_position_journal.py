@@ -20,6 +20,7 @@ from trading.domain.order_lifecycle import (
     InvalidOrderTransition,
     OrderLifecycle,
     OrderLifecycleEvent,
+    OrderLifecycleState,
     new_order_lifecycle,
     reduce_order_lifecycle,
 )
@@ -42,6 +43,7 @@ from trading.persistence.journal_codec import (
 )
 
 _EXECUTION_SCOPE_MAX_LENGTH = 128
+_CLIENT_ORDER_ID_MAX_LENGTH = 255
 _POSITION_KEY_MAX_LENGTH = 255
 _EVENT_ID_MAX_LENGTH = 255
 _VENUE_ORDER_ID_MAX_LENGTH = 255
@@ -138,6 +140,12 @@ _SELECT_ORDER_LOCATION_SQL = """
 SELECT position_key, execution_scope
 FROM np.orders
 WHERE client_order_id = %s
+"""
+
+_SELECT_SCOPE_POSITION_KEYS_SQL = """
+SELECT position_key
+FROM np.position_streams
+WHERE execution_scope = %s
 """
 
 _SELECT_VENUE_OWNER_SQL = """
@@ -722,6 +730,33 @@ class PostgresOrderPositionJournal:
         finally:
             self._close(connection)
 
+    def _read(self, operation: str, callback: Callable[[object], object]) -> object:
+        connection = self._connection()
+        try:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(_READ_TRANSACTION_SQL)
+                    result = callback(cursor)
+            except JournalRepositoryError:
+                raise
+            except psycopg2.Error as exc:
+                raise JournalStorageError(f"{operation} query failed") from exc
+            except Exception as exc:
+                raise JournalStorageError(f"{operation} failed") from exc
+
+            try:
+                connection.rollback()
+            except Exception as exc:
+                raise JournalStorageError(
+                    f"{operation} transaction could not finish"
+                ) from exc
+            return result
+        except Exception:
+            self._rollback(connection)
+            raise
+        finally:
+            self._close(connection)
+
     def reserve_instruction(
         self,
         *,
@@ -1067,35 +1102,117 @@ class PostgresOrderPositionJournal:
             "position_key",
             _POSITION_KEY_MAX_LENGTH,
         )
-        connection = self._connection()
-        try:
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute(_READ_TRANSACTION_SQL)
-                    replay = _replay_stream(
-                        cursor,
-                        execution_scope=scope,
-                        position_key=key,
-                        lock=False,
-                    )
-            except JournalRepositoryError:
-                raise
-            except psycopg2.Error as exc:
-                raise JournalStorageError("position replay query failed") from exc
-            except Exception as exc:
-                raise JournalStorageError("position replay failed") from exc
-            try:
-                connection.rollback()
-            except Exception as exc:
-                raise JournalStorageError(
-                    "position replay transaction could not finish"
-                ) from exc
-            return replay.projection
-        except Exception:
-            self._rollback(connection)
-            raise
-        finally:
-            self._close(connection)
+
+        def replay(cursor: object) -> PositionStreamProjection:
+            return _replay_stream(
+                cursor,
+                execution_scope=scope,
+                position_key=key,
+                lock=False,
+            ).projection
+
+        return self._read("position replay", replay)
+
+    def replay_order(
+        self,
+        *,
+        execution_scope: str,
+        client_order_id: str,
+    ) -> ReplayedOrder:
+        """Return one order from a complete, consistent position-stream replay."""
+        scope = _checked_input_text(
+            execution_scope,
+            "execution_scope",
+            _EXECUTION_SCOPE_MAX_LENGTH,
+        )
+        client_id = _checked_input_text(
+            client_order_id,
+            "client_order_id",
+            _CLIENT_ORDER_ID_MAX_LENGTH,
+        )
+
+        def replay(cursor: object) -> ReplayedOrder:
+            cursor.execute(_SELECT_ORDER_LOCATION_SQL, (client_id,))
+            raw_location = cursor.fetchone()
+            if raw_location is None:
+                raise JournalNotFoundError("order does not exist")
+            location = _row(raw_location, 2, "order location")
+            position_key = _checked_stored_text(
+                location[0],
+                "position_key",
+                _POSITION_KEY_MAX_LENGTH,
+            )
+            stored_scope = _checked_stored_text(
+                location[1],
+                "execution_scope",
+                _EXECUTION_SCOPE_MAX_LENGTH,
+            )
+            if stored_scope != scope:
+                raise JournalConflictError(
+                    JournalConflictKind.POSITION_SCOPE,
+                    "order belongs to another execution scope",
+                )
+            projection = _replay_stream(
+                cursor,
+                execution_scope=scope,
+                position_key=position_key,
+                lock=False,
+            ).projection
+            return _find_replayed_order(projection, client_id)
+
+        return self._read("order replay", replay)
+
+    def list_unresolved_submissions(
+        self,
+        *,
+        execution_scope: str,
+    ) -> tuple[ReplayedOrder, ...]:
+        """Return pending and reconciling submissions from one consistent snapshot."""
+        scope = _checked_input_text(
+            execution_scope,
+            "execution_scope",
+            _EXECUTION_SCOPE_MAX_LENGTH,
+        )
+
+        def replay(cursor: object) -> tuple[ReplayedOrder, ...]:
+            cursor.execute(_SELECT_SCOPE_POSITION_KEYS_SQL, (scope,))
+            raw_position_keys = tuple(
+                _checked_stored_text(
+                    _row(row, 1, "scoped position key")[0],
+                    "position_key",
+                    _POSITION_KEY_MAX_LENGTH,
+                )
+                for row in cursor.fetchall()
+            )
+            if len(raw_position_keys) != len(set(raw_position_keys)):
+                raise JournalReplayError("scope contains duplicate position streams")
+            position_keys = tuple(sorted(raw_position_keys))
+
+            unresolved_states = {
+                OrderLifecycleState.PENDING,
+                OrderLifecycleState.RECONCILING,
+            }
+            unresolved = []
+            for position_key in position_keys:
+                projection = _replay_stream(
+                    cursor,
+                    execution_scope=scope,
+                    position_key=position_key,
+                    lock=False,
+                ).projection
+                unresolved.extend(
+                    order
+                    for order in projection.orders
+                    if order.lifecycle.state in unresolved_states
+                )
+            return tuple(
+                sorted(
+                    unresolved,
+                    key=lambda order: order.instruction.order_intent.client_order_id,
+                )
+            )
+
+        return self._read("unresolved submission replay", replay)
 
 
 __all__ = [

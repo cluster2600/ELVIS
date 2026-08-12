@@ -13,7 +13,9 @@ from psycopg2.extensions import STATUS_READY, TRANSACTION_STATUS_IDLE
 
 from trading.domain.order_lifecycle import (
     ConfirmedFill,
+    OrderLifecycleState,
     SubmissionAcknowledged,
+    SubmissionAmbiguous,
     SubmissionFailed,
 )
 from trading.domain.orders import (
@@ -77,9 +79,14 @@ def make_instruction(
     )
 
 
-def make_ack(*, venue_order_id="venue-1", observed_at=NOW + timedelta(seconds=1)):
+def make_ack(
+    *,
+    client_order_id="order-1",
+    venue_order_id="venue-1",
+    observed_at=NOW + timedelta(seconds=1),
+):
     return SubmissionAcknowledged(
-        client_order_id="order-1",
+        client_order_id=client_order_id,
         venue_order_id=venue_order_id,
         observed_at=observed_at,
     )
@@ -105,9 +112,17 @@ def make_fill(
     )
 
 
-def make_failed():
+def make_ambiguous(*, client_order_id="order-1"):
+    return SubmissionAmbiguous(
+        client_order_id=client_order_id,
+        reason="transport result is unknown",
+        observed_at=NOW + timedelta(seconds=2),
+    )
+
+
+def make_failed(*, client_order_id="order-1"):
     return SubmissionFailed(
-        client_order_id="order-1",
+        client_order_id=client_order_id,
         status=SubmissionStatus.NOT_SENT,
         retry_safety=RetrySafety.SAFE,
         reason="nothing was sent",
@@ -144,6 +159,7 @@ class MemoryConnection:
         self.database = database
         self.state = copy.deepcopy(database.state)
         self.commands = []
+        self.cursor_calls = 0
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
@@ -152,6 +168,7 @@ class MemoryConnection:
         return TRANSACTION_STATUS_IDLE
 
     def cursor(self):
+        self.cursor_calls += 1
         return MemoryCursor(self)
 
     def commit(self):
@@ -202,6 +219,14 @@ class MemoryCursor:
                     "created_at": NOW,
                 }
                 self.rows = [(position_key,)]
+            return
+        if sql.startswith("SELECT position_key FROM np.position_streams"):
+            scope = params[0]
+            self.rows = [
+                (position_key,)
+                for position_key, stream in reversed(tuple(state.streams.items()))
+                if stream["execution_scope"] == scope
+            ]
             return
         if "FROM np.position_streams" in sql:
             stream = state.streams.get(params[0])
@@ -720,6 +745,241 @@ def test_replay_not_found_scope_and_transaction_modes(journal):
         for connection in database.connections
         for command in connection.commands
     )
+
+
+def test_replay_order_returns_exact_order_from_a_complete_stream(journal):
+    database, repository = journal
+    instruction = make_instruction()
+    repository.reserve_instruction(
+        execution_scope="paper:test",
+        instruction=instruction,
+    )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-1",
+        event_id="ack-1",
+        event=make_ack(),
+    )
+
+    before = len(database.connections)
+    order = repository.replay_order(
+        execution_scope="paper:test",
+        client_order_id="order-1",
+    )
+
+    assert order.instruction == instruction
+    assert order.lifecycle.state is OrderLifecycleState.OPEN
+    assert order.venue_order_id == "venue-1"
+    assert tuple(record.event_id for record in order.events) == ("ack-1",)
+    assert len(database.connections) == before + 1
+    connection = database.connections[-1]
+    assert connection.cursor_calls == 1
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+    assert connection.closed is True
+
+
+def test_replay_order_reports_not_found_and_scope_conflict(journal):
+    _, repository = journal
+
+    with pytest.raises(JournalNotFoundError, match="order does not exist"):
+        repository.replay_order(
+            execution_scope="paper:test",
+            client_order_id="missing-order",
+        )
+
+    repository.reserve_instruction(
+        execution_scope="paper:test",
+        instruction=make_instruction(),
+    )
+    with pytest.raises(JournalConflictError) as caught:
+        repository.replay_order(
+            execution_scope="paper:other",
+            client_order_id="order-1",
+        )
+    assert caught.value.kind is JournalConflictKind.POSITION_SCOPE
+
+
+def test_replay_order_quarantines_corrupt_stream_data(journal):
+    database, repository = journal
+    repository.reserve_instruction(
+        execution_scope="paper:test",
+        instruction=make_instruction(),
+    )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-1",
+        event_id="ack-1",
+        event=make_ack(),
+    )
+    database.state.events[0]["event_payload"]["venue_order_id"] = "tampered"
+
+    with pytest.raises(JournalReplayError, match="cannot be decoded"):
+        repository.replay_order(
+            execution_scope="paper:test",
+            client_order_id="order-1",
+        )
+
+    connection = database.connections[-1]
+    assert connection.rollbacks == 1
+    assert connection.closed is True
+
+
+def test_list_unresolved_submissions_filters_states_orders_and_uses_one_snapshot(
+    journal,
+):
+    database, repository = journal
+    instructions = (
+        make_instruction(
+            client_order_id="z-pending",
+            decision_id="decision-z",
+            position_key="position-z",
+        ),
+        make_instruction(
+            client_order_id="a-reconciling",
+            decision_id="decision-a",
+            position_key="position-a",
+        ),
+        make_instruction(
+            client_order_id="m-open",
+            decision_id="decision-m",
+            position_key="position-m",
+        ),
+        make_instruction(
+            client_order_id="b-failed",
+            decision_id="decision-b",
+            position_key="position-b",
+        ),
+    )
+    for instruction in instructions:
+        repository.reserve_instruction(
+            execution_scope="paper:test",
+            instruction=instruction,
+        )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-a",
+        event_id="ambiguous-1",
+        event=make_ambiguous(client_order_id="a-reconciling"),
+    )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-m",
+        event_id="ack-1",
+        event=make_ack(client_order_id="m-open", venue_order_id="venue-m"),
+    )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-b",
+        event_id="failed-1",
+        event=make_failed(client_order_id="b-failed"),
+    )
+    repository.reserve_instruction(
+        execution_scope="paper:other",
+        instruction=make_instruction(
+            client_order_id="other-pending",
+            decision_id="decision-other",
+            position_key="position-other",
+        ),
+    )
+
+    before = len(database.connections)
+    unresolved = repository.list_unresolved_submissions(execution_scope="paper:test")
+
+    assert tuple(
+        order.instruction.order_intent.client_order_id for order in unresolved
+    ) == ("a-reconciling", "z-pending")
+    assert tuple(order.lifecycle.state for order in unresolved) == (
+        OrderLifecycleState.RECONCILING,
+        OrderLifecycleState.PENDING,
+    )
+    assert len(database.connections) == before + 1
+    connection = database.connections[-1]
+    assert connection.cursor_calls == 1
+    assert (
+        connection.commands.count(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+        )
+        == 1
+    )
+    assert (
+        sum(
+            command.startswith("SELECT position_key FROM np.position_streams")
+            for command in connection.commands
+        )
+        == 1
+    )
+    assert all("FOR UPDATE" not in command for command in connection.commands)
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+    assert connection.closed is True
+
+
+def test_list_unresolved_submissions_replays_resolved_streams_before_filtering(
+    journal,
+):
+    database, repository = journal
+    repository.reserve_instruction(
+        execution_scope="paper:test",
+        instruction=make_instruction(),
+    )
+    repository.append_event(
+        execution_scope="paper:test",
+        position_key="position-1",
+        event_id="ack-1",
+        event=make_ack(),
+    )
+    database.state.events[0]["event_payload"]["venue_order_id"] = "tampered"
+
+    with pytest.raises(JournalReplayError, match="cannot be decoded"):
+        repository.list_unresolved_submissions(execution_scope="paper:test")
+
+
+def test_list_unresolved_submissions_rejects_an_orphan_scope_stream(journal):
+    database, repository = journal
+    database.state.streams["orphan-position"] = {
+        "execution_scope": "paper:test",
+        "stream_version": 0,
+        "created_at": NOW,
+    }
+
+    with pytest.raises(JournalReplayError, match="no registered order"):
+        repository.list_unresolved_submissions(execution_scope="paper:test")
+
+
+@pytest.mark.parametrize(
+    "client_order_id",
+    (" padded ", "x" * 256, "bad\x00id", "bad\ud800id"),
+)
+def test_replay_order_rejects_unrepresentable_identity_before_connect(
+    client_order_id,
+):
+    database = MemoryDatabase()
+    repository = PostgresOrderPositionJournal(database.connect)
+
+    with pytest.raises(JournalInputError):
+        repository.replay_order(
+            execution_scope="paper:test",
+            client_order_id=client_order_id,
+        )
+
+    assert database.connections == []
+
+
+def test_read_query_failure_is_typed_and_closes_connection(journal):
+    database, repository = journal
+    database.fail_execute = True
+
+    with pytest.raises(JournalStorageError, match="order replay failed"):
+        repository.replay_order(
+            execution_scope="paper:test",
+            client_order_id="order-1",
+        )
+
+    connection = database.connections[-1]
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+    assert connection.closed is True
 
 
 @pytest.mark.parametrize(
