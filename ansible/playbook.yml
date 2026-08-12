@@ -595,23 +595,6 @@
         virtualenv: "{{ project_dir }}/venv"
       become_user: "{{ project_user }}"
       become: no
-      when: ansible_os_family != "Darwin"
-      
-    - name: Install CoreML dependencies (macOS)
-      pip:
-        requirements: "{{ project_dir }}/requirements/requirements_coreml.txt"
-        virtualenv: "{{ project_dir }}/venv"
-      become_user: "{{ project_user }}"
-      become: no
-      when: ansible_os_family == "Darwin"
-      
-    - name: Install YDF dependencies
-      pip:
-        requirements: "{{ project_dir }}/requirements/requirements_ydf.txt"
-        virtualenv: "{{ project_dir }}/venv"
-      become_user: "{{ project_user }}"
-      become: no
-      ignore_errors: yes  # In case file doesn't exist
       
     # Database Setup
     - name: Initialize PostgreSQL database (CentOS/RHEL)

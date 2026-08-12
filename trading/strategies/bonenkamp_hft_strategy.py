@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import time
+import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,12 +24,39 @@ import joblib
 import numpy as np
 import pandas as pd
 import requests
+import sklearn
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.exceptions import InconsistentVersionWarning
 from sklearn.metrics import classification_report, f1_score
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.preprocessing import StandardScaler
 
+from trading.models.artifact_manifest import (
+    ArtifactDescriptor,
+    validate_classifier_classes,
+    validate_feature_manifest,
+    write_feature_manifest,
+)
+from trading.models.feature_schema import FeatureContractError
+from trading.models.feature_schemas import (
+    BONENKAMP_FINANCIAL_9_V1,
+    BONENKAMP_SOCIAL_11_V1,
+)
 from trading.strategies.base_strategy import BaseStrategy
+
+BONENKAMP_ARTIFACT_DESCRIPTOR = ArtifactDescriptor(
+    model_kind="random-forest-classifier",
+    library="scikit-learn",
+    library_version=sklearn.__version__,
+)
+
+
+def _validate_bonenkamp_components(model: object, scaler: object) -> None:
+    if not isinstance(model, RandomForestClassifier):
+        raise FeatureContractError("Bonenkamp model must be a RandomForestClassifier")
+    if not isinstance(scaler, StandardScaler):
+        raise FeatureContractError("Bonenkamp scaler must be a StandardScaler")
 
 
 class BonenkampHFTStrategy(BaseStrategy):
@@ -64,6 +92,9 @@ class BonenkampHFTStrategy(BaseStrategy):
         self.use_social_features = use_social_features
         self.rolling_window_days = rolling_window_days
         self.model_save_path = model_save_path
+        self.feature_schema = (
+            BONENKAMP_SOCIAL_11_V1 if use_social_features else BONENKAMP_FINANCIAL_9_V1
+        )
 
         # Research parameters (exact from paper)
         self.n_estimators = 600  # Optimal number found in research
@@ -103,6 +134,8 @@ class BonenkampHFTStrategy(BaseStrategy):
         self.target_sharpe_ratio = 2.02 if use_social_features else 1.92
         self.target_annual_return = 0.149 if use_social_features else 0.051
         self.target_f1_score = 0.576 if use_social_features else 0.516
+
+        self.load_model()
 
         self.logger.info("🎯 Bonenkamp HFT Strategy initialized")
         self.logger.info(f"📊 Social features: {use_social_features}")
@@ -239,49 +272,28 @@ class BonenkampHFTStrategy(BaseStrategy):
         Prepare standardized feature vector as per research methodology.
         """
         try:
-            # Financial indicators (9 features)
             financial = self.calculate_financial_indicators(data)
-            feature_vector = [
-                financial["RSI"],
-                financial["STOCH"],
-                financial["ROC"],
-                financial["EMA"],
-                financial["MACD"],
-                financial["CCI"],
-                financial["OBV"],
-                financial["ATR"],
-                financial["WILLR"],
-            ]
-
-            # Social features (2 features, if enabled)
+            feature_values = dict(financial)
             if self.use_social_features:
-                social = self.collect_social_features()
-                feature_vector.extend(
-                    [social["TWITTER_PRICE_LAG"], social["GOOGLE_TRENDS"]]
+                feature_values.update(self.collect_social_features())
+
+            features = np.asarray(
+                [self.feature_schema.vectorize(feature_values)], dtype=np.float64
+            )
+
+            if self.is_trained or hasattr(self.feature_scaler, "mean_"):
+                self.feature_schema.validate_fitted_component(
+                    self.feature_scaler, "Bonenkamp scaler"
                 )
-
-            # Convert to numpy array and standardize
-            features = np.array(feature_vector).reshape(1, -1)
-
-            # Apply standardization if scaler is fitted
-            if hasattr(self.feature_scaler, "mean_"):
-                try:
-                    features = self.feature_scaler.transform(features)
-                except Exception as e:
-                    self.logger.warning(f"Feature scaling failed: {e}")
-
-            expected_features = 11 if self.use_social_features else 9
-            if features.shape[1] != expected_features:
-                self.logger.warning(
-                    f"Feature mismatch: got {features.shape[1]}, expected {expected_features}"
-                )
+                features = self.feature_scaler.transform(features)
 
             return features
 
         except Exception as e:
             self.logger.error(f"Error preparing features: {e}")
-            n_features = 11 if self.use_social_features else 9
-            return np.zeros((1, n_features))
+            raise FeatureContractError(
+                f"cannot produce schema {self.feature_schema.identity}"
+            ) from e
 
     def train_model(self, training_data: pd.DataFrame) -> float:
         """
@@ -311,27 +323,38 @@ class BonenkampHFTStrategy(BaseStrategy):
             X = np.array(X)
             y = np.array(y)
 
-            # Standardize features
-            self.feature_scaler.fit(X)
-            X_scaled = self.feature_scaler.transform(X)
+            candidate_scaler = clone(self.feature_scaler)
+            candidate_model = clone(self.rf_model)
+            _validate_bonenkamp_components(candidate_model, candidate_scaler)
+
+            candidate_scaler.fit(X)
+            X_scaled = candidate_scaler.transform(X)
 
             # 10-fold cross-validation (as per research)
+            cv_splitter = TimeSeriesSplit(n_splits=self.cv_folds)
             cv_scores = cross_val_score(
-                self.rf_model,
+                candidate_model,
                 X_scaled,
                 y,
-                cv=self.cv_folds,
+                cv=cv_splitter,
                 scoring="f1_weighted",
                 n_jobs=-1,
             )
 
-            # Train final model on all data
-            self.rf_model.fit(X_scaled, y)
-            self.is_trained = True
-            self.last_training_time = datetime.now()
+            candidate_model.fit(X_scaled, y)
+            self.feature_schema.validate_fitted_component(
+                candidate_model, "Bonenkamp model"
+            )
+            self.feature_schema.validate_fitted_component(
+                candidate_scaler, "Bonenkamp scaler"
+            )
+            validate_classifier_classes(candidate_model, (0, 1), "Bonenkamp model")
 
             mean_f1 = cv_scores.mean()
-            self.f1_scores.append(mean_f1)
+            if not np.isfinite(mean_f1):
+                raise FeatureContractError(
+                    "Bonenkamp cross-validation score is invalid"
+                )
 
             # Log performance comparison to research targets
             self.logger.info(
@@ -339,8 +362,13 @@ class BonenkampHFTStrategy(BaseStrategy):
             )
             self.logger.info(f"📊 CV scores: {cv_scores}")
 
-            # Save model
-            self._save_model()
+            self._save_model(candidate_model, candidate_scaler)
+
+            self.rf_model = candidate_model
+            self.feature_scaler = candidate_scaler
+            self.is_trained = True
+            self.last_training_time = datetime.now()
+            self.f1_scores.append(mean_f1)
 
             return mean_f1
 
@@ -358,27 +386,12 @@ class BonenkampHFTStrategy(BaseStrategy):
             if len(data_slice) < 20:
                 continue
 
-            # Calculate features
             financial = self.calculate_financial_indicators(data_slice)
-            feature_vector = [
-                financial["RSI"],
-                financial["STOCH"],
-                financial["ROC"],
-                financial["EMA"],
-                financial["MACD"],
-                financial["CCI"],
-                financial["OBV"],
-                financial["ATR"],
-                financial["WILLR"],
-            ]
-
+            feature_values = dict(financial)
             if self.use_social_features:
-                social = self.collect_social_features()
-                feature_vector.extend(
-                    [social["TWITTER_PRICE_LAG"], social["GOOGLE_TRENDS"]]
-                )
+                feature_values.update(self.collect_social_features())
 
-            X.append(feature_vector)
+            X.append(self.feature_schema.vectorize(feature_values))
 
             # Binary label: 1 if next price increases, 0 if decreases
             current_price = data.iloc[i]["close"]
@@ -405,9 +418,6 @@ class BonenkampHFTStrategy(BaseStrategy):
                 df = data[symbol]
                 current_price = float(df["close"].iloc[-1])
 
-                # Prepare features
-                features = self.prepare_feature_vector(df)
-
                 if not self.is_trained:
                     # Fallback to simple RSI logic if model not trained
                     financial = self.calculate_financial_indicators(df)
@@ -422,6 +432,12 @@ class BonenkampHFTStrategy(BaseStrategy):
                 else:
                     # Use trained Random Forest model
                     try:
+                        features = self.prepare_feature_vector(df)
+                        if features.shape != (1, self.feature_schema.size):
+                            raise FeatureContractError(
+                                "Bonenkamp inference vector does not match "
+                                f"{self.feature_schema.identity}"
+                            )
                         probabilities = self.rf_model.predict_proba(features)[0]
                         sell_prob, buy_prob = probabilities[0], probabilities[1]
 
@@ -465,10 +481,7 @@ class BonenkampHFTStrategy(BaseStrategy):
 
     def _get_feature_names(self) -> List[str]:
         """Get feature names for interpretability."""
-        names = ["RSI", "STOCH", "ROC", "EMA", "MACD", "CCI", "OBV", "ATR", "WILLR"]
-        if self.use_social_features:
-            names.extend(["TWITTER_PRICE_LAG", "GOOGLE_TRENDS"])
-        return names
+        return list(self.feature_schema.names)
 
     def calculate_position_size(
         self,
@@ -665,35 +678,67 @@ class BonenkampHFTStrategy(BaseStrategy):
         time_since_training = datetime.now() - self.last_training_time
         return time_since_training.total_seconds() > (24 * 3600)  # 24 hours
 
-    def _save_model(self):
+    def _save_model(self, model=None, scaler=None):
         """Save trained model and scaler."""
-        try:
-            model_file = os.path.join(self.model_save_path, "bonenkamp_rf_model.pkl")
-            scaler_file = os.path.join(self.model_save_path, "bonenkamp_scaler.pkl")
+        target_model = self.rf_model if model is None else model
+        target_scaler = self.feature_scaler if scaler is None else scaler
+        _validate_bonenkamp_components(target_model, target_scaler)
+        self.feature_schema.validate_fitted_component(target_model, "Bonenkamp model")
+        self.feature_schema.validate_fitted_component(target_scaler, "Bonenkamp scaler")
+        validate_classifier_classes(target_model, (0, 1), "Bonenkamp model")
 
-            joblib.dump(self.rf_model, model_file)
-            joblib.dump(self.feature_scaler, scaler_file)
+        model_file = os.path.join(self.model_save_path, "bonenkamp_rf_model.pkl")
+        scaler_file = os.path.join(self.model_save_path, "bonenkamp_scaler.pkl")
+        manifest_file = os.path.join(self.model_save_path, "feature_manifest.json")
+        joblib.dump(target_model, model_file)
+        joblib.dump(target_scaler, scaler_file)
+        write_feature_manifest(
+            manifest_file,
+            self.feature_schema,
+            BONENKAMP_ARTIFACT_DESCRIPTOR,
+            {"model": model_file, "scaler": scaler_file},
+        )
 
-            self.logger.info(f"💾 Model saved to {model_file}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving model: {e}")
+        self.logger.info(f"💾 Model saved to {model_file}")
 
     def load_model(self) -> bool:
         """Load previously trained model."""
         try:
             model_file = os.path.join(self.model_save_path, "bonenkamp_rf_model.pkl")
             scaler_file = os.path.join(self.model_save_path, "bonenkamp_scaler.pkl")
+            manifest_file = os.path.join(self.model_save_path, "feature_manifest.json")
 
             if os.path.exists(model_file) and os.path.exists(scaler_file):
-                self.rf_model = joblib.load(model_file)
-                self.feature_scaler = joblib.load(scaler_file)
+                components = {"model": model_file, "scaler": scaler_file}
+                validate_feature_manifest(
+                    manifest_file,
+                    self.feature_schema,
+                    BONENKAMP_ARTIFACT_DESCRIPTOR,
+                    components,
+                )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", InconsistentVersionWarning)
+                    loaded_model = joblib.load(model_file)
+                    loaded_scaler = joblib.load(scaler_file)
+                _validate_bonenkamp_components(loaded_model, loaded_scaler)
+                self.feature_schema.validate_fitted_component(
+                    loaded_model, "Bonenkamp model"
+                )
+                self.feature_schema.validate_fitted_component(
+                    loaded_scaler, "Bonenkamp scaler"
+                )
+                validate_classifier_classes(loaded_model, (0, 1), "Bonenkamp model")
+                self.rf_model = loaded_model
+                self.feature_scaler = loaded_scaler
                 self.is_trained = True
                 self.logger.info(f"📚 Model loaded from {model_file}")
                 return True
 
             return False
 
+        except FeatureContractError as e:
+            self.logger.warning(f"Incompatible Bonenkamp model ignored: {e}")
+            return False
         except Exception as e:
             self.logger.error(f"Error loading model: {e}")
             return False

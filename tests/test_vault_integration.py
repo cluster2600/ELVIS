@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def test_vault_fallback():
+def check_vault_fallback():
     """Test that the system works without Vault (fallback mode)"""
     print("🧪 Testing Vault Fallback Mode")
     print("=" * 40)
@@ -68,7 +68,7 @@ def test_vault_fallback():
         os.environ["VAULT_ENABLED"] = "true"
 
 
-def test_vault_client():
+def check_vault_client():
     """Test Vault client initialization"""
     print("\n🧪 Testing Vault Client")
     print("=" * 30)
@@ -101,7 +101,7 @@ def test_vault_client():
         return False
 
 
-def test_enhanced_secrets_manager():
+def check_enhanced_secrets_manager():
     """Test enhanced secrets manager"""
     print("\n🧪 Testing Enhanced Secrets Manager")
     print("=" * 40)
@@ -142,7 +142,7 @@ def test_enhanced_secrets_manager():
         return False
 
 
-def test_database_integration():
+def check_database_integration():
     """Test database integration with new secrets manager"""
     print("\n🧪 Testing Database Integration")
     print("=" * 35)
@@ -185,7 +185,7 @@ def test_database_integration():
             os.environ.pop(key, None)
 
 
-def test_imports():
+def check_imports():
     """Test that all modules can be imported"""
     print("\n🧪 Testing Module Imports")
     print("=" * 30)
@@ -215,11 +215,11 @@ def main():
     print("=" * 50)
 
     tests = [
-        ("Module Imports", test_imports),
-        ("Vault Fallback Mode", test_vault_fallback),
-        ("Vault Client", test_vault_client),
-        ("Enhanced Secrets Manager", test_enhanced_secrets_manager),
-        ("Database Integration", test_database_integration),
+        ("Module Imports", check_imports),
+        ("Vault Fallback Mode", check_vault_fallback),
+        ("Vault Client", check_vault_client),
+        ("Enhanced Secrets Manager", check_enhanced_secrets_manager),
+        ("Database Integration", check_database_integration),
     ]
 
     results = []

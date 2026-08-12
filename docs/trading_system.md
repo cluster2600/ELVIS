@@ -30,7 +30,7 @@ graph TB
     subgraph "Signal Generation"
         DataFeed[Market Data / PriceFetcher]
         Features[Feature Dict]
-        Models[YDF / CoreML / trade-learned / RL / research / Bonenkamp-HFT]
+        Models[technical / RL / research / Bonenkamp-HFT / optional MLX]
         Signal[signal, confidence]
     end
 
@@ -128,11 +128,7 @@ with technical analysis into a weighted vote.
 classDiagram
     class EnsembleStrategy {
         +symbols: List~str~
-        +REQUIRED_FEATURES: List~str~  20 features
         +CLASSES: List~str~  BUY, HOLD, SELL
-        +ydf_model
-        +nn_model  CoreML
-        +trade_learned_model  sklearn via joblib
         +drl_agent
         +research_strategy
         +rl_strategy
@@ -155,16 +151,16 @@ classDiagram
 
 How it actually works:
 
-- **Model sources (all optional).** On construction it tries to load a YDF
-  Random Forest (`models/model_rf.ydf` native, else a TensorFlow-DF export at
-  `models/model_rf_tf`), a CoreML neural net (`models/NNModel.mlpackage`), and a
-  trade-learned scikit-learn classifier persisted with `joblib`
-  (`training/models/trade_learned_model.pkl`). It also optionally wires in a DRL
-  agent, a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an
-  MLX LLM endpoint (`MLX_URL`). Any source that fails to import or load is simply
-  skipped — `ydf`, `tensorflow`, and `coremltools` have no Python 3.14 wheels and
-  are guarded behind `try/except`, so on 3.14 the strategy runs on technical
-  analysis plus whichever pure-Python sources are present.
+- **Model sources (all optional).** On construction it can wire in a DRL agent,
+  a research strategy, an RL strategy, a Bonenkamp HFT strategy, and an MLX LLM
+  endpoint (`MLX_URL`). The former YDF, CoreML, and trade-learned branches were
+  retired after audit: none had a causally valid, runtime-compatible production
+  artefact. The migration ledger records the evidence and acceptance tests.
+- **Research and Bonenkamp artefacts are contract-gated.** Their separate 9- and
+  11-feature schemas define order and preprocessing. A model/scaler pair is
+  activated only when its sibling manifest, hashes, runtime version, concrete
+  types, dimensions, and binary classes all match; otherwise the strategy keeps
+  its documented untrained fallback and never calls the incompatible model.
 - **`generate_signal(symbol, market_data)`** is the entry point the main loop
   calls. It builds a feature dict, gathers weighted predictions from each
   available source (technical, research, RL, Bonenkamp-HFT, model ensemble),
@@ -347,7 +343,11 @@ Key behaviours:
 - **Leverage safety (Issue #14).** The default leverage is `3` (from
   `config.config.TRADING_CONFIG["DEFAULT_LEVERAGE"]`, overridable by the
   `DEFAULT_LEVERAGE` env var). `validate_leverage_config` rejects leverage above
-  10x unless `OVERRIDE_HIGH_LEVERAGE=true` is set.
+  10x unless `OVERRIDE_HIGH_LEVERAGE=true` is set. Bootstrap sources this field
+  explicitly from the canonical mapping, requires the key, and passes the same
+  configured value to its primary and paper-fallback executors; there is no
+  hidden 50x fallback. Other legacy bootstrap settings are unchanged in this
+  slice.
 - **Rate limiting (Issue #12).** Live API calls are wrapped with `binance_retry`
   (exponential back-off) from `utils.binance_rate_limiter`.
 - **Paper balance.** `_calculate_paper_balance()` computes equity as a single
@@ -407,7 +407,7 @@ were previously split across `config/config.py` and `trading/config/*.yaml`.
 # trading_config.yaml
 trading:
   symbol: BTCUSDT
-  mode: paper                # paper | live
+  mode: paper                # only executable mode; live is rejected before bootstrap
   default_leverage: 3        # env DEFAULT_LEVERAGE overrides; >10x needs OVERRIDE_HIGH_LEVERAGE=true
   strategy: ensemble
 

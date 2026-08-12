@@ -1,7 +1,8 @@
-# ML-legacy training container — Python 3.10
+# ML training container — Python 3.10
 #
-# Why this exists: the live bot runs on Python 3.14, but several training
-# dependencies (tensorflow/keras, ydf, coremltools) have no 3.14 wheels.
+# Why this exists: the unified trainer requires PyTorch, while its optional
+# TensorFlow/Keras path remains isolated from the Python 3.14 bot runtime. This
+# generic image uses the CPU PyTorch wheel; GPU training needs a dedicated base.
 # This image isolates that stack on 3.10 and shares ONLY the models/ volume
 # with the bot container — the coupling is saved model files, not imports,
 # so the two Python versions never mix.
@@ -31,13 +32,11 @@ WORKDIR /app
 
 # Core scientific deps resolve for 3.10 (pyproject requires-python >=3.10),
 # then the 3.10-only ML stack the 3.14 bot image cannot carry.
-COPY requirements.txt requirements/ /app/requirements/
-RUN pip install --no-cache-dir -r /app/requirements/requirements.txt \
-    && pip install --no-cache-dir \
-        tensorflow \
-        ydf \
-        -r /app/requirements/requirements_ydf.txt \
-        -r /app/requirements/requirements_coreml.txt
+COPY requirements.txt /app/requirements/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements/requirements.txt
+
+COPY requirements/requirements_ml310.txt /app/requirements/requirements_ml310.txt
+RUN pip install --no-cache-dir -r /app/requirements/requirements_ml310.txt
 
 COPY . /app
 

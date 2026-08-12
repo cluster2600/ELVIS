@@ -20,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def test_database_integration():
+def check_database_integration():
     """Test complete database integration."""
 
     logger.info("=== DATABASE INTEGRATION TEST ===")
@@ -61,7 +61,7 @@ def test_database_integration():
     try:
         pnl = (105500.0 - 105000.0) * 0.001  # $0.50 profit
         record_trade("BTCUSDT", "SELL", 105500.0, 0.001, pnl, 0.42)
-        close_open_position("BTCUSDT")
+        close_open_position("BTCUSDT", "BUY")
         logger.info(f"✅ SELL trade recorded with PnL: ${pnl:.2f}")
     except Exception as e:
         logger.error(f"❌ SELL trade recording failed: {e}")
@@ -81,7 +81,7 @@ def test_database_integration():
 
 
 if __name__ == "__main__":
-    success = test_database_integration()
+    success = check_database_integration()
     if success:
         logger.info("🎉 Database integration is fully operational!")
     else:

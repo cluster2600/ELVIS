@@ -132,6 +132,133 @@ class TestBinanceExecutor(unittest.TestCase):
         self.assertEqual(order["side"], "SELL")
         self.assertTrue(order["orderId"].startswith("MOCK_"))
 
+    def test_typed_paper_order_echoes_client_identity_and_uses_unique_ids(self):
+        """Correlated calls echo the client ID and never reuse a clock ID."""
+        with (
+            patch(
+                "trading.execution.binance_executor.get_open_positions", return_value=[]
+            ),
+            patch.object(
+                self.executor, "_calculate_paper_balance", return_value={"USDT": 100.0}
+            ),
+            patch("trading.execution.binance_executor.time.time", return_value=1.0),
+        ):
+            first = self.executor.execute_buy(
+                "BTCUSDT",
+                0.1,
+                50000.0,
+                client_order_id="ELV-first",
+            )
+            second = self.executor.execute_buy(
+                "BTCUSDT",
+                0.1,
+                50000.0,
+                client_order_id="ELV-second",
+            )
+
+        self.assertEqual(first["clientOrderId"], "ELV-first")
+        self.assertEqual(second["clientOrderId"], "ELV-second")
+        self.assertNotEqual(first["orderId"], second["orderId"])
+        self.assertLessEqual(len(first["orderId"]), 255)
+
+    def test_typed_sell_echoes_client_identity(self):
+        with (
+            patch(
+                "trading.execution.binance_executor.get_open_positions", return_value=[]
+            ),
+            patch.object(
+                self.executor, "_calculate_paper_balance", return_value={"USDT": 100.0}
+            ),
+        ):
+            order = self.executor.execute_sell(
+                "BTCUSDT",
+                0.1,
+                50000.0,
+                client_order_id="ELV-sell",
+            )
+
+        self.assertEqual(order["side"], "SELL")
+        self.assertEqual(order["clientOrderId"], "ELV-sell")
+
+    def test_legacy_paper_order_without_client_identity_remains_compatible(self):
+        order = self.executor.execute_buy("BTCUSDT", 0.1, 50000.0)
+
+        self.assertEqual(order["status"], "FILLED")
+        self.assertNotIn("clientOrderId", order)
+
+    def test_invalid_client_identity_is_blocked_before_any_effect(self):
+        with (
+            patch.object(self.executor.fee_calculator, "calculate_trading_fee") as fee,
+            patch("trading.execution.binance_executor.get_open_positions") as positions,
+            patch("trading.execution.binance_executor.record_trade") as record,
+            patch("trading.execution.binance_executor.uuid.uuid4") as new_uuid,
+        ):
+            result = self.executor.execute_buy(
+                "BTCUSDT",
+                0.1,
+                50000.0,
+                client_order_id="bad\x00id",
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        fee.assert_not_called()
+        positions.assert_not_called()
+        record.assert_not_called()
+        new_uuid.assert_not_called()
+
+    def test_every_unrepresentable_client_identity_is_blocked_before_effect(self):
+        invalid_client_ids = [
+            True,
+            1,
+            "",
+            " surrounded ",
+            "x" * 256,
+            "bad\x00id",
+            "bad\ud800id",
+        ]
+        with (
+            patch.object(self.executor.fee_calculator, "calculate_trading_fee") as fee,
+            patch("trading.execution.binance_executor.get_open_positions") as positions,
+            patch("trading.execution.binance_executor.record_trade") as record,
+            patch("trading.execution.binance_executor.uuid.uuid4") as new_uuid,
+        ):
+            for client_order_id in invalid_client_ids:
+                with self.subTest(client_order_id=repr(client_order_id)):
+                    result = self.executor.execute_buy(
+                        "BTCUSDT",
+                        0.1,
+                        50000.0,
+                        client_order_id=client_order_id,
+                    )
+                    self.assertEqual(result["status"], "BLOCKED")
+
+        fee.assert_not_called()
+        positions.assert_not_called()
+        record.assert_not_called()
+        new_uuid.assert_not_called()
+
+    def test_mock_id_failure_happens_before_any_effect(self):
+        with (
+            patch.object(self.executor.fee_calculator, "calculate_trading_fee") as fee,
+            patch("trading.execution.binance_executor.get_open_positions") as positions,
+            patch("trading.execution.binance_executor.record_trade") as record,
+            patch(
+                "trading.execution.binance_executor.uuid.uuid4",
+                side_effect=RuntimeError("entropy unavailable"),
+            ),
+        ):
+            result = self.executor.execute_buy(
+                "BTCUSDT",
+                0.1,
+                50000.0,
+                client_order_id="ELV-valid",
+            )
+
+        self.assertEqual(result, {})
+        fee.assert_not_called()
+        positions.assert_not_called()
+        record.assert_not_called()
+
     def test_execute_stop_loss(self):
         """
         With no open position, execute_stop_loss reports NO_POSITION and does

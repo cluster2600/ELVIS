@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 
@@ -8,11 +9,39 @@ import joblib
 import numpy as np
 import pandas as pd
 import requests
+import sklearn
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.exceptions import InconsistentVersionWarning
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.preprocessing import StandardScaler
 
+from trading.models.artifact_manifest import (
+    ArtifactDescriptor,
+    validate_classifier_classes,
+    validate_feature_manifest,
+    write_feature_manifest,
+)
+from trading.models.feature_schema import FeatureContractError
+from trading.models.feature_schemas import (
+    RESEARCH_FINANCIAL_9_V1,
+    RESEARCH_SOCIAL_11_V1,
+)
 from trading.strategies.base_strategy import BaseStrategy
+
+RESEARCH_ARTIFACT_DESCRIPTOR = ArtifactDescriptor(
+    model_kind="random-forest-classifier",
+    library="scikit-learn",
+    library_version=sklearn.__version__,
+)
+
+
+def _validate_research_components(model: object, scaler: object) -> None:
+    if not isinstance(model, RandomForestClassifier):
+        raise FeatureContractError("research model must be a RandomForestClassifier")
+    if not isinstance(scaler, StandardScaler):
+        raise FeatureContractError("research scaler must be a StandardScaler")
+
 
 # Optional social-data dependencies. These libraries have no Python 3.14 wheels
 # and are not installed in CI, so their imports are guarded: the collectors below
@@ -66,6 +95,9 @@ class ResearchBasedStrategy(BaseStrategy):
         self.social_data_enabled = social_data_enabled
         self.enable_rolling_training = enable_rolling_training
         self.model_save_path = model_save_path
+        self.feature_schema = (
+            RESEARCH_SOCIAL_11_V1 if social_data_enabled else RESEARCH_FINANCIAL_9_V1
+        )
 
         # Research-specific parameters (exact from paper)
         self.n_estimators = 600  # Exactly as specified in research
@@ -87,7 +119,7 @@ class ResearchBasedStrategy(BaseStrategy):
         self.is_trained = False
         self.last_retrain_time = None
         self.training_data_buffer = []
-        self.feature_names = []
+        self.feature_names = list(self.feature_schema.names)
 
         # Social data collectors
         self.twitter_collector = (
@@ -315,91 +347,21 @@ class ResearchBasedStrategy(BaseStrategy):
             # Collect social features
             social_features = self.collect_social_features()
 
-            # Combine all features in the order used in research
-            feature_vector = [
-                financial_indicators["RSI"],
-                financial_indicators["STOCH"],
-                financial_indicators["ROC"],
-                financial_indicators["EMA"],
-                financial_indicators["MACD"],
-                financial_indicators["CCI"],
-                financial_indicators["OBV"],
-                financial_indicators["ATR"],
-                financial_indicators["WILLR"],
-            ]
-
-            # Add social features if enabled
+            feature_values = dict(financial_indicators)
             if self.social_data_enabled:
-                feature_vector.extend(
-                    [
-                        social_features["TWITTER_PRICE_SENTIMENT"],
-                        social_features["GOOGLE_TRENDS_BITCOIN"],
-                    ]
+                feature_values.update(social_features)
+
+            features = np.asarray(
+                [self.feature_schema.vectorize(feature_values)], dtype=np.float64
+            )
+
+            # A trained strategy must never bypass preprocessing.  An unfitted
+            # strategy may still expose the raw vector to diagnostics/tests.
+            if self.is_trained or hasattr(self.feature_scaler, "mean_"):
+                self.feature_schema.validate_fitted_component(
+                    self.feature_scaler, "research scaler"
                 )
-
-            # Store feature names for interpretability
-            self.feature_names = [
-                "RSI",
-                "STOCH",
-                "ROC",
-                "EMA",
-                "MACD",
-                "CCI",
-                "OBV",
-                "ATR",
-                "WILLR",
-            ]
-            if self.social_data_enabled:
-                self.feature_names.extend(
-                    ["TWITTER_PRICE_SENTIMENT", "GOOGLE_TRENDS_BITCOIN"]
-                )
-
-            # Convert to numpy array
-            features = np.array(feature_vector).reshape(1, -1)
-
-            # Check feature consistency before scaling
-            expected_features = 11 if self.social_data_enabled else 9
-            actual_features = features.shape[1]
-
-            if actual_features != expected_features:
-                self.logger.warning(
-                    f"Feature mismatch: got {actual_features}, expected {expected_features}"
-                )
-                # Pad or truncate features to match expected size
-                if actual_features < expected_features:
-                    # Pad with zeros (missing social features)
-                    padding = np.zeros((1, expected_features - actual_features))
-                    features = np.concatenate([features, padding], axis=1)
-                    self.logger.info(
-                        f"Padded features from {actual_features} to {expected_features}"
-                    )
-                else:
-                    # Truncate extra features
-                    features = features[:, :expected_features]
-                    self.logger.info(
-                        f"Truncated features from {actual_features} to {expected_features}"
-                    )
-
-            # Apply standardization if scaler is fitted
-            if hasattr(self.feature_scaler, "mean_"):
-                try:
-                    # Check if scaler was trained with different number of features
-                    if hasattr(self.feature_scaler, "n_features_in_"):
-                        scaler_features = self.feature_scaler.n_features_in_
-                        if scaler_features != features.shape[1]:
-                            self.logger.warning(
-                                f"Scaler feature mismatch: scaler trained on {scaler_features}, got {features.shape[1]}"
-                            )
-                            # Skip scaling if mismatch
-                            self.logger.info("Skipping feature scaling due to mismatch")
-                        else:
-                            features = self.feature_scaler.transform(features)
-                    else:
-                        features = self.feature_scaler.transform(features)
-                except Exception as scale_error:
-                    self.logger.warning(
-                        f"Feature scaling failed: {scale_error}, using unscaled features"
-                    )
+                features = self.feature_scaler.transform(features)
 
             self.logger.debug(
                 f"🔢 Prepared {features.shape[1]} features for prediction"
@@ -408,9 +370,9 @@ class ResearchBasedStrategy(BaseStrategy):
 
         except Exception as e:
             self.logger.error(f"Error preparing features: {e}")
-            # Return default feature vector
-            n_features = 11 if self.social_data_enabled else 9
-            return np.zeros((1, n_features))
+            raise FeatureContractError(
+                f"cannot produce schema {self.feature_schema.identity}"
+            ) from e
 
     def train_model(self, training_data: pd.DataFrame) -> float:
         """
@@ -444,27 +406,11 @@ class ResearchBasedStrategy(BaseStrategy):
                 financial_indicators = self.calculate_financial_indicators(data_slice)
                 social_features = self.collect_social_features()
 
-                feature_vector = [
-                    financial_indicators["RSI"],
-                    financial_indicators["STOCH"],
-                    financial_indicators["ROC"],
-                    financial_indicators["EMA"],
-                    financial_indicators["MACD"],
-                    financial_indicators["CCI"],
-                    financial_indicators["OBV"],
-                    financial_indicators["ATR"],
-                    financial_indicators["WILLR"],
-                ]
-
+                feature_values = dict(financial_indicators)
                 if self.social_data_enabled:
-                    feature_vector.extend(
-                        [
-                            social_features["TWITTER_PRICE_SENTIMENT"],
-                            social_features["GOOGLE_TRENDS_BITCOIN"],
-                        ]
-                    )
+                    feature_values.update(social_features)
 
-                X.append(feature_vector)
+                X.append(self.feature_schema.vectorize(feature_values))
 
                 # Create binary label: 1 if next price is higher (BUY), 0 if lower (SELL)
                 current_price = training_data.iloc[i]["close"]
@@ -486,9 +432,12 @@ class ResearchBasedStrategy(BaseStrategy):
                 f"📈 Label distribution: BUY={np.sum(y)}, SELL={len(y)-np.sum(y)}"
             )
 
-            # Fit the feature scaler
-            self.feature_scaler.fit(X)
-            X_scaled = self.feature_scaler.transform(X)
+            candidate_scaler = clone(self.feature_scaler)
+            candidate_model = clone(self.rf_model)
+            _validate_research_components(candidate_model, candidate_scaler)
+
+            candidate_scaler.fit(X)
+            X_scaled = candidate_scaler.transform(X)
 
             # 10-fold cross-validation as specified in research.
             # Financial data is ordered in time, so a time-series-aware split is
@@ -496,22 +445,37 @@ class ResearchBasedStrategy(BaseStrategy):
             # (Stratified)KFold that cross_val_score picks for an int cv value.
             cv_splitter = TimeSeriesSplit(n_splits=self.cv_folds)
             cv_scores = cross_val_score(
-                self.rf_model, X_scaled, y, cv=cv_splitter, scoring="f1", n_jobs=-1
+                candidate_model,
+                X_scaled,
+                y,
+                cv=cv_splitter,
+                scoring="f1",
+                n_jobs=-1,
             )
 
-            # Train the final model on all data
-            self.rf_model.fit(X_scaled, y)
-            self.is_trained = True
-            self.last_retrain_time = datetime.now()
+            candidate_model.fit(X_scaled, y)
+            self.feature_schema.validate_fitted_component(
+                candidate_model, "research model"
+            )
+            self.feature_schema.validate_fitted_component(
+                candidate_scaler, "research scaler"
+            )
+            validate_classifier_classes(candidate_model, (0, 1), "research model")
 
             mean_cv_score = cv_scores.mean()
+            if not np.isfinite(mean_cv_score):
+                raise FeatureContractError("research cross-validation score is invalid")
             self.logger.info(
                 f"🎯 Model training complete: F1-score={mean_cv_score:.3f} (target: 0.576)"
             )
             self.logger.info(f"📝 CV scores: {cv_scores}")
 
-            # Save the trained model
-            self.save_model()
+            self.save_model(candidate_model, candidate_scaler)
+
+            self.rf_model = candidate_model
+            self.feature_scaler = candidate_scaler
+            self.is_trained = True
+            self.last_retrain_time = datetime.now()
 
             return mean_cv_score
 
@@ -559,8 +523,6 @@ class ResearchBasedStrategy(BaseStrategy):
                         signals[symbol] = {"signal": signal, "confidence": confidence}
                         continue
 
-                features = self.prepare_features(df)
-
                 if not self.is_trained:
                     self.logger.warning(
                         "Model not trained, using default signal logic."
@@ -578,24 +540,15 @@ class ResearchBasedStrategy(BaseStrategy):
                         signal, confidence = ("SELL", 0.5) if rsi < 50 else ("BUY", 0.5)
                 else:
                     try:
+                        features = self.prepare_features(df)
                         # Ensure features have the shape used at training time.
                         # This respects the social flag: 11 features when social
                         # data is enabled (9 financial + 2 social), else 9.
-                        expected_features = 11 if self.social_data_enabled else 9
-                        if features.shape[1] != expected_features:
-                            self.logger.warning(
-                                f"Feature shape mismatch: got {features.shape[1]}, "
-                                f"expected {expected_features}. Fixing..."
+                        if features.shape != (1, self.feature_schema.size):
+                            raise FeatureContractError(
+                                "research inference vector does not match "
+                                f"{self.feature_schema.identity}"
                             )
-                            if features.shape[1] < expected_features:
-                                # Pad with zeros
-                                padding = np.zeros(
-                                    (1, expected_features - features.shape[1])
-                                )
-                                features = np.concatenate([features, padding], axis=1)
-                            else:
-                                # Truncate to expected size
-                                features = features[:, :expected_features]
 
                         probabilities = self.rf_model.predict_proba(features)[0]
                         sell_prob, buy_prob = probabilities[0], probabilities[1]
@@ -708,29 +661,58 @@ class ResearchBasedStrategy(BaseStrategy):
         time_since_retrain = datetime.now() - self.last_retrain_time
         return time_since_retrain.total_seconds() > (24 * 3600)
 
-    def save_model(self):
+    def save_model(self, model=None, scaler=None):
         """Save the trained model and scaler."""
-        try:
-            model_path = os.path.join(self.model_save_path, "research_rf_model.pkl")
-            scaler_path = os.path.join(self.model_save_path, "research_scaler.pkl")
+        target_model = self.rf_model if model is None else model
+        target_scaler = self.feature_scaler if scaler is None else scaler
+        _validate_research_components(target_model, target_scaler)
+        self.feature_schema.validate_fitted_component(target_model, "research model")
+        self.feature_schema.validate_fitted_component(target_scaler, "research scaler")
+        validate_classifier_classes(target_model, (0, 1), "research model")
 
-            joblib.dump(self.rf_model, model_path)
-            joblib.dump(self.feature_scaler, scaler_path)
+        model_path = os.path.join(self.model_save_path, "research_rf_model.pkl")
+        scaler_path = os.path.join(self.model_save_path, "research_scaler.pkl")
+        manifest_path = os.path.join(self.model_save_path, "feature_manifest.json")
+        joblib.dump(target_model, model_path)
+        joblib.dump(target_scaler, scaler_path)
+        write_feature_manifest(
+            manifest_path,
+            self.feature_schema,
+            RESEARCH_ARTIFACT_DESCRIPTOR,
+            {"model": model_path, "scaler": scaler_path},
+        )
 
-            self.logger.info(f"💾 Model saved to {model_path}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving model: {e}")
+        self.logger.info(f"💾 Model saved to {model_path}")
 
     def load_model(self) -> bool:
         """Load the trained model and scaler."""
         try:
             model_path = os.path.join(self.model_save_path, "research_rf_model.pkl")
             scaler_path = os.path.join(self.model_save_path, "research_scaler.pkl")
+            manifest_path = os.path.join(self.model_save_path, "feature_manifest.json")
 
             if os.path.exists(model_path) and os.path.exists(scaler_path):
-                self.rf_model = joblib.load(model_path)
-                self.feature_scaler = joblib.load(scaler_path)
+                components = {"model": model_path, "scaler": scaler_path}
+                validate_feature_manifest(
+                    manifest_path,
+                    self.feature_schema,
+                    RESEARCH_ARTIFACT_DESCRIPTOR,
+                    components,
+                )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", InconsistentVersionWarning)
+                    loaded_model = joblib.load(model_path)
+                    loaded_scaler = joblib.load(scaler_path)
+                _validate_research_components(loaded_model, loaded_scaler)
+                self.feature_schema.validate_fitted_component(
+                    loaded_model, "research model"
+                )
+                self.feature_schema.validate_fitted_component(
+                    loaded_scaler, "research scaler"
+                )
+                validate_classifier_classes(loaded_model, (0, 1), "research model")
+                self.rf_model = loaded_model
+                self.feature_scaler = loaded_scaler
                 self.is_trained = True
                 self.logger.info(f"📚 Model loaded from {model_path}")
                 return True
@@ -738,6 +720,9 @@ class ResearchBasedStrategy(BaseStrategy):
                 self.logger.info("No saved model found, will train from scratch")
                 return False
 
+        except FeatureContractError as e:
+            self.logger.warning(f"Incompatible research model ignored: {e}")
+            return False
         except Exception as e:
             self.logger.error(f"Error loading model: {e}")
             return False

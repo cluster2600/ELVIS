@@ -53,6 +53,16 @@ def test_init_db_creates_session_resets_table():
     conn.commit.assert_called()
 
 
+def test_init_db_preserves_existing_open_positions():
+    conn, cursor = _fake_conn()
+    with patch.object(paper_trade_db, "get_conn", return_value=conn):
+        paper_trade_db.init_db()
+
+    sql = _executed_sql(cursor)
+    assert any("CREATE TABLE IF NOT EXISTS np.open_positions" in s for s in sql), sql
+    assert not any("DROP TABLE" in s and "open_positions" in s for s in sql), sql
+
+
 def test_init_db_with_balances_creates_session_resets_table():
     conn, cursor = _fake_conn()
     with patch.object(paper_trade_db, "get_conn", return_value=conn):

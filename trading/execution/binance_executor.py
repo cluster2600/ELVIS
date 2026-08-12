@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import uuid
 
 from binance.exceptions import BinanceAPIException
 
@@ -338,19 +339,63 @@ class BinanceExecutor(BaseExecutor):
             self.logger.error(f"Error setting leverage for {symbol}: {e}")
 
     def execute_buy(
-        self, symbol: str, quantity: float, price: float = None, **kwargs
+        self,
+        symbol: str,
+        quantity: float,
+        price: float = None,
+        *,
+        client_order_id: str | None = None,
+        **kwargs,
     ) -> Dict[str, Any]:
-        return self._execute_paper_trade(symbol, "BUY", quantity, price)
+        return self._execute_paper_trade(
+            symbol,
+            "BUY",
+            quantity,
+            price,
+            client_order_id=client_order_id,
+        )
 
     def execute_sell(
-        self, symbol: str, quantity: float, price: float = None, **kwargs
+        self,
+        symbol: str,
+        quantity: float,
+        price: float = None,
+        *,
+        client_order_id: str | None = None,
+        **kwargs,
     ) -> Dict[str, Any]:
-        return self._execute_paper_trade(symbol, "SELL", quantity, price)
+        return self._execute_paper_trade(
+            symbol,
+            "SELL",
+            quantity,
+            price,
+            client_order_id=client_order_id,
+        )
 
     def _execute_paper_trade(
-        self, symbol: str, side: str, quantity: float, price: float = None
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float = None,
+        *,
+        client_order_id: str | None = None,
     ) -> Dict[str, Any]:
         try:
+            if client_order_id is not None and not self._is_valid_client_order_id(
+                client_order_id
+            ):
+                self.logger.error(
+                    "[PAPER TRADE] BLOCKED %s %s: invalid client order ID",
+                    side,
+                    symbol,
+                )
+                return {
+                    "status": "BLOCKED",
+                    "reason": "Invalid client order ID",
+                }
+            mock_order_id = f"MOCK_{uuid.uuid4().hex}"
+
             if price is None or price <= 0:
                 # No valid caller-supplied price: refuse rather than fill at
                 # the hardcoded mock (mock fills once booked entries at
@@ -501,7 +546,7 @@ class BinanceExecutor(BaseExecutor):
             if should_execute:
                 mock_order = {
                     "symbol": symbol,
-                    "orderId": f"MOCK_{symbol}_{int(time.time())}",
+                    "orderId": mock_order_id,
                     "side": side,
                     "quantity": str(quantity),
                     "price": str(current_price),
@@ -509,6 +554,8 @@ class BinanceExecutor(BaseExecutor):
                     "type": "LIMIT" if price else "MARKET",
                     "leverage": self.default_leverage,
                 }
+                if client_order_id is not None:
+                    mock_order["clientOrderId"] = client_order_id
                 self.logger.info(
                     f"[PAPER TRADE] {side} order completed successfully: {mock_order} | PnL: ${pnl:.2f}"
                 )
@@ -524,6 +571,17 @@ class BinanceExecutor(BaseExecutor):
                 f"[PAPER TRADE] Error executing {side} order: {e}", exc_info=True
             )
             return {}
+
+    @staticmethod
+    def _is_valid_client_order_id(value: object) -> bool:
+        return (
+            type(value) is str
+            and bool(value)
+            and value == value.strip()
+            and len(value) <= 255
+            and "\x00" not in value
+            and not any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+        )
 
     def _calculate_position_pnl(
         self, symbol: str, side: str, current_price: float, quantity: float

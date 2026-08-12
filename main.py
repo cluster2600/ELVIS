@@ -2,13 +2,16 @@
 # run before any ML import — do not let isort reorder this file)
 import argparse
 import logging
+import math
 import threading
 import signal
 import sys
 import time
 import curses
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 
 # ponytail: torch, sklearn and skimage each bundle their own libomp.dylib; loading
 # them together segfaults during RL training on macOS. Must be set before any
@@ -37,6 +40,13 @@ from utils.console_dashboard import ConsoleDashboard
 from trading.utils.trade_history_api import app as trade_history_app
 from trading.cooldown.trade_cooldown_manager import TradeCooldownManager
 from trading.analysis.technical_indicators import add_technical_indicators
+from trading.application.order_service import OrderService
+from trading.application.rsi_gate_policy import RsiGatePolicy
+from trading.application.signal_policy import SignalPolicyPipeline
+from trading.data.market_frames import enrich_symbol_frames
+from trading.domain.orders import OrderIntent, OrderSide, OrderType, SubmissionReport
+from trading.domain.signals import Signal, SignalAction
+from trading.execution.legacy_paper_adapter import LegacyPaperExecutionAdapter
 import pandas as pd
 
 
@@ -243,8 +253,9 @@ def _close_position_by_id(position, exit_price, realized_pnl, logger):
     it can't net cleanly — leaves the position open OR spawns a new opposite
     one. The position then re-triggers its exit every cycle (the take-profit
     that fired identically every 2s while 20 duplicate positions piled up).
-    close_position deletes the exact row and records the realized trade, so
-    the exit is deterministic and idempotent.
+    close_position locks the exact row and commits its realized trade and
+    deletion together. A missing/already-closed row returns False, so later
+    exit rules are short-circuited only after the close transaction commits.
     """
     from utils.paper_trade_db import close_position
 
@@ -252,8 +263,15 @@ def _close_position_by_id(position, exit_price, realized_pnl, logger):
         pos_id = position[0]
         qty = abs(float(position[4]))
         fee = abs(float(exit_price)) * qty * 0.0004
-        close_position(pos_id, float(exit_price), float(realized_pnl), fee)
-        return True
+        return (
+            close_position(
+                pos_id,
+                float(exit_price),
+                float(realized_pnl),
+                fee,
+            )
+            is True
+        )
     except Exception as exc:
         logger.error(f"Close-by-id failed for position {position[0]}: {exc}")
         return False
@@ -312,6 +330,247 @@ def _record_model_votes(strategy, symbol, side, logger: logging.Logger):
         logger.error(f"⚠️ Model-feedback record error: {exc}")
 
 
+def _observe_rsi_policy_shadow(
+    *,
+    signal_symbol: str,
+    legacy_action: str,
+    legacy_confidence: float,
+    reference_price: float,
+    strategy_id: str,
+    rsi: object,
+    legacy_rsi_reason: str | None,
+    logger: logging.Logger,
+) -> None:
+    """Compare the authoritative RSI gate with a side-effect-free candidate."""
+    try:
+        decision = Signal(
+            decision_id=uuid.uuid4().hex,
+            symbol=signal_symbol,
+            action=SignalAction(legacy_action),
+            confidence=legacy_confidence,
+            reference_price=reference_price,
+            observed_at=datetime.now(timezone.utc),
+            strategy_id=strategy_id,
+            reasons=("shadow.rsi.input",),
+        )
+        policy = RsiGatePolicy(rsi)
+        candidate = SignalPolicyPipeline((policy,)).evaluate(decision)
+
+        legacy_vetoed = legacy_rsi_reason is not None
+        observed_legacy_action = (
+            SignalAction.HOLD.value if legacy_vetoed else decision.action.value
+        )
+        observed_legacy_confidence = 0.0 if legacy_vetoed else decision.confidence
+        candidate_reasons = candidate.reasons[len(decision.reasons) :]
+        action_match = candidate.action.value == observed_legacy_action
+        confidence_match = candidate.confidence == observed_legacy_confidence
+        matched = action_match and confidence_match
+
+        observed_rsi = None
+        if isinstance(policy.rsi, (int, float)) and not isinstance(policy.rsi, bool):
+            numeric_rsi = float(policy.rsi)
+            if math.isfinite(numeric_rsi):
+                observed_rsi = numeric_rsi
+
+        extra = {
+            "event_type": "signal_policy_shadow",
+            "migration_slice": "M6b2",
+            "migration_mode": "shadow",
+            "stage": "roadmap_filters.rsi",
+            "policy_id": policy.policy_id,
+            "shadow_evaluation_id": decision.decision_id,
+            "signal_symbol": decision.symbol,
+            "strategy_id": decision.strategy_id,
+            "rsi": observed_rsi,
+            "legacy_action": observed_legacy_action,
+            "legacy_confidence": observed_legacy_confidence,
+            "candidate_action": candidate.action.value,
+            "candidate_confidence": candidate.confidence,
+            "legacy_reason": legacy_rsi_reason,
+            "candidate_reasons": candidate_reasons,
+            "action_match": action_match,
+            "confidence_match": confidence_match,
+            "matched": matched,
+        }
+        log = logger.info if matched else logger.warning
+        log(
+            "RSI policy shadow %s for %s: legacy=%s/%.3f candidate=%s/%.3f",
+            "match" if matched else "divergence",
+            decision.symbol,
+            observed_legacy_action,
+            observed_legacy_confidence,
+            candidate.action.value,
+            candidate.confidence,
+            extra=extra,
+        )
+    except Exception as exc:
+        try:
+            logger.warning(
+                "RSI policy shadow unavailable (%s)",
+                type(exc).__name__,
+                extra={
+                    "event_type": "signal_policy_shadow_error",
+                    "migration_slice": "M6b2",
+                    "migration_mode": "shadow",
+                    "stage": "roadmap_filters.rsi",
+                    "policy_id": "rsi-gate",
+                    "signal_symbol": signal_symbol,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
+
+
+def _observe_take_profit_regime_shadow(
+    *,
+    signal_symbol: str,
+    quality_regime: object,
+    candidate_regime: object,
+    logger: logging.Logger,
+) -> None:
+    """Compare the legacy TP fallback with a side-effect-free regime candidate."""
+    supported_regimes = {"TRENDING", "REVERSAL", "RANGING", "CHOPPY"}
+    try:
+        normalized_quality = quality_regime if isinstance(quality_regime, str) else None
+        normalized_legacy = (
+            normalized_quality.upper() if normalized_quality is not None else ""
+        )
+        legacy_effective_regime = (
+            normalized_legacy if normalized_legacy in supported_regimes else "RANGING"
+        )
+        normalized_candidate = (
+            candidate_regime
+            if isinstance(candidate_regime, str)
+            and candidate_regime in supported_regimes
+            else None
+        )
+        candidate_available = normalized_candidate is not None
+        matched = normalized_candidate == legacy_effective_regime
+        extra = {
+            "event_type": "take_profit_regime_shadow",
+            "migration_slice": "M7g",
+            "migration_mode": "shadow",
+            "stage": "pretrade.take_profit_regime",
+            "shadow_evaluation_id": uuid.uuid4().hex,
+            "signal_symbol": signal_symbol,
+            "quality_regime": normalized_quality,
+            "legacy_effective_regime": legacy_effective_regime,
+            "candidate_regime": normalized_candidate,
+            "candidate_available": candidate_available,
+            "matched": matched,
+        }
+    except Exception as exc:
+        try:
+            logger.warning(
+                "Take-profit regime shadow unavailable (%s)",
+                type(exc).__name__,
+                extra={
+                    "event_type": "take_profit_regime_shadow_error",
+                    "migration_slice": "M7g",
+                    "migration_mode": "shadow",
+                    "stage": "pretrade.take_profit_regime",
+                    "signal_symbol": signal_symbol,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
+        return
+
+    try:
+        log = logger.info if matched else logger.warning
+        log(
+            "Take-profit regime shadow %s for %s: legacy=%s candidate=%s",
+            "match" if matched else "divergence",
+            signal_symbol,
+            legacy_effective_regime,
+            normalized_candidate or "unavailable",
+            extra=extra,
+        )
+    except Exception:
+        pass
+
+
+def _validated_active_fee_profile(candidate_regime: object) -> str | None:
+    """Return a current produced TP profile or fail closed with ``None``."""
+    if type(candidate_regime) is str and candidate_regime in {
+        "TRENDING",
+        "RANGING",
+        "CHOPPY",
+    }:
+        return candidate_regime
+    return None
+
+
+def _legacy_order_intent(
+    *,
+    symbol: str,
+    signal: str,
+    confidence: float,
+    current_price: float,
+    position_size: float,
+    leverage: int,
+    strategy_id: str,
+) -> OrderIntent:
+    """Validate the legacy decision before it reaches the paper adapter."""
+    decision_id = uuid.uuid4().hex
+    observed_at = datetime.now(timezone.utc)
+    decision = Signal(
+        decision_id=decision_id,
+        symbol=symbol,
+        action=SignalAction(signal),
+        confidence=confidence,
+        reference_price=current_price,
+        observed_at=observed_at,
+        strategy_id=strategy_id,
+        reasons=("legacy signal filters approved",),
+    )
+    return OrderIntent(
+        client_order_id=f"ELV-{decision_id}",
+        decision_id=decision.decision_id,
+        symbol=decision.symbol,
+        side=OrderSide(decision.action.value),
+        quantity=Decimal(str(position_size)),
+        order_type=OrderType.MARKET,
+        reference_price=Decimal(str(decision.reference_price)),
+        leverage=leverage,
+        created_at=observed_at,
+    )
+
+
+def _record_acknowledged_legacy_order(
+    report: SubmissionReport,
+    intent: OrderIntent,
+    *,
+    confidence: float,
+    strategy,
+    cooldown_manager,
+    logger: logging.Logger,
+) -> bool:
+    """Record legacy feedback once, and only after a proven acknowledgment."""
+    if not report.acknowledged:
+        return False
+    if report.client_order_id != intent.client_order_id:
+        logger.error("Refusing to record an acknowledgment for another order")
+        return False
+
+    _record_model_votes(strategy, intent.symbol, intent.side.value, logger)
+    try:
+        cooldown_manager.record_trade(
+            intent.symbol,
+            intent.side.value,
+            float(intent.quantity),
+            confidence,
+        )
+    except Exception as exc:
+        logger.error(
+            f"⚠️ Cooldown record failed after acknowledged order "
+            f"{intent.client_order_id}: {type(exc).__name__}"
+        )
+    return True
+
+
 def _score_model_votes(logger: logging.Logger):
     """Adaptive-ensemble feedback (#11): score votes of closed positions.
 
@@ -334,9 +593,14 @@ def main(mode: str, log_level: str):
     Main entry point for the trading bot using dependency injection.
 
     Args:
-        mode (str): Trading mode, either 'paper' or 'live'.
+        mode (str): Trading mode. Only 'paper' is currently executable.
         log_level (str): Logging level string.
     """
+    if mode != "paper":
+        raise RuntimeError(
+            "ELVIS currently supports paper trading only; live execution is disabled"
+        )
+
     # Bootstrap the application
     bootstrapper = bootstrap_application(mode, log_level)
     logger = container.get("logger")
@@ -357,6 +621,8 @@ def main(mode: str, log_level: str):
         risk_manager = container.get("risk_manager")
         price_fetcher = container.get("price_fetcher")
         executor = container.get("executor")
+        legacy_execution = LegacyPaperExecutionAdapter(executor, runtime_mode=mode)
+        order_service = OrderService(legacy_execution)
         llm_advisor = container.get("llm_advisor")
 
         # Get the active strategy (ensemble or research-based)
@@ -456,7 +722,7 @@ def main(mode: str, log_level: str):
                                     f"⚠️ Error fetching {trading_symbol}: {e}"
                                 )
 
-                        # Use BTCUSDT as primary for dashboard/indicators
+                        # Use BTCUSDT as primary for the dashboard.
                         data = all_data.get("BTCUSDT", pd.DataFrame())
                         logger.debug(
                             f"Fetched data shape: {data.shape if not data.empty else 'EMPTY'}"
@@ -580,9 +846,19 @@ def main(mode: str, log_level: str):
                             )
 
                     if not data.empty:
-                        # Calculate technical indicators for the data
-                        logger.debug("Adding technical indicators...")
-                        data = add_technical_indicators(data, logger)
+                        # Enrich every fetched symbol independently. Keep
+                        # emergency fallback data outside all_data so it can
+                        # inform the dashboard without becoming tradeable.
+                        logger.debug(
+                            "Adding technical indicators for each available symbol..."
+                        )
+                        all_data = enrich_symbol_frames(all_data, logger)
+                        if "BTCUSDT" in all_data:
+                            data = all_data["BTCUSDT"]
+                        else:
+                            data = add_technical_indicators(
+                                data.copy(deep=True), logger
+                            )
                         logger.debug(f"Data with indicators shape: {data.shape}")
                         logger.debug(f"Available columns: {list(data.columns)}")
 
@@ -1420,8 +1696,25 @@ def main(mode: str, log_level: str):
                                         )
                                         continue
 
+                                    symbol_history = symbol_data.tail(100).copy(
+                                        deep=True
+                                    )
+                                    filter_result = None
+                                    regime_result = None
+                                    take_profit_regime = None
+
                                     # Extract current price and market data for this symbol
                                     current_price = float(symbol_data.iloc[-1]["close"])
+
+                                    # Preserve the per-symbol observation used
+                                    # by the legacy gate before the strategy's
+                                    # neutral fallback is applied.
+                                    _raw_filter_rsi = symbol_data.iloc[-1].get("rsi")
+                                    _filter_rsi = (
+                                        float(_raw_filter_rsi)
+                                        if pd.notna(_raw_filter_rsi)
+                                        else None
+                                    )
 
                                     # Create market data specific to this symbol
                                     market_data = {
@@ -1441,8 +1734,8 @@ def main(mode: str, log_level: str):
                                             symbol_data.iloc[-1].get("volume", 1000)
                                         ),
                                         "rsi": (
-                                            float(symbol_data.iloc[-1].get("rsi", 50.0))
-                                            if pd.notna(symbol_data.iloc[-1].get("rsi"))
+                                            _filter_rsi
+                                            if _filter_rsi is not None
                                             else 50.0
                                         ),
                                         "macd": (
@@ -1573,17 +1866,24 @@ def main(mode: str, log_level: str):
                                                     MarketRegimeDetector(logger)
                                                 )
 
-                                            # Convert current data to DataFrame for analysis
-                                            historical_df = data.tail(100).copy()
-
                                             # Analyze signal quality
                                             filter_result = main._winrate_filter.analyze_signal_quality(
-                                                symbol, market_data, historical_df
+                                                symbol, market_data, symbol_history
                                             )
+                                            candidate_take_profit_regime = None
+                                            market_regime_result = filter_result.get(
+                                                "market_regime"
+                                            )
+                                            if isinstance(market_regime_result, dict):
+                                                candidate_take_profit_regime = (
+                                                    market_regime_result.get(
+                                                        "take_profit_regime"
+                                                    )
+                                                )
 
                                             # Analyze market regime
                                             regime_result = main._regime_detector.detect_current_regime(
-                                                historical_df
+                                                symbol_history
                                             )
 
                                             # Cache regime per symbol for the
@@ -1655,6 +1955,27 @@ def main(mode: str, log_level: str):
                                                     f"   📉 Quality: {filter_result['confidence']:.2%} | Regime: {regime_result['regime']['class']}"
                                                 )
 
+                                            # Publish the candidate only after
+                                            # the complete analysis/filtering
+                                            # block succeeds.
+                                            take_profit_regime = (
+                                                candidate_take_profit_regime
+                                            )
+                                            if (
+                                                os.getenv(
+                                                    "ELVIS_TP_REGIME_MODE", "legacy"
+                                                )
+                                                == "shadow"
+                                            ):
+                                                _observe_take_profit_regime_shadow(
+                                                    signal_symbol=symbol,
+                                                    quality_regime=regime_result[
+                                                        "regime"
+                                                    ]["class"],
+                                                    candidate_regime=take_profit_regime,
+                                                    logger=logger,
+                                                )
+
                                         except Exception as filter_error:
                                             logger.error(
                                                 f"⚠️ High win rate filter error: {filter_error}"
@@ -1676,14 +1997,45 @@ def main(mode: str, log_level: str):
                                                     apply_signal_filters,
                                                 )
 
+                                                _roadmap_input_signal = signal
+                                                _roadmap_input_confidence = confidence
                                                 signal, confidence, _gate_reasons = (
                                                     apply_signal_filters(
                                                         signal,
                                                         confidence,
-                                                        data.tail(100),
-                                                        rsi=market_data.get("rsi"),
+                                                        symbol_history,
+                                                        rsi=_filter_rsi,
                                                     )
                                                 )
+                                                if (
+                                                    os.getenv(
+                                                        "ELVIS_RSI_POLICY_MODE",
+                                                        "legacy",
+                                                    )
+                                                    == "shadow"
+                                                ):
+                                                    _legacy_rsi_reason = next(
+                                                        (
+                                                            reason
+                                                            for reason in _gate_reasons
+                                                            if reason.startswith(
+                                                                "rsi_gate:"
+                                                            )
+                                                        ),
+                                                        None,
+                                                    )
+                                                    _observe_rsi_policy_shadow(
+                                                        signal_symbol=symbol,
+                                                        legacy_action=_roadmap_input_signal,
+                                                        legacy_confidence=_roadmap_input_confidence,
+                                                        reference_price=current_price,
+                                                        strategy_id=type(
+                                                            active_strategy
+                                                        ).__name__,
+                                                        rsi=_filter_rsi,
+                                                        legacy_rsi_reason=_legacy_rsi_reason,
+                                                        logger=logger,
+                                                    )
                                                 for _reason in _gate_reasons:
                                                     logger.warning(
                                                         f"🚧 {symbol} filter: {_reason}"
@@ -1898,8 +2250,8 @@ def main(mode: str, log_level: str):
                                             # Scale based on regime quality if filter was used
                                             regime_multiplier = 1.0
                                             if (
-                                                "filter_result" in locals()
-                                                and "regime_result" in locals()
+                                                filter_result is not None
+                                                and regime_result is not None
                                             ):
                                                 if (
                                                     regime_result[
@@ -1954,7 +2306,9 @@ def main(mode: str, log_level: str):
                                                         volume_multiplier,
                                                     )
 
-                                                    _vol_mult = volume_multiplier(data)
+                                                    _vol_mult = volume_multiplier(
+                                                        symbol_history
+                                                    )
                                                     if _vol_mult != 1.0:
                                                         position_size *= _vol_mult
                                                         logger.info(
@@ -2016,90 +2370,90 @@ def main(mode: str, log_level: str):
                                                         is_trade_viable,
                                                     )
 
-                                                    _fee_regime = getattr(
-                                                        main, "_last_regime", {}
-                                                    ).get(symbol, "RANGING")
-                                                    _tp_price = dynamic_take_profit(
-                                                        _fee_regime,
-                                                        current_price,
-                                                        side=signal,
+                                                    _fee_regime_mode = os.getenv(
+                                                        "ELVIS_TP_REGIME_MODE",
+                                                        "legacy",
                                                     )
-                                                    _viable, _net, _costs = (
-                                                        is_trade_viable(
-                                                            current_price,
-                                                            _tp_price,
-                                                            position_size,
-                                                            side=signal,
+                                                    if _fee_regime_mode == "active":
+                                                        _fee_regime = _validated_active_fee_profile(
+                                                            take_profit_regime
                                                         )
-                                                    )
-                                                    if not _viable:
+                                                    else:
+                                                        _fee_regime = getattr(
+                                                            main,
+                                                            "_last_regime",
+                                                            {},
+                                                        ).get(symbol, "RANGING")
+                                                        if _fee_regime is None:
+                                                            _fee_regime = "RANGING"
+                                                    if _fee_regime is None:
                                                         logger.warning(
-                                                            f"💸 {symbol} {signal} skipped by fee gate: "
-                                                            f"net ${_net:.4f} after ${_costs['total']:.4f} fees "
-                                                            f"({_fee_regime} TP target)"
+                                                            f"💸 {symbol} {signal} skipped: "
+                                                            "current take-profit regime unavailable"
                                                         )
                                                         signal = "HOLD"
+                                                    else:
+                                                        _tp_price = dynamic_take_profit(
+                                                            _fee_regime,
+                                                            current_price,
+                                                            side=signal,
+                                                        )
+                                                        _viable, _net, _costs = (
+                                                            is_trade_viable(
+                                                                current_price,
+                                                                _tp_price,
+                                                                position_size,
+                                                                side=signal,
+                                                            )
+                                                        )
+                                                        if not _viable:
+                                                            logger.warning(
+                                                                f"💸 {symbol} {signal} skipped by fee gate: "
+                                                                f"net ${_net:.4f} after ${_costs['total']:.4f} fees "
+                                                                f"({_fee_regime} TP target)"
+                                                            )
+                                                            signal = "HOLD"
                                                 except Exception as fee_error:
                                                     logger.error(
                                                         f"⚠️ Fee gate error: {fee_error}"
                                                     )
+                                                    signal = "HOLD"
 
-                                            if signal == "BUY":
+                                            if signal in ("BUY", "SELL"):
                                                 logger.info(
-                                                    f"🟢 [BUY] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
+                                                    f"🎯 [{signal}] Submitting {symbol} paper order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
                                                 )
-                                                result = executor.execute_buy(
-                                                    symbol, position_size, current_price
+                                                intent = _legacy_order_intent(
+                                                    symbol=symbol,
+                                                    signal=signal,
+                                                    confidence=confidence,
+                                                    current_price=current_price,
+                                                    position_size=position_size,
+                                                    leverage=legacy_execution.default_leverage,
+                                                    strategy_id=type(
+                                                        active_strategy
+                                                    ).__name__,
                                                 )
+                                                report = order_service.submit(intent)
 
-                                                if result:
+                                                if _record_acknowledged_legacy_order(
+                                                    report,
+                                                    intent,
+                                                    confidence=confidence,
+                                                    strategy=active_strategy,
+                                                    cooldown_manager=trading_loop.cooldown_manager,
+                                                    logger=logger,
+                                                ):
                                                     logger.info(
-                                                        f"✅ [SUCCESS] {symbol} BUY executed successfully"
+                                                        f"✅ [ACKNOWLEDGED] {symbol} {signal} paper order {report.venue_order_id}"
                                                     )
-                                                    _record_model_votes(
-                                                        active_strategy,
-                                                        symbol,
-                                                        "BUY",
-                                                        logger,
-                                                    )
-                                                    trading_loop.cooldown_manager.record_trade(
-                                                        symbol,
-                                                        "BUY",
-                                                        position_size,
-                                                        confidence,
+                                                elif report.requires_reconciliation:
+                                                    logger.error(
+                                                        f"⚠️ [AMBIGUOUS] {symbol} {signal} submission requires reconciliation; no automatic retry"
                                                     )
                                                 else:
-                                                    logger.error(
-                                                        f"❌ [FAIL] Failed to execute {symbol} BUY order"
-                                                    )
-
-                                            elif signal == "SELL":
-                                                logger.info(
-                                                    f"🔴 [SELL] Executing {symbol} order - Size: {position_size:.6f}, Price: ${current_price:.2f}"
-                                                )
-                                                result = executor.execute_sell(
-                                                    symbol, position_size, current_price
-                                                )
-
-                                                if result:
-                                                    logger.info(
-                                                        f"✅ [SUCCESS] {symbol} SELL executed successfully"
-                                                    )
-                                                    _record_model_votes(
-                                                        active_strategy,
-                                                        symbol,
-                                                        "SELL",
-                                                        logger,
-                                                    )
-                                                    trading_loop.cooldown_manager.record_trade(
-                                                        symbol,
-                                                        "SELL",
-                                                        position_size,
-                                                        confidence,
-                                                    )
-                                                else:
-                                                    logger.error(
-                                                        f"❌ [FAIL] Failed to execute {symbol} SELL order"
+                                                    logger.warning(
+                                                        f"🚫 [NOT SUBMITTED] {symbol} {signal}: {report.status.value} ({report.reason})"
                                                     )
 
                                         except Exception as e:
@@ -2233,6 +2587,7 @@ def main(mode: str, log_level: str):
                                                     logger.info(
                                                         f"🛑 Stop loss closed {pos_symbol} (pnl ${absolute_loss:.2f})"
                                                     )
+                                                    continue  # position closed
                                                 else:
                                                     logger.error(
                                                         f"❌ Stop loss execution failed for {pos_symbol}"
@@ -2284,7 +2639,7 @@ def main(mode: str, log_level: str):
                                                         logger,
                                                     ):
                                                         logger.info(
-                                                            f"📉 Trailing stop executed: {close_signal} "
+                                                            f"📉 Trailing stop closed {side.upper()} "
                                                             f"{abs(quantity):.6f} {pos_symbol}"
                                                         )
                                                         main._trailing.clear(
@@ -2359,8 +2714,9 @@ def main(mode: str, log_level: str):
                                                 )
                                                 if success:
                                                     logger.info(
-                                                        f"💰 Take profit executed: {close_signal.upper()} {close_size:.6f} {pos_symbol}"
+                                                        f"💰 Take profit closed {side.upper()} {abs(quantity):.6f} {pos_symbol}"
                                                     )
+                                                    continue  # position closed
                                                 else:
                                                     logger.error(
                                                         f"❌ Take profit execution failed for {pos_symbol}"
@@ -2394,14 +2750,11 @@ def main(mode: str, log_level: str):
                                 "✅ Multi-symbol trading handled by main loop - BNBUSDT included"
                             )
 
-                            # The LEGACY single-symbol execution below reuses
-                            # whatever signal/confidence the LAST loop symbol
-                            # left behind — executing it again double-places
-                            # orders and double-records cooldown for that
-                            # symbol every cycle. Neutralize unless explicitly
-                            # re-enabled.
-                            if os.getenv("ELVIS_LEGACY_EXECUTION", "0") != "1":
-                                signal = "HOLD"
+                            # The legacy single-symbol branch reused the last
+                            # multi-symbol decision and could place it twice.
+                            # It is permanently fail-closed while its remaining
+                            # sizing code is removed in the risk-planning slice.
+                            signal = "HOLD"
 
                             # Continue with execution logic
                             current_price = data.iloc[-1]["close"]
@@ -2563,9 +2916,10 @@ def main(mode: str, log_level: str):
                             )
 
                             if signal == "BUY":
-                                order_result = executor.place_order(
-                                    symbol, "buy", position_size, current_price
+                                logger.error(
+                                    "Legacy duplicate BUY path is retired; order not submitted"
                                 )
+                                order_result = None
                                 if order_result:
                                     logger.info(
                                         f"🎉 [SUCCESS] BUY order executed: {position_size:.6f} {symbol} at ${current_price:.2f}"
@@ -2620,9 +2974,10 @@ def main(mode: str, log_level: str):
                                         f"❌ [FAIL] Failed to execute BUY order for {symbol} - Size: {position_size:.6f}, Price: ${current_price:.2f}"
                                     )
                             elif signal == "SELL":
-                                order_result = executor.place_order(
-                                    symbol, "sell", position_size, current_price
+                                logger.error(
+                                    "Legacy duplicate SELL path is retired; order not submitted"
                                 )
+                                order_result = None
                                 if order_result:
                                     logger.info(
                                         f"🎉 [SUCCESS] SELL order executed: {position_size:.6f} {symbol} at ${current_price:.2f}"
@@ -2704,26 +3059,12 @@ def main(mode: str, log_level: str):
                                             )
                                         )
 
-                                        if signal == "BUY":
-                                            executor.place_order(
-                                                symbol,
-                                                "buy",
-                                                position_size,
-                                                current_price,
-                                            )
-                                            logger.info(
-                                                f"BUY signal executed: {position_size} BTC at {current_price}"
-                                            )
-                                        elif signal == "SELL":
-                                            executor.place_order(
-                                                symbol,
-                                                "sell",
-                                                position_size,
-                                                current_price,
-                                            )
-                                            logger.info(
-                                                f"SELL signal executed: {position_size} BTC at {current_price}"
-                                            )
+                                        logger.error(
+                                            "Strategy %s produced %s through the retired "
+                                            "generate_signals API; order not submitted",
+                                            type(active_strategy).__name__,
+                                            signal,
+                                        )
                     else:
                         logger.error("Data is empty even after mock data creation!")
 

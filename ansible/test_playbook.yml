@@ -56,8 +56,6 @@
       register: req_files
       loop:
         - requirements.txt
-        - requirements/requirements_coreml.txt
-        - requirements/requirements_ydf.txt
         - .env.example
         - scripts/run_elvis.sh
         

@@ -19,7 +19,8 @@ def add_technical_indicators(
         if missing_columns:
             if logger:
                 logger.error(
-                    f"Missing required columns for technical indicators: {missing_columns}"
+                    "Missing required columns for technical indicators: %s",
+                    missing_columns,
                 )
                 logger.info(f"Available columns: {list(data.columns)}")
             return data
@@ -35,6 +36,7 @@ def add_technical_indicators(
         macd = ta.trend.MACD(data["close"])
         data["macd"] = macd.macd()
         data["signal_line"] = macd.macd_signal()
+        data["macd_histogram"] = macd.macd_diff()
 
         bollinger = ta.volatility.BollingerBands(data["close"])
         data["lower_bb"] = bollinger.bollinger_lband()

@@ -212,10 +212,13 @@ class TestRiskManager(unittest.TestCase):
         Test the check_new_day method on the same day.
         """
         # Set up
-        self.risk_manager.last_trade_time = datetime.now() - timedelta(hours=2)
+        current_time = datetime(2026, 8, 12, 0, 5)
+        self.risk_manager.last_trade_time = current_time - timedelta(minutes=2)
 
         # Call method
-        result = self.risk_manager.check_new_day()
+        with patch("trading.risk_management.datetime") as clock:
+            clock.now.return_value = current_time
+            result = self.risk_manager.check_new_day()
 
         # Check result
         self.assertFalse(result)

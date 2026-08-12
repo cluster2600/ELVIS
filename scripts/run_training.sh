@@ -579,7 +579,7 @@ setup_neural_architecture_search() {
 
 stop_dashboard() {
     # Clean up dashboard config
-    [[ -f ".dashboard_config" ]] && rm -f .dashboard_config
+    rm -f .dashboard_config
 }
 
 run_automl_training() {
@@ -913,8 +913,7 @@ main() {
     echo -e "${YELLOW}💡 Next Steps:${NC}"
     echo -e "   1. Review trained models: ${CYAN}ls -la models/${NC}"
     echo -e "   2. Test with paper trading: ${CYAN}python main.py --mode paper${NC}"
-    echo -e "   3. Start live trading: ${CYAN}python main.py --mode live${NC}"
-    echo -e "   4. View training logs: ${CYAN}ls -la logs/model_training_*${NC}"
+    echo -e "   3. View training logs: ${CYAN}ls -la logs/model_training_*${NC}"
     if [[ "$START_DASHBOARD" == "true" ]]; then
         echo -e "   4. View console dashboard: ${CYAN}python3 utils/dashboard/console_dashboard.py${NC}"
         echo -e "   5. Run diagnostics: ${CYAN}$0 --check${NC}"

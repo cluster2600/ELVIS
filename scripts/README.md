@@ -37,7 +37,9 @@ the repo root to keep the top level clean.
 | Script | Purpose |
 |---|---|
 | `train_enhanced_rf.py` | Train the enhanced Random Forest model. |
-| `create_coreml_model.py` | Build a CoreML model (needs `coremltools`/`tensorflow`; no Python 3.14 wheels). |
+
+The former random-data CoreML generator was removed. New model producers must
+train on causal data and emit the validated feature manifest used at inference.
 
 ## Apple-container workflow (macOS)
 

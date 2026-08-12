@@ -1,5 +1,11 @@
 # Paper Trading Setup Documentation
 
+> **Compatibility-runtime guide.** This setup starts the current paper runtime;
+> it does not compose or activate the dormant V2 durable owner. See the
+> [V2 architecture](V2_ARCHITECTURE.md) and its
+> [cut-over gates](architecture_migration/04-migration-roadmap.md). Paper remains
+> the only executable mode and `ACTIVE` remains a **NO-GO**.
+
 ## Overview
 
 The ELVIS trading bot supports paper trading mode with multi-asset balances. In paper trading mode, the bot starts with **$1000 USDT** and **$1000 BNB** for a total portfolio value of **$2000**.
@@ -23,10 +29,11 @@ Binance REST endpoint the bot talks to: `paper` points `API_CONFIG` at
 `TESTNET_API_SPOT_SECRET`), any other value points it at
 `https://api.binance.com`.
 
-The bot's own paper/live behaviour is chosen separately by the `--mode`
-argument of `main.py` (`--mode paper|live`, default `paper`), passed through to
-`main(mode=...)`. For a normal paper-trading session leave both at their paper
-defaults.
+The bot's execution behaviour is selected separately by the `--mode` argument
+of `main.py`. `paper` is the only executable mode. The legacy `live` CLI value
+is rejected before bootstrap because the current executor exposes no validated
+live-submission capability. For a normal paper-trading session leave both
+settings at their paper defaults.
 
 ### Database Configuration
 The paper trading system uses PostgreSQL to track:
@@ -173,6 +180,13 @@ from utils.paper_trade_db import reset_trading_session
 reset_trading_session()  # inserts a new reset marker; historical trades kept
 ```
 
+Within an existing `np` schema, database initialization is non-destructive:
+calling `init_db()` again creates missing tables but preserves
+`np.open_positions`. Schema creation and versioned migrations are introduced by
+the later persistence migration. Use the explicit reset script below when
+positions and balances really must be cleared; restarting the bot is not a
+reset operation.
+
 ## Monitoring
 
 The paper trading system provides real-time monitoring of:
@@ -196,4 +210,4 @@ To start fresh paper trading:
 - Paper trading uses simulated trades, no real money is involved
 - All trading logic is identical to live trading
 - Performance metrics accurately reflect trading strategy effectiveness
-- Database persistence ensures trade history survives restarts
+- Database persistence ensures trade history and open positions survive restarts

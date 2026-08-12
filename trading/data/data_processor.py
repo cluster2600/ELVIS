@@ -59,54 +59,6 @@ class DataProcessor:
                 funding = self.exchange.fetch_funding_rate(symbol)
                 df["funding_rate"] = funding["fundingRate"]
 
-            # Fill missing EnsembleStrategy features with defaults
-            required_features = [
-                "price",
-                "Order_Amount",
-                "sma",
-                "Filled",
-                "Total",
-                "future_price",
-                "atr",
-                "vol_adjusted_price",
-                "volume_ma",
-                "macd",
-                "signal_line",
-                "lower_bb",
-                "sma_bb",
-                "upper_bb",
-                "news_sentiment",
-                "social_feature",
-                "adx",
-                "rsi",
-                "order_book_depth",
-                "volume",
-            ]
-            for feature in required_features:
-                if feature not in df:
-                    if feature == "price":
-                        df[feature] = df["close"]
-                    elif feature == "sma":
-                        df[feature] = df["sma_20"]  # From market regime
-                    elif feature == "atr":
-                        df[feature] = df["atr"]  # From technical indicators
-                    elif feature == "macd":
-                        df[feature] = df["macd"]  # From technical indicators
-                    elif feature == "signal_line":
-                        df[feature] = df["macd_signal"]  # From technical indicators
-                    elif feature == "lower_bb":
-                        df[feature] = df["bb_low"]  # From Bollinger Bands
-                    elif feature == "sma_bb":
-                        df[feature] = df["bb_mid"]  # From Bollinger Bands
-                    elif feature == "upper_bb":
-                        df[feature] = df["bb_high"]  # From Bollinger Bands
-                    elif feature == "rsi":
-                        df[feature] = df["rsi"]  # From technical indicators
-                    elif feature == "volume":
-                        df[feature] = df["volume"]  # From OHLCV
-                    else:
-                        df[feature] = 0.0  # Default for missing features
-
             # Handle missing data
             if self.quality_config.handle_missing_data:
                 df = self.handle_missing_data(df)

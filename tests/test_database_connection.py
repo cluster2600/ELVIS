@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 os.environ["VAULT_ENABLED"] = "false"
 
 
-def test_database():
+def check_database():
     """Test database connection and functionality"""
     try:
         from utils.paper_trade_db import get_all_trades, get_conn, get_open_positions
@@ -48,7 +48,7 @@ def main():
     """Main test function"""
     logger.info("🔧 Testing database connection...")
 
-    db_ok = test_database()
+    db_ok = check_database()
 
     logger.info("=" * 50)
     if db_ok:

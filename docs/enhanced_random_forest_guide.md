@@ -16,9 +16,9 @@ disabled and the model still trains and predicts with sklearn + joblib.
 > Python-3.14 note: `optuna` and `shap` are **not** pinned in `requirements.txt`
 > and have no reliable 3.14 wheels yet. On a stock 3.14 environment they are
 > absent, so hyperparameter optimization and SHAP explanations are disabled by
-> default. The model falls back to hand-tuned default hyperparameters. `ydf` and
-> `tensorflow` are likewise intentionally absent (see `pyproject.toml`) — this
-> model is **sklearn**, not TensorFlow Decision Forests.
+> default. The model falls back to hand-tuned default hyperparameters. This
+> model is **sklearn**, not TensorFlow Decision Forests; the unrelated synthetic
+> YDF Ensemble placeholder was retired.
 
 ## What the code actually provides
 

@@ -18,13 +18,19 @@ the live loop) is wired into `main.py` behind an environment flag.
   Runs in the signal loop with the winrate filter (pre-existing wiring); its
   per-symbol regime cache also feeds #5 and #10. Always on.
 - **#2 RSI overbought/oversold filter** — `trading.signals.filters.rsi_gate`
-  Signal gates · `ELVIS_ROADMAP_FILTERS=1`
+  Signal gates · `ELVIS_ROADMAP_FILTERS=1`. The legacy gate remains
+  authoritative. Set `ELVIS_RSI_POLICY_MODE=shadow` to compare the pure,
+  fail-closed candidate on the same per-symbol RSI; shadow output is logged and
+  never applied. The default is `legacy`.
 - **#3 Volume-based trade sizing** — `trading.risk.position_sizing.volume_multiplier`
   Sizing block · `ELVIS_VOLUME_SIZING=1`
 - **#4 Trailing stop loss** — `trading.execution.exits.TrailingStop`
   Position loop · `ELVIS_TRAILING_STOP=1`, trail via `ELVIS_TRAIL_PCT` (0.02)
 - **#5 Fee optimization (all-in cost gate)** — `trading.fees.fee_gate.is_trade_viable`
-  Pre-execution · `ELVIS_FEE_GATE=1`
+  Pre-execution · `ELVIS_FEE_GATE=1`. Quantity is the contract/base quantity:
+  entry and exit fees use their respective fill notionals, while leverage only
+  changes required margin. Invalid cost inputs and gate exceptions fail closed
+  to HOLD.
 - **#6 Momentum confirmation** — `trading.signals.filters.has_momentum`
   Signal gates · `ELVIS_ROADMAP_FILTERS=1`
 - **#7 Bollinger Band squeeze** — `trading.signals.filters.detect_bb_squeeze`
@@ -32,9 +38,19 @@ the live loop) is wired into `main.py` behind an environment flag.
 - **#8 Time-of-day filter** — `trading.signals.filters.is_optimal_trading_hour`
   Signal gates · `ELVIS_ROADMAP_FILTERS=1`
 - **#9 MACD histogram divergence** — `trading.signals.filters.detect_macd_divergence`
-  Signal gates (veto; BUY/SELL override is opt-in) · `ELVIS_ROADMAP_FILTERS=1`
+  Signal gates (veto; BUY/SELL override is opt-in) · `ELVIS_ROADMAP_FILTERS=1`.
+  The active market-frame producer emits `macd_histogram` from the same MACD
+  calculation as `macd` and `signal_line`.
 - **#10 Dynamic take profit by regime** — `trading.execution.exits.dynamic_take_profit`
-  Position loop, replaces the fixed $8 target · `ELVIS_DYNAMIC_TP=1`
+  Position loop · `ELVIS_DYNAMIC_TP=1`. The per-symbol analysis now exposes a
+  distinct `take_profit_regime`; the legacy cache still holds a quality label
+  and therefore uses the conservative `RANGING` fallback. Set
+  `ELVIS_TP_REGIME_MODE=shadow` to compare that effective legacy result with
+  the new profile without changing the fee gate, cache, or exits. Set it to
+  `active` to make the fee gate use only the current per-symbol profile and
+  fail closed to HOLD when that profile is absent or invalid. `REVERSAL` is
+  supported by the exit function but not currently produced or accepted by
+  the active fee gate. The default remains `legacy` for rollback.
 - **#11 Adaptive ML ensemble weights** — `trading.signals.adaptive_ensemble` + `trading.signals.model_feedback`
   Ensemble voting modulated by a per-model feedback loop · `ELVIS_ADAPTIVE_ENSEMBLE=1` —
   [how it works](#item-11-adaptive-ensemble--wired-via-a-real-feedback-pipeline)
@@ -57,7 +73,9 @@ the live loop) is wired into `main.py` behind an environment flag.
 
 All integration lives in `main.py`, mirroring the existing lazy-import pattern,
 and every stage is wrapped in try/except so a gate failure logs and never kills
-the loop.
+the loop. Each fetched symbol is copied and enriched with its own indicators;
+the BTC frame remains the dashboard view but is not reused for another pair's
+signal gates or sizing.
 
 1. **Signal gates** — after the existing high-win-rate filter, a
    `PROFITABILITY-ROADMAP SIGNAL GATES` block applies
@@ -65,19 +83,29 @@ the loop.
    trading hours, MACD divergence — each toggleable via its config key), then
    optional order-flow confirmation and MTF alignment. Any veto downgrades the
    signal to HOLD and logs the reason.
-2. **Regime cache** — the regime detected for each symbol is cached on
-   `main._last_regime` and reused by the dynamic-TP and fee-gate stages.
-3. **Sizing** — `volume_multiplier(data)` scales the adaptive position size
-   (0.5x–2.0x by volume vs its 20-bar mean); the optional Kelly stage derives
-   f* from the last 200 paper trades' PnL and *caps* (never raises) the size.
-4. **Fee gate** — before `execute_buy/sell`, the expected move to the
+2. **Regime cache** — `main._last_regime` still caches the detector's quality
+   label. M7f adds the separate, purpose-specific `take_profit_regime` producer,
+   and M7g can observe it with `ELVIS_TP_REGIME_MODE=shadow`. M7h adds an
+   `active` fee-gate path that consumes only the fresh local value and never
+   reads this cache. Open-position exits remain on the legacy cache until their
+   position lifecycle is migrated.
+3. **Sizing** — `volume_multiplier(symbol_history)` scales the adaptive position
+   size (0.5x–2.0x by that symbol's volume vs its 20-bar mean); the optional
+   Kelly stage derives f* from the last 200 paper trades' PnL and *caps* (never
+   raises) the size.
+4. **Fee gate** — before typed order submission, the expected move to the
    regime's take-profit target is compared against all-in costs (entry+exit
-   taker fees + funding); non-viable trades are skipped with a logged breakdown.
+   taker fees + funding); non-viable trades and calculation failures are skipped
+   with a logged breakdown.
 5. **Exits** — the position loop updates a per-position `TrailingStop`
-   (2% giveback from the high-water mark, both sides) and, when the symbol's
-   regime is known, replaces the fixed $8 take-profit with the regime target
-   (TRENDING 5%, REVERSAL 1%, RANGING 0.25%, CHOPPY 0.1% — percentage-based;
-   the roadmap's absolute dollar offsets don't transfer across price levels).
+   (2% giveback from the high-water mark, both sides). The dynamic target
+   function supports TRENDING 5%, REVERSAL 1%, RANGING 0.25%, and CHOPPY 0.1%,
+   but the legacy cache currently reaches its RANGING fallback; M7f defines the
+   correct producer contract before a later cut-over. Percentages are used
+   because the roadmap's absolute dollar offsets do not transfer across price
+   levels. A confirmed stop-loss, trailing-stop, or take-profit close ends the
+   checks for that position in the current cycle; later exit rules cannot close
+   the same legacy row a second time.
 
 ## Why three flags default off
 

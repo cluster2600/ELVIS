@@ -48,11 +48,10 @@ dependencies = [
 
 [project.optional-dependencies]
 # ML add-ons used by the ensemble/DRL paths (all import-guarded in code).
-# ydf and tensorflow are intentionally absent: no Python 3.14 wheels yet
-# (checked 2026-07); the ensemble degrades gracefully without them.
+# TensorFlow is intentionally absent: no Python 3.14 wheel yet (checked
+# 2026-07), so its training path remains isolated in Python 3.10.
 ml = [
   "torch",
-  "coremltools",
   "gymnasium",
   "openai",
   "TA-Lib",
@@ -67,11 +66,15 @@ test = [
 [tool.setuptools.packages.find]
 include = ["core*", "trading*", "training*", "utils*", "config*", "services*", "scripts*"]
 
+[tool.setuptools.package-data]
+"trading.persistence.sql_migrations" = ["*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "perf: API latency/load benchmarks (run explicitly with -m perf)",
+    "postgres: isolated PostgreSQL integration tests (requires an explicit admin DSN)",
 ]
 
 [tool.black]

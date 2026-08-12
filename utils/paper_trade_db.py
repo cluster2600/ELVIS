@@ -1,3 +1,5 @@
+import math
+
 import psycopg2
 
 PSYCOPG2_AVAILABLE = True
@@ -71,7 +73,6 @@ def init_db():
                 fee REAL
             )
         """)
-        c.execute("DROP TABLE IF EXISTS np.open_positions CASCADE;")
         c.execute("""
             CREATE TABLE IF NOT EXISTS np.open_positions (
                 id SERIAL PRIMARY KEY,
@@ -249,42 +250,88 @@ def close_open_position(symbol, side):
 
 
 def close_position(position_id, exit_price, pnl, fee=0.0):
-    """Close a specific position by ID and record the trade"""
+    """Record and delete one position atomically, returning the commit outcome."""
     conn = get_conn()
     if conn is None:
         print(f"[WARNING] Cannot close position - database not available")
-        return
+        return False
     try:
+        normalized_exit_price = float(exit_price)
+        normalized_pnl = float(pnl)
+        normalized_fee = float(fee)
+        if (
+            not math.isfinite(normalized_exit_price)
+            or normalized_exit_price <= 0
+            or not math.isfinite(normalized_pnl)
+            or not math.isfinite(normalized_fee)
+            or normalized_fee < 0
+        ):
+            raise ValueError("close values must be finite and economically valid")
+
         c = conn.cursor()
 
-        # Get position details before closing
+        # Serialize competing close attempts for the same legacy row. The
+        # trade and deletion must use this one transaction; record_trade()
+        # owns a separate connection and cannot provide that guarantee.
         c.execute(
-            "SELECT symbol, side, entry_price, quantity, leverage FROM open_positions WHERE id = %s",
+            "SELECT symbol, side, entry_price, quantity, leverage "
+            "FROM open_positions WHERE id = %s FOR UPDATE",
             (position_id,),
         )
         position = c.fetchone()
 
         if position:
-            symbol, side, entry_price, quantity, leverage = position
+            symbol, side, _entry_price, quantity, _leverage = position
+            normalized_side = str(side).upper()
+            if normalized_side not in ("BUY", "SELL"):
+                raise ValueError(f"invalid stored position side: {side!r}")
+            normalized_quantity = float(quantity)
+            if not math.isfinite(normalized_quantity) or normalized_quantity <= 0:
+                raise ValueError("stored position quantity must be finite and positive")
 
-            # Record the closing trade
-            record_trade(symbol, side, exit_price, quantity, pnl, fee)
+            c.execute(
+                """
+                INSERT INTO trades
+                    (timestamp, symbol, side, price, quantity, pnl, fee)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    datetime.now(),
+                    str(symbol),
+                    normalized_side,
+                    normalized_exit_price,
+                    normalized_quantity,
+                    normalized_pnl,
+                    normalized_fee,
+                ),
+            )
 
             # Remove from open positions
             c.execute("DELETE FROM open_positions WHERE id = %s", (position_id,))
+            if c.rowcount != 1:
+                raise RuntimeError(
+                    f"position {position_id} was not deleted exactly once"
+                )
 
             conn.commit()
             # Only log significant trades to reduce spam
-            if abs(pnl) >= 5.0:  # Only log profits/losses >= $5
-                print(
-                    f"[INFO] Closed position {position_id}: {side} {symbol} P&L: ${pnl:.2f}"
-                )
+            if abs(normalized_pnl) >= 5.0:  # Only log profits/losses >= $5
+                try:
+                    print(
+                        f"[INFO] Closed position {position_id}: "
+                        f"{normalized_side} {symbol} P&L: ${normalized_pnl:.2f}"
+                    )
+                except Exception:
+                    pass
+            return True
         else:
             print(f"[WARNING] Position {position_id} not found")
+            return False
 
     except Exception as e:
         print(f"[ERROR] Failed to close position {position_id}: {e}")
         conn.rollback()
+        return False
     finally:
         conn.close()
 

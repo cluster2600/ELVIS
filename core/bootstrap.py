@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Optional
 
+import config.config as canonical_config_module
 from config import API_CONFIG, TRADING_CONFIG
 from core.di import container
 from core.events import SystemEvent, event_bus
@@ -520,11 +521,14 @@ class ApplicationBootstrapper:
             # Create a Binance executor with futures support
             from trading.execution.binance_executor import BinanceExecutor
 
+            configured_leverage = canonical_config_module.TRADING_CONFIG[
+                "DEFAULT_LEVERAGE"
+            ]
             executor = BinanceExecutor(
                 logger=logger,
                 is_testnet=is_testnet,
                 use_futures=use_futures,
-                default_leverage=trading_config.get("DEFAULT_LEVERAGE", 50),
+                default_leverage=configured_leverage,
             )
 
             success = executor.initialize()
@@ -534,7 +538,10 @@ class ApplicationBootstrapper:
                 )
                 # Fallback to paper trading executor
                 executor = BinanceExecutor(
-                    logger=logger, is_testnet=True, use_futures=False
+                    logger=logger,
+                    is_testnet=True,
+                    use_futures=False,
+                    default_leverage=configured_leverage,
                 )
                 executor.initialize()
 

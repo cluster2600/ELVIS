@@ -57,6 +57,8 @@ TradingBot_*.log
 *.npy
 *.npz
 *.tfevents*
+models/research_based/feature_manifest.json
+models/bonenkamp_hft/feature_manifest.json
 models/checkpoints/
 models/logs/
 training/training_results/

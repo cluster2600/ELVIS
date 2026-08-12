@@ -1,19 +1,11 @@
+import logging
 import os
+from datetime import datetime
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
 import requests
-
-try:
-    import coremltools as ct
-
-    HAS_COREML = True
-except ImportError:
-    HAS_COREML = False
-    print("Warning: coremltools not available, some ML features disabled")
-import logging
-from datetime import datetime
-from typing import Any, Dict, List
 
 from trading.strategies.base_strategy import BaseStrategy
 from trading.strategies.research_based_strategy import ResearchBasedStrategy
@@ -29,36 +21,20 @@ import ta
 
 from trading.strategies.bonenkamp_hft_strategy import BonenkampHFTStrategy
 
-# Handle YDF import with fallback
-try:
-    import ydf
-
-    YDF_AVAILABLE = True
-except ImportError:
-    YDF_AVAILABLE = False
-    ydf = None
-    print("YDF not available, ensemble strategy will fallback to other models")
-
 
 class EnsembleStrategy(BaseStrategy):
     """
-    EnsembleStrategy combines predictions from multiple models:
-    - YDF Random Forest model
-    - CoreML Neural Network model
-    - Trade-learned model (trained on actual trading history)
-    - (optional) MLX Large Language Model for additional decision support
+    EnsembleStrategy combines technical analysis with validated optional
+    strategies and an optional MLX language-model signal.
 
-    This strategy averages model outputs to determine a consensus BUY, SELL, or HOLD signal.
-    The trade-learned model provides adaptive learning from actual trading experience.
+    Available outputs are averaged to determine a BUY, SELL, or HOLD signal.
     """
 
     def __init__(
         self,
         logger: logging.Logger,
         symbols: List[str] = ["BTCUSDT"],
-        ydf_model_path: str = "models/model_rf_tf",
-        coreml_model_path: str = "models/NNModel.mlpackage",
-        trade_learned_model_path: str = "training/models/trade_learned_model.pkl",
+        *,
         mlx_url: str = None,
         risk_per_trade: float = 0.01,
         min_position_size: float = 0.001,
@@ -79,8 +55,6 @@ class EnsembleStrategy(BaseStrategy):
         Args:
             logger (logging.Logger): The logger for debugging/info output.
             symbols (List[str]): The trading pairs to manage.
-            ydf_model_path (str): Path to the YDF Random Forest model.
-            coreml_model_path (str): Path to the CoreML Neural Network model.
             mlx_url (str, optional): URL to MLX server for LLM support.
             risk_per_trade (float): The percentage of the portfolio to risk on a single trade.
             min_position_size (float): The minimum position size in BTC.
@@ -94,28 +68,6 @@ class EnsembleStrategy(BaseStrategy):
         self.order_flow_analyzer = order_flow_analyzer
         self.price_fetcher = price_fetcher
         self.exchange_manager = exchange_manager
-        self.REQUIRED_FEATURES = [
-            "price",
-            "Order_Amount",
-            "sma",
-            "Filled",
-            "Total",
-            "future_price",
-            "atr",
-            "vol_adjusted_price",
-            "volume_ma",
-            "macd",
-            "signal_line",
-            "lower_bb",
-            "sma_bb",
-            "upper_bb",
-            "news_sentiment",
-            "social_feature",
-            "adx",
-            "rsi",
-            "order_book_depth",
-            "volume",
-        ]  # Exactly 20 features to match CoreML model expectations
         self.CLASSES = ["BUY", "HOLD", "SELL"]
 
         self.risk_per_trade = risk_per_trade
@@ -130,12 +82,6 @@ class EnsembleStrategy(BaseStrategy):
         self.mlx_url = mlx_url or os.getenv("MLX_URL", "")
         self.mlx_available = False
 
-        # Load models
-        self.ydf_model = self._load_ydf_model(ydf_model_path)
-        self.nn_model = self._load_coreml_model(coreml_model_path)
-        self.trade_learned_model = self._load_trade_learned_model(
-            trade_learned_model_path
-        )
         self._check_mlx_connectivity()
 
         # Initialize DRL agent
@@ -192,90 +138,6 @@ class EnsembleStrategy(BaseStrategy):
             self.logger.info(
                 f"⚡ Recorded trade signal: {signal} at ${price:.2f} - INSTANT NEXT TRADE ALLOWED"
             )
-
-    def _load_ydf_model(self, model_path: str):
-        """Load the YDF model from disk."""
-        if not YDF_AVAILABLE:
-            self.logger.warning("YDF is not installed. Skipping YDF model loading.")
-            return None
-        try:
-            # Try native YDF format first
-            native_path = "models/model_rf.ydf"
-            if os.path.exists(native_path):
-                model = ydf.load_model(native_path)
-                self.logger.info(f"YDF model loaded from {native_path} (native format)")
-                return model
-            elif os.path.exists(model_path):
-                # Try TensorFlow format as fallback
-                model = ydf.from_tensorflow_decision_forests(model_path)
-                self.logger.info(
-                    f"YDF model loaded from {model_path} (TensorFlow format)"
-                )
-                return model
-            else:
-                raise FileNotFoundError(
-                    f"YDF model not found at {native_path} or {model_path}"
-                )
-        except Exception as e:
-            self.logger.error(f"Failed to load YDF model: {e}")
-            return None
-
-    def _load_coreml_model(self, model_path: str):
-        """Load the CoreML model from disk."""
-        try:
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"CoreML model file not found at {model_path}")
-            model = ct.models.MLModel(model_path)
-            self.logger.info(f"CoreML model loaded from {model_path}")
-            return model
-        except Exception as e:
-            self.logger.error(f"Failed to load CoreML model: {e}")
-            return None
-
-    def _load_trade_learned_model(self, model_path: str):
-        """Load the trade-learned model from disk."""
-        try:
-            import joblib
-
-            if not os.path.exists(model_path):
-                self.logger.warning(
-                    f"Trade-learned model file not found at {model_path}"
-                )
-                return None
-
-            model_data = joblib.load(model_path)
-
-            # Handle both old format (direct model) and new format (dict with metadata)
-            if hasattr(model_data, "predict"):
-                # Direct model - wrap in dictionary format
-                wrapped_model = {
-                    "model": model_data,
-                    "model_type": "sklearn_classifier",
-                    "training_samples": "unknown",
-                    "cv_score": "unknown",
-                }
-                self.logger.info(
-                    f"Trade-learned model loaded from {model_path} (direct model)"
-                )
-                return wrapped_model
-            elif isinstance(model_data, dict) and "model" in model_data:
-                # New format with metadata
-                self.logger.info(f"Trade-learned model loaded from {model_path}")
-                self.logger.info(
-                    f"Model type: {model_data.get('model_type', 'unknown')}"
-                )
-                self.logger.info(
-                    f"Training samples: {model_data.get('training_samples', 'unknown')}"
-                )
-                self.logger.info(f"CV score: {model_data.get('cv_score', 'unknown')}")
-                return model_data
-            else:
-                self.logger.error("Invalid trade-learned model format")
-                return None
-
-        except Exception as e:
-            self.logger.error(f"Failed to load trade-learned model: {e}")
-            return None
 
     def _check_mlx_connectivity(self):
         """Check if MLX server is available."""
@@ -426,174 +288,6 @@ class EnsembleStrategy(BaseStrategy):
         """Predict using available models, with technical analysis fallback."""
         preds = {}
         self.logger.info("=== STARTING MODEL PREDICTIONS ===")
-
-        # Try YDF model if available
-        if YDF_AVAILABLE and self.ydf_model is not None:
-            try:
-                # Create feature array with defaults for missing values
-                feature_values = []
-                for col in self.REQUIRED_FEATURES:
-                    value = features.get(col, 0.0)
-                    if pd.isna(value) or not isinstance(value, (int, float)):
-                        value = 0.0
-                    feature_values.append(float(value))
-
-                # Create DataFrame for prediction
-                feature_df = pd.DataFrame(
-                    [feature_values], columns=self.REQUIRED_FEATURES
-                )
-
-                # Get prediction probabilities
-                predictions = self.ydf_model.predict(feature_df)
-
-                # Convert to probability array [BUY, HOLD, SELL]
-                if hasattr(predictions, "__len__") and len(predictions) > 0:
-                    # Handle different prediction formats
-                    if isinstance(predictions, np.ndarray):
-                        if predictions.ndim > 0:
-                            pred_class = int(
-                                predictions.flat[0]
-                            )  # Use flat[0] for safe scalar conversion
-                        else:
-                            pred_class = int(
-                                predictions.item()
-                            )  # Use item() for 0-d arrays
-                    else:
-                        pred_class = int(predictions[0])
-
-                    # Ensure pred_class is within valid range [0, 1, 2]
-                    pred_class = max(0, min(2, pred_class))
-
-                    # Convert class prediction to probability array
-                    prob_array = np.zeros(3)
-                    prob_array[pred_class] = 0.8  # High confidence for predicted class
-                    prob_array[(pred_class + 1) % 3] = (
-                        0.15  # Low confidence for other classes
-                    )
-                    prob_array[(pred_class + 2) % 3] = 0.05
-                    preds["ydf"] = prob_array
-                    self.logger.debug(
-                        f"YDF prediction: class {pred_class}, probs {prob_array}"
-                    )
-
-            except Exception as e:
-                self.logger.warning(f"YDF prediction failed: {e}")
-
-        # Try CoreML model if available
-        if self.nn_model is not None:
-            try:
-                # Create safe feature array with defaults
-                feature_values = []
-                for col in self.REQUIRED_FEATURES:
-                    value = features.get(col, 0.0)
-                    if pd.isna(value) or not isinstance(value, (int, float)):
-                        value = 0.0
-                    feature_values.append(float(value))
-
-                # Ensure we have exactly 20 features for the CoreML model
-                if len(feature_values) != 20:
-                    self.logger.warning(
-                        f"CoreML model expects 20 features, got {len(feature_values)}. Adjusting array size."
-                    )
-                    if len(feature_values) < 20:
-                        # Pad with zeros if we have fewer features
-                        feature_values.extend([0.0] * (20 - len(feature_values)))
-                    else:
-                        # Truncate if we have more features
-                        feature_values = feature_values[:20]
-
-                # Normalize features to prevent NaN outputs (CoreML model expects small values)
-                feature_array = np.array(feature_values, dtype=np.float32)
-
-                # Apply scaling to keep values in reasonable range (0-1)
-                # Large values like prices (107000) cause NaN outputs
-                normalized_features = []
-                for i, value in enumerate(feature_array):
-                    if abs(value) > 1000:  # Large values need scaling
-                        normalized_features.append(
-                            value / 100000.0
-                        )  # Scale down large values
-                    elif abs(value) > 100:  # Medium values need moderate scaling
-                        normalized_features.append(value / 1000.0)
-                    elif abs(value) > 10:  # Small values need light scaling
-                        normalized_features.append(value / 100.0)
-                    else:  # Keep small values as-is
-                        normalized_features.append(value)
-
-                # Reshape to exactly (1, 20) as expected by the model
-                nn_input = {
-                    "x": np.array(normalized_features, dtype=np.float32).reshape(1, 20)
-                }
-                nn_pred = self.nn_model.predict(nn_input)
-                probs = nn_pred.get("classLabel_probs") or nn_pred.get(
-                    "classProbability", {}
-                )
-
-                # Check for NaN in probabilities
-                prob_array = np.array([probs.get(cls, 0.0) for cls in self.CLASSES])
-                if np.any(np.isnan(prob_array)):
-                    self.logger.warning(
-                        f"CoreML model returned NaN probabilities, skipping prediction"
-                    )
-                    # Don't add to preds if NaN
-                else:
-                    preds["nn"] = prob_array
-                    self.logger.debug(
-                        f"CoreML prediction successful with normalized input"
-                    )
-                    self.logger.debug(f"Raw probs: {probs}, Final array: {prob_array}")
-            except Exception as e:
-                self.logger.warning(f"CoreML prediction failed: {e}")
-                self.logger.debug(
-                    f"Current REQUIRED_FEATURES count: {len(self.REQUIRED_FEATURES)}"
-                )
-                self.logger.debug(f"Features list: {self.REQUIRED_FEATURES}")
-
-        # Try trade-learned model if available
-        if self.trade_learned_model is not None:
-            try:
-                model_data = self.trade_learned_model
-                model = model_data["model"]
-                feature_names = model_data.get(
-                    "feature_names",
-                    [
-                        "rsi",
-                        "macd",
-                        "sma",
-                        "price",
-                        "volume",
-                        "atr",
-                        "adx",
-                        "bb_lower",
-                        "bb_upper",
-                        "sentiment",
-                    ],
-                )
-
-                # Extract features for the trade-learned model
-                trade_features = self._extract_trade_learned_features(features)
-
-                # Create feature array in the correct order
-                feature_array = np.array(
-                    [[trade_features.get(name, 0.0) for name in feature_names]]
-                )
-
-                # Get prediction probabilities
-                probabilities = model.predict_proba(feature_array)[0]
-
-                # Convert to [BUY, HOLD, SELL] format
-                # Model was trained with 0=loss, 1=profit
-                # Map: profit->BUY, loss->SELL, neutral->HOLD
-                if len(probabilities) == 2:  # Binary classifier
-                    # probabilities[0] = loss, probabilities[1] = profit
-                    buy_prob = probabilities[1]  # Profit probability -> BUY
-                    sell_prob = probabilities[0]  # Loss probability -> SELL
-                    hold_prob = 1.0 - max(buy_prob, sell_prob)  # Neutral
-                    preds["trade_learned"] = np.array([buy_prob, hold_prob, sell_prob])
-
-                self.logger.debug(f"Trade-learned model prediction successful")
-            except Exception as e:
-                self.logger.warning(f"Trade-learned model prediction failed: {e}")
 
         # Try MLX if available
         if self.mlx_available:
@@ -1513,123 +1207,30 @@ class EnsembleStrategy(BaseStrategy):
         return (adx_strength + rsi_strength) / 2
 
     def _create_features_from_data(self, df: pd.DataFrame) -> dict:
-        """Create features from price data."""
+        """Adapt the latest row without inventing retired model inputs."""
         try:
             latest = df.iloc[-1]
-
-            # Calculate basic features
             features = {
                 "price": latest.get("close", 0.0),
                 "volume": latest.get("volume", 0.0),
                 "sma": latest.get("sma_20", 0.0),
                 "rsi": latest.get("rsi", 50.0),
                 "macd": latest.get("macd", 0.0),
-                "signal_line": latest.get("signal_line", 0.0),
+                "signal_line": latest.get(
+                    "macd_signal", latest.get("signal_line", 0.0)
+                ),
                 "adx": latest.get("adx", 0.0),
                 "atr": latest.get("atr", 0.0),
-                "lower_bb": latest.get("lower_bb", 0.0),
-                "sma_bb": latest.get("sma_bb", 0.0),
-                "upper_bb": latest.get("upper_bb", 0.0),
-                # Additional required features with defaults
-                "Order_Amount": 0.0,
-                "Filled": 0.0,
-                "Total": 0.0,
-                "future_price": latest.get(
-                    "close", 0.0
-                ),  # Use current price as estimate
-                "vol_adjusted_price": latest.get("close", 0.0),
-                "volume_ma": latest.get("volume", 0.0),
-                "news_sentiment": 0.0,  # Neutral sentiment
-                "social_feature": 0.0,
-                "order_book_depth": 0.0,
+                "lower_bb": latest.get("bb_low", latest.get("lower_bb", 0.0)),
+                "sma_bb": latest.get("bb_mid", latest.get("sma_bb", 0.0)),
+                "upper_bb": latest.get("bb_high", latest.get("upper_bb", 0.0)),
             }
-
-            # Ensure all required features are present with defaults if missing
-            for feature in self.REQUIRED_FEATURES:
-                if feature not in features:
-                    features[feature] = 0.0
-
+            if "volume_ma" in latest:
+                features["volume_ma"] = latest["volume_ma"]
             return features
         except Exception as e:
             self.logger.error(f"Error creating features: {e}")
-            return {k: 0.0 for k in self.REQUIRED_FEATURES}
-
-    def _extract_trade_learned_features(self, features: dict) -> Dict[str, float]:
-        """
-        Extract features for the trade-learned model from market data
-        """
-        try:
-            # Get current time
-            now = datetime.now()
-
-            # Get current price and volume data
-            current_price = features.get("price", 97000.0)
-            current_volume = features.get("volume", 1000.0)
-
-            # Calculate trade characteristics (for simulation)
-            estimated_trade_size = 0.01  # Small default trade size
-            estimated_trade_value = estimated_trade_size * current_price
-
-            # Extract the features that the model was trained on
-            trade_features = {
-                # Market timing features
-                "hour_of_day": now.hour,
-                "day_of_week": now.weekday(),
-                "minute_of_hour": now.minute,
-                # Price and volatility features (simulated from current market data)
-                "price_ma_5": features.get("sma", current_price),
-                "price_ma_20": features.get("sma", current_price),
-                "price_momentum_short": 0.0,  # Would need historical data
-                "price_momentum_long": 0.0,  # Would need historical data
-                # Technical indicators
-                "rsi": features.get("rsi", 50.0),
-                "macd": features.get("macd", 0.0),
-                "bollinger_position": 0.5,  # Default neutral position
-                # Volume features
-                "volume_ma": features.get("volume_ma", current_volume),
-                "volume_ratio": 1.0,  # Default
-                # Market structure
-                "volatility_estimate": features.get("atr", current_price * 0.02)
-                / current_price,
-                "spread_estimate": 0.001,  # 0.1% default spread
-                # Trade characteristics (estimated)
-                "trade_size_btc": estimated_trade_size,
-                "trade_value_usd": estimated_trade_value,
-                "entry_price": current_price,
-                "trade_hour": now.hour,
-                "trade_dow": now.weekday(),
-                "position_size_ratio": estimated_trade_value
-                / 10000.0,  # Assume $10k portfolio
-            }
-
-            return trade_features
-
-        except Exception as e:
-            self.logger.error(f"Error extracting trade-learned features: {e}")
-            # Return default features
-            now = datetime.now()
-            return {
-                "price_ma_5": 97000.0,
-                "price_ma_20": 97000.0,
-                "price_momentum_short": 0.0,
-                "price_momentum_long": 0.0,
-                "rsi": 50.0,
-                "macd": 0.0,
-                "bollinger_position": 0.5,
-                "volume_ma": 1000.0,
-                "volume_ratio": 1.0,
-                "hour_of_day": now.hour,
-                "day_of_week": now.weekday(),
-                "minute_of_hour": now.minute,
-                "volatility_estimate": 0.02,
-                "spread_estimate": 0.001,
-                "trade_size_btc": 0.01,
-                "trade_value_usd": 970.0,
-                "entry_price": 97000.0,
-                "trade_hour": now.hour,
-                "trade_dow": now.weekday(),
-                "position_size_ratio": 0.097,
-            }
+            return {}
 
     def _technical_analysis_prediction(self, features: dict) -> np.ndarray:
         """Simple technical analysis based prediction as fallback."""

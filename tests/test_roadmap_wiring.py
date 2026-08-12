@@ -6,6 +6,7 @@ handoffs of its four wiring blocks — plus a tripwire pinning the
 ``get_all_trades`` column order the Kelly block depends on positionally.
 """
 
+import ast
 import inspect
 import os
 import re
@@ -121,7 +122,42 @@ def test_fee_gate_rejects_sub_breakeven_move():
     assert not viable and net <= 0
     choppy_tp = dynamic_take_profit("CHOPPY", entry, side="BUY")
     choppy_viable, choppy_net, _ = is_trade_viable(entry, choppy_tp, 0.001, side="BUY")
-    assert choppy_viable and choppy_net == pytest.approx(0.01, abs=1e-6)
+    assert choppy_viable and choppy_net == pytest.approx(0.00996, abs=1e-6)
+
+
+def test_main_fee_gate_exception_fails_closed():
+    tree = ast.parse(open("main.py").read())
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    fee_gate_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "is_trade_viable"
+    ]
+    assert len(fee_gate_calls) == 1
+
+    parent = parents[fee_gate_calls[0]]
+    while not isinstance(parent, ast.Try):
+        parent = parents[parent]
+    fee_gate_try = parent
+    handler_nodes = [
+        statement for handler in fee_gate_try.handlers for statement in handler.body
+    ]
+    assert any(
+        isinstance(child, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "signal"
+            for target in child.targets
+        )
+        and isinstance(child.value, ast.Constant)
+        and child.value.value == "HOLD"
+        for child in handler_nodes
+    )
 
 
 def test_env_flag_semantics_match_main_py(monkeypatch):

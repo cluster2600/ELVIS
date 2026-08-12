@@ -52,6 +52,7 @@ plots_and_metrics/
 
 # Large model files (keep model structure but exclude large binaries)
 models/
+*.pkl
 
 # OS-specific
 .DS_Store

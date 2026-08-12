@@ -290,21 +290,21 @@ vault_status = {
 
 ## 🔍 Security Testing
 
-### Automated Security Checks (real tests)
+### Automated Security Checks
 - `tests/test_api_connection_tester_vault_token.py` — asserts the old
   hardcoded `trading-bot-token` literal is gone and that a missing
   `VAULT_TOKEN` is handled gracefully (warn + `DISCONNECTED`) instead of being
   defaulted.
-- `tests/test_vault_connection.py` and `tests/test_vault_integration.py` —
-  exercise the Vault client / secrets-manager connection and round-trip
-  behaviour.
 
-Run them with:
+Run it with:
 ```bash
-pytest tests/test_api_connection_tester_vault_token.py \
-       tests/test_vault_connection.py \
-       tests/test_vault_integration.py
+pytest tests/test_api_connection_tester_vault_token.py
 ```
+
+`tests/test_vault_connection.py` and `tests/test_vault_integration.py` are
+manual diagnostics, not pytest tests. They can contact a local Vault and the
+former can write test secrets, so run them only against an explicitly prepared
+disposable Vault.
 
 ## 📚 Additional Resources
 

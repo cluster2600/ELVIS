@@ -1,0 +1,5 @@
+# Dependencies used only by the optional Python 3.10 training container.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.10.0+cpu
+seaborn==0.13.2
+tensorflow==2.16.2

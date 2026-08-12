@@ -1,14 +1,21 @@
-# ELVIS Architecture (verified 2026-07-12)
+# ELVIS compatibility-runtime architecture (verified 2026-07-12)
 
 Diagrams below reflect the **actual** code after the doc-audit fixes and the
 2026-07 root reorganization — every module, class, and path shown exists and
 is import-verified.
 
+> This is the audited legacy/runtime-compatibility topology, retained while
+> ELVIS V2 is migrated in reversible slices. It is not the V2 target and does
+> not prove V2 activation. See the [V2 architecture](V2_ARCHITECTURE.md) for the
+> new approach and the
+> [migration roadmap](architecture_migration/04-migration-roadmap.md) for
+> current authority. `ACTIVE` remains a **NO-GO**.
+
 ## System / runtime flow
 
 ```mermaid
 flowchart TD
-    A["main.py (paper or live mode)"] --> B["core.bootstrap.bootstrap_application"]
+    A["main.py (paper-only capability gate)"] --> B["core.bootstrap.bootstrap_application"]
     B --> C["core.di container"]
     C --> S["trading.strategies.EnsembleStrategy"]
     C --> X["trading.execution.BinanceExecutor"]
@@ -18,7 +25,10 @@ flowchart TD
     S -->|BUY / SELL / HOLD| G["signal-quality gates: regime detector + winrate filter + trading.signals (RSI, momentum, BB squeeze, hours, MACD, order flow, MTF)"]
     G -->|approved signal| SZ["sizing + fee gate: trading.risk.position_sizing + trading.fees.fee_gate"]
     G -->|vetoed| H["HOLD"]
-    SZ -->|viable trade| X
+    SZ -->|viable trade| I["typed Signal + OrderIntent"]
+    I --> OS["OrderService: one call, no retry"]
+    OS --> LA["LegacyPaperExecutionAdapter"]
+    LA --> X
     X -->|paper fills + PnL| DB[("Postgres: np.trades / np.open_positions")]
     X -.->|"exits: trading.execution.exits (trailing stop, regime take-profit)"| X
     DB --> API["trading.utils.trade_history_api Flask :5050"]
@@ -65,13 +75,14 @@ flowchart TD
 - `shap` and `optuna` have no Python 3.14 wheels yet; `explain_predictions` and
   `tune_hyperparameters` **degrade gracefully** (feature-importance export and
   `GridSearchCV` respectively) so the documented interface works everywhere.
-- `ydf` / `tensorflow` are likewise absent on 3.14; the ensemble skips those
-  members via import guards. The `[ml]` extra (torch, coremltools, gymnasium,
-  openai, TA-Lib, xgboost, lightgbm) covers the 3.14-compatible add-ons and
-  **deliberately excludes** ydf/tensorflow.
-- The full TF/YDF stack runs in a dedicated **Python 3.10 container**
+- The synthetic YDF and CoreML ensemble members were retired: neither had a
+  deployable, provenance-backed model. The tracked YDF placeholder scored 37.1%
+  OOB accuracy, below its 39.3% majority-class baseline. The `[ml]` extra now
+  contains only supported 3.14-compatible add-ons.
+- The unified PyTorch trainer and its optional TensorFlow path run in a
+  dedicated **Python 3.10 container**
   (`docker/Dockerfile.ml310`, compose profile `ml`:
   `docker compose --profile ml run --rm elvis-ml-trainer`). The two runtimes
   share only the `models/` volume — never imports — so trained artifacts flow
   to the 3.14 bot without dependency coupling. See
-  [DEPLOYMENT.md](DEPLOYMENT.md).
+  [UNIFIED_TRAINING_GUIDE.md](UNIFIED_TRAINING_GUIDE.md).

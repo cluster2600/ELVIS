@@ -7,19 +7,44 @@
 [![Python](https://img.shields.io/badge/python-3.14%20%7C%203.10%20(ML)-blue)](docs/DEPLOYMENT.md)
 [![License](https://img.shields.io/badge/license-BTC__BOT-lightgrey)](LICENSE)
 
-ELVIS is a BTC futures trading bot that combines an ML ensemble (RandomForest,
-neural nets, optional YDF/CoreML members), market-regime detection, and a
-layered signal-quality pipeline with strict risk management. Secrets live in
-HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
+ELVIS is a BTC futures trading bot undergoing a V2 architecture migration. V2
+keeps a small Python modular monolith while replacing coupled state changes
+with typed decisions, durable journals, atomic state owners, generation-bound
+activation, and least-authority PostgreSQL roles.
 
-> **Paper trading is the supported mode.** Live mode exists but is not
-> considered safe for unattended use. Nothing here is financial advice, and no
-> profitability figures are guaranteed.
+> **Paper trading is the only executable mode.** `--mode live` is retained as a
+> compatibility value but is rejected before application bootstrap; the current
+> executor has no validated live-submission capability. Nothing here is
+> financial advice, and no profitability figures are guaranteed.
+
+## ELVIS V2 programme
+
+This branch contains the incremental build of ELVIS V2. It is a new
+architecture approach, not a released or deployed V2 runtime:
+
+- pure, fail-closed signal and risk decisions precede external effects;
+- immutable journal facts and deterministic replay replace inferred state;
+- one atomic owner commits each related order, fill, position, and account
+  transition;
+- a database fence and runtime generation prevent simultaneous legacy and V2
+  authorities; and
+- an offline bootstrap prepares narrowly scoped database identities without
+  granting the running bot migration authority.
+
+The compatibility paper runtime remains authoritative. The new persistence,
+fence, activation, and bootstrap capabilities are implemented but dormant;
+dedicated deployment identities, fail-closed runtime composition, shadow and
+reconciliation evidence, rollback rehearsal, soak, and explicit operator
+approval are still required. `ACTIVE` remains a **NO-GO**.
+
+Start with the [V2 architecture overview](docs/V2_ARCHITECTURE.md). The
+[migration roadmap](docs/architecture_migration/04-migration-roadmap.md) is the
+authoritative implementation ledger.
 
 ## Features
 
-- **Ensemble strategy** — multiple models vote; graceful degradation when
-  optional ML deps (ydf, tensorflow, coremltools) are absent
+- **Ensemble strategy** — technical, research, RL, Bonenkamp, and optional MLX
+  signals vote; incompatible Research/Bonenkamp artefacts stay disabled
 - **Signal-quality gates** — market regime, RSI, momentum persistence,
   BB squeeze, trading hours, MACD divergence, order flow, multi-timeframe
   alignment ([roadmap implementation](docs/profitability_roadmap_implementation.md))
@@ -32,7 +57,10 @@ HashiCorp Vault/OpenBao; monitoring runs on Prometheus + Grafana + Loki.
 - **Reproducible training** — checkpointed pipeline with resume
   (`--resume latest|best`), walk-forward optimization, RL agents
 
-## Quick start
+## Compatibility-runtime quick start
+
+These commands run the current paper runtime. They do not activate the dormant
+V2 authority path.
 
 ```bash
 git clone https://github.com/cluster2600/ELVIS.git && cd ELVIS
@@ -54,12 +82,16 @@ python main.py --mode paper
 ```bash
 docker compose up -d                                  # bot + database
 docker compose --profile observability up -d          # + Prometheus/Grafana/Loki
-docker compose --profile ml run --rm elvis-ml-trainer # py3.10 ML-legacy training
+docker compose --profile ml run --rm elvis-ml-trainer # py3.10 ML training
 ```
 
-The bot image runs Python 3.14; TensorFlow/YDF/CoreML training runs in a
-separate Python 3.10 container sharing the `models/` volume — see
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+The current Compose/Ansible path is not the V2 cut-over procedure. Do not infer
+V2 database authority or readiness from a healthy legacy container.
+
+The bot image runs Python 3.14; the unified PyTorch trainer and its optional
+TensorFlow path run in a separate Python 3.10 container sharing the `models/`
+volume — see
+[docs/UNIFIED_TRAINING_GUIDE.md](docs/UNIFIED_TRAINING_GUIDE.md).
 
 ## Project layout
 
@@ -82,9 +114,11 @@ tests/             # pytest suite (CI: python 3.14, heavy deps absent)
 
 | Topic | Where |
 |---|---|
-| Architecture & diagrams | [docs/architecture.md](docs/architecture.md) · [docs/ELVIS_SYSTEM_ARCHITECTURE.md](docs/ELVIS_SYSTEM_ARCHITECTURE.md) |
-| Components reference | [docs/COMPONENTS.md](docs/COMPONENTS.md) |
-| Deployment (Ansible + Docker) | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| V2 overview and status | [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md) · [migration ledger](docs/architecture_migration/04-migration-roadmap.md) |
+| V2 detailed architecture | [target contracts and diagrams](docs/architecture_migration/03-target-architecture.md) |
+| Compatibility runtime | [verified topology](docs/architecture.md) · [components](docs/COMPONENTS.md) |
+| Architecture evidence | [audit and reference comparison](docs/architecture_migration/README.md) |
+| Current deployment — not V2 cut-over | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 | Security | [SECURITY.md](SECURITY.md) · [docs/SECURITY_GUIDE.md](docs/SECURITY_GUIDE.md) |
 | Vault / secrets | [docs/VAULT_INTEGRATION.md](docs/VAULT_INTEGRATION.md) · [docs/VAULT_SETUP.md](docs/VAULT_SETUP.md) |
 | Training | [docs/training.md](docs/training.md) · [docs/UNIFIED_TRAINING_GUIDE.md](docs/UNIFIED_TRAINING_GUIDE.md) |

@@ -1,5 +1,13 @@
 # ELVIS System Architecture - Container Relationships & Port Mapping
 
+> **Compatibility-runtime reference.** This page documents the existing
+> container and observability topology. It does not include or activate the
+> dormant V2 durable owner, database fence, runtime generations, or
+> least-authority role bootstrap. Use the
+> [V2 architecture](V2_ARCHITECTURE.md) and
+> [migration roadmap](architecture_migration/04-migration-roadmap.md) for the
+> new design and current status.
+
 ## 🏗️ Complete System Architecture
 
 ```mermaid
