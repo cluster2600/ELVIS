@@ -1195,4 +1195,5 @@ def test_order_lifecycle_only_approved_modules_consume_contract() -> None:
         Path("trading/persistence/journal_codec.py"),
         Path("trading/persistence/order_position_journal.py"),
         Path("trading/persistence/paper_account_journal.py"),
+        Path("trading/persistence/paper_account_readiness.py"),
     ]

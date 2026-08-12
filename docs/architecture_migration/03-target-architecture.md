@@ -895,14 +895,123 @@ preconditions derive `BLOCKED`; failed account or position replay, unresolved
 submissions, or unaccounted orders derive `RECONCILIATION_REQUIRED`, which takes
 priority when both classes are present. A non-empty `np.open_positions`
 watermark always derives its own blocker.
+If a raw migration row is malformed and therefore cannot become a valid
+`MigrationIdentity`, the applied tuple retains only its decodable prefix and an
+explicit `MIGRATION_DRIFT` finding becomes the single canonical ledger blocker;
+no invalid row is synthesized into apparently valid evidence.
 
 The assessment is explicitly non-authoritative and stale as soon as its source
 snapshot ends. `PREPARED_FOR_FENCE` is not `READY`, does not grant a runtime
 lease, and cannot activate an owner. M9b.13a contains no database access,
 readiness endpoint, startup wiring, fence row, role or trigger, writer shutdown,
-shadow path, or cut-over. A following PostgreSQL adapter must obtain all evidence
-from one repeatable-read, read-only snapshot; a still later activation boundary
-must repeat the assessment under its own fence, account, and position locks.
+shadow path, or cut-over. M9b.13b below obtains all evidence from one
+repeatable-read, read-only snapshot; a still later activation boundary must
+repeat the assessment under its own fence, account, and position locks.
+
+M9b.13b supplies that dormant PostgreSQL evidence adapter as the direct,
+non-facade
+`trading.persistence.paper_account_readiness.PostgresPaperAccountReadiness`.
+Its constructor accepts an injected fresh-connection factory and its only
+operation is positional-only `assess(context, /)`. The public error boundary is
+`PaperAccountReadinessError`, with `PaperAccountReadinessInputError` for a
+non-exact context rejected before connection and
+`PaperAccountReadinessStorageError` when PostgreSQL, packaged migration loading,
+or snapshot completion cannot produce one complete assessment. A storage error
+never returns partial findings.
+
+One assessment uses one connection and one cursor. Its transaction is
+`REPEATABLE READ` and `READ ONLY`. It loads the packaged migration identities,
+then validates the physical authority of `np.schema_migrations` before trusting
+any ledger row. That relation must be one ordinary permanent table with exactly,
+in order, `version integer NOT NULL`, `name text NOT NULL`,
+`checksum character(64) NOT NULL`, and
+`applied_at timestamp with time zone NOT NULL DEFAULT now()`; its only
+constraint must be the non-deferrable, initially immediate, validated primary
+key on `version`. Rules, triggers, row-level security, forced row-level
+security, inheritance, and policies are forbidden.
+It then compares the applied contiguous prefix with the packaged identities.
+An absent ledger, a pending prefix, checksum or name drift, malformed raw row,
+physical metadata drift, or behavior drift returns only migration evidence and
+stops before account, position, raw claim, or legacy-watermark queries. A
+malformed row retains only the valid decoded prefix and carries the canonical
+`MIGRATION_DRIFT` finding rather than being misreported as merely pending.
+
+Even an exact ledger is not sufficient authority for business reads. The
+adapter next verifies all sixteen durable business relations as ordinary,
+permanent PostgreSQL tables with no rules, user triggers, row-level security,
+forced row-level security, inheritance, or policies. The exact inventory is
+`np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.trades`,
+`np.trading_session_resets`, `np.order_events`, `np.orders`,
+`np.position_streams`, `np.paper_account_streams`,
+`np.paper_account_balances`, `np.paper_margin_reservations`,
+`np.paper_account_batch_manifests`, `np.paper_account_settlements`, and
+`np.paper_account_postings`. A missing table, view or foreign-table substitution,
+temporary or unlogged persistence, or behavior overlay is canonical
+`MIGRATION_DRIFT` and stops before any business relation is read.
+
+The later legacy fence will cover seven shared tables with no execution-scope
+column. Readiness therefore cannot be established from a caller-local subset.
+After exact migration proof, M9b.13b inventories every
+`paper_account_streams` and `position_streams` identity across every execution
+scope. It strictly replays each account and position through the existing
+M9b.12c and M9b.3 replay functions, using the same read-only cursor and each
+row's stored scope, with no nested public repository call or second connection.
+The requested `(account_key, execution_scope)` must exist exactly; every other
+account, including one in another scope, is `UNEXPECTED_ACCOUNT`. Missing,
+wrong-scope, corrupt, insolvent, provenance-mismatched, reserved-margin, and
+open-position evidence remains explicit and fail-closed.
+
+Before replay, the adapter inventories raw rows globally, retaining full
+relational identity and multiplicity. An order claim is
+`(position_key, execution_scope, client_order_id)`; a manifest claim is
+`(account_key, execution_scope, position_key, client_order_id)`. It rejects a
+repeated globally unique client-order claim instead of collapsing duplicates
+into a set. After strict replay, raw order rows must equal replayed order rows
+with the same multiplicity, and raw manifest rows must equal replayed manifest
+rows with the same multiplicity. Thus an orphan raw row, duplicate claim, row
+outside every stream/account, or replay omission cannot disappear behind a
+valid-looking projection.
+
+The adapter then compares the raw global order claims with the raw global
+manifest claims after the manifest's account key is removed. Exact relational
+and multiplicity equality is the required order-to-manifest bijection. An order
+claim without a manifest claim is `UNACCOUNTED_ORDER`; a manifest claim without
+an order claim is `ACCOUNT_REPLAY_FAILED`. A raw-versus-replayed order mismatch
+also derives `POSITION_REPLAY_FAILED` for `np.orders`; a raw-versus-replayed
+manifest mismatch derives `ACCOUNT_REPLAY_FAILED` for
+`np.paper_account_batch_manifests`. Every `PENDING`, `RECONCILING`, `OPEN`,
+`PARTIAL`, or `CANCEL_PENDING` lifecycle is `UNRESOLVED_SUBMISSION`, while any
+replayed open position is `DURABLE_OPEN_POSITION`. An empty, orphaned, corrupt,
+or otherwise unreplayable position stream is `POSITION_REPLAY_FAILED`;
+foreign-scope state is not ignored.
+
+Only after those reads does the adapter capture exact `(row_count, max_id)`
+watermarks for `np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.trades`, and
+`np.trading_session_resets`. These watermarks inventory the snapshot; they do
+not adopt, reconcile, or semantically account for legacy rows. The pure
+contract derives `LEGACY_OPEN_POSITION` from a non-empty
+`np.open_positions` watermark.
+
+The adapter executes only reads, takes no explicit or row lock, performs no
+DML, never commits, and ends the snapshot with rollback. It is not exported by
+the persistence facade and has no production runtime consumer. Its returned
+assessment still has `snapshot_authoritative == False`: a concurrent legacy
+commit may become visible immediately after the snapshot began or ended.
+M9b.13b adds no schema migration, fence record, rotating runtime generation,
+trigger, database-role restriction, legacy-writer shutdown, health/startup gate,
+reconciliation mutation, shadow execution, or cut-over decision.
+
+A future activation transaction must first establish a database-enforced global
+legacy-writer fence, then repeat this evidence under the lock order
+`fence -> account -> position`; it cannot reuse an earlier
+`PREPARED_FOR_FENCE` result.
+That transition must wait out in-flight legacy writes, prevent stale binaries
+from writing after activation, and retain an explicit rollback policy. The
+current global full-history replay is also unbounded and requires measured soak,
+operational timeouts, and a bounded replay or snapshot strategy before runtime
+activation.
 
 ## Runtime and configuration
 
@@ -1062,13 +1171,13 @@ Cut-over still requires: completion and soak evidence for the dormant integrated
 owner; persisted instrument identity and version plus price, fee, tick, lot, and
 opening-capital provenance;
 funding, borrowing, liquidation, and unrealised mark-to-market rules;
-generation and execution-scope provenance; atomic legacy compatibility
+rotating runtime generation and execution-scope fencing; atomic legacy compatibility
 projections where they remain necessary; durable reconciliation and quarantine
 for unsupported, unresolved, or incompatible pre-atomic histories; startup
-migration/readiness checks and an explicit repository factory; bounded replay
-or snapshots; a proved sole-writer fence over every legacy executor and
-database writer; side-effect-free shadow parity; and an explicit cut-over
-decision.
+composition of the non-authoritative assessment plus its locked activation
+re-check; bounded replay or snapshots; a proved sole-writer fence over every
+legacy executor and database writer; side-effect-free shadow parity; and an
+explicit cut-over decision.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

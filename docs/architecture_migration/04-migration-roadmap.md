@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.12d verified dormant account-first atomic owner; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.13b dormant global pre-fence assessment implemented; final counted gates pending; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -3048,14 +3048,17 @@ derives a legacy-open-position blocker from the corresponding watermark, and
 returns exactly `PREPARED_FOR_FENCE`, `BLOCKED`, or
 `RECONCILIATION_REQUIRED`. Reconciliation findings take precedence over ordinary
 blockers.
+Malformed raw migration rows are not coerced into `MigrationIdentity` values:
+the evidence retains only the decodable prefix and canonicalizes an explicit
+`MIGRATION_DRIFT` blocker.
 
 Every assessment reports `snapshot_authoritative == False`. In particular,
 `PREPARED_FOR_FENCE` is not permission to start or activate trading. This slice
 has no SQL, repository, migration, runtime consumer, health/readiness endpoint,
 generation fence, trigger, role change, shadow execution, or cut-over. M9b.13b
-must collect the evidence in one `REPEATABLE READ READ ONLY` PostgreSQL snapshot;
-the eventual activation transaction must independently re-check it under the
-global lock order `fence -> account -> position`.
+now collects the evidence in one `REPEATABLE READ READ ONLY` PostgreSQL
+snapshot; the eventual activation transaction must independently re-check it
+under the global lock order `fence -> account -> position`.
 
 Verification commands for this slice:
 
@@ -3105,13 +3108,182 @@ TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
 git diff --check
 ```
 
-The dedicated contract suite passes 120 tests under each supported Python
-interpreter, and the exact adjacent command passes 567 tests under each
+The dedicated contract suite passes 122 tests under each supported Python
+interpreter, and the exact adjacent command passes 569 tests under each
 interpreter. Black, isort, flake8, Python 3.10 compilation, and the diff check
 pass. The complete non-PostgreSQL gate passes 2,244 tests, skips 50, deselects
 113, and passes 7 subtests under `Pacific/Honolulu`. Pytest exits successfully;
 the legacy background threads still emit their known post-success logging
 errors after the result.
+
+### M9b.13b dormant global PostgreSQL pre-fence assessment
+
+M9b.13b implements the M9b.13a port through the direct, non-facade
+`trading.persistence.paper_account_readiness.PostgresPaperAccountReadiness`.
+The constructor accepts one injected fresh-connection factory and
+`assess(context, /)` returns a complete `PaperAccountReadinessAssessment` or
+raises a typed error. `PaperAccountReadinessError` is the common boundary,
+`PaperAccountReadinessInputError` rejects a non-exact context before connection,
+and `PaperAccountReadinessStorageError` reports connection, query, packaged
+migration, replay-boundary, or snapshot-finalization failure without returning a
+partial assessment.
+
+Each call obtains one connection and one cursor, starts a `REPEATABLE READ`,
+`READ ONLY` transaction, and rolls it back after the report is built. It never
+commits.
+The adapter first loads the packaged migration identities and proves the
+physical authority of `np.schema_migrations`. It must be one ordinary permanent
+table with exactly, in order, `version integer NOT NULL`, `name text NOT NULL`,
+`checksum character(64) NOT NULL`, and
+`applied_at timestamp with time zone NOT NULL DEFAULT now()`; its only
+constraint must be the non-deferrable, initially immediate, validated primary
+key on `version`. Rules, triggers, row-level security, forced row-level
+security, inheritance, and policies are forbidden. Only then does
+the adapter read and compare the contiguous migration prefix. A missing ledger,
+incomplete prefix, identity drift, malformed raw row, physical metadata drift,
+or behavior overlay produces the canonical migration blocker and stops before
+business inventory. A malformed trailing row preserves only its decodable
+prefix and is `MIGRATION_DRIFT`, not `MIGRATION_PENDING`.
+
+An exact ledger is followed by a second authority gate covering all sixteen
+business relations: `np.account_balances`, `np.liquidations`,
+`np.margin_history`, `np.model_predictions`, `np.open_positions`, `np.trades`,
+`np.trading_session_resets`, `np.order_events`, `np.orders`,
+`np.position_streams`, `np.paper_account_streams`,
+`np.paper_account_balances`, `np.paper_margin_reservations`,
+`np.paper_account_batch_manifests`, `np.paper_account_settlements`, and
+`np.paper_account_postings`. Each must be an ordinary permanent table with no
+rules, user triggers, row-level security, forced row-level security,
+inheritance, or policies. Missing relations, views or other relation kinds,
+non-permanent persistence, and behavior overlays produce `MIGRATION_DRIFT`
+before a business row is trusted.
+
+The future legacy fence is global because none of the seven migration-`0001`
+tables carries an execution scope. The assessment therefore scans every account
+and position identity across every stored scope, not only the requested scope.
+It passes the same cursor and each identity's stored scope into strict account
+and position replay with `lock=False`; it neither calls a public repository
+method nor opens a nested connection. The requested account key and scope must
+match exactly. Missing or wrong-scope expected state, extra same- or
+foreign-scope accounts, provenance mismatch, insolvency, margin reservations,
+replay failures, and durable open positions all remain stable typed findings.
+
+Before replay, the adapter reads the raw global relational claims without
+collapsing multiplicity. Orders retain
+`(position_key, execution_scope, client_order_id)` and manifests retain
+`(account_key, execution_scope, position_key, client_order_id)`. Repeated global
+client-order claims fail closed. The complete raw order multiset must equal the
+strictly replayed order multiset, and the complete raw manifest multiset must
+equal the strictly replayed manifest multiset. Orphan rows, duplicate claims,
+rows outside every stream/account, and replay omissions therefore remain
+visible.
+
+The adapter also compares raw order claims with raw manifest claims after
+normalizing away only the manifest account key. A missing manifest claim is
+`UNACCOUNTED_ORDER`; a missing order claim is `ACCOUNT_REPLAY_FAILED`.
+Raw-versus-replayed mismatches separately identify `np.orders` as
+`POSITION_REPLAY_FAILED` or `np.paper_account_batch_manifests` as
+`ACCOUNT_REPLAY_FAILED`. All five non-terminal lifecycle states are
+`UNRESOLVED_SUBMISSION`, and an empty, orphaned, corrupt, or foreign-scope
+position stream that cannot replay is `POSITION_REPLAY_FAILED`. The adapter then
+captures exact row-count and maximum-ID watermarks for
+`np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.trades`, and
+`np.trading_session_resets`. A non-empty `np.open_positions` watermark derives
+`LEGACY_OPEN_POSITION`; other legacy rows are inventoried, not adopted or
+reconciled.
+
+All adapter SQL is read-only: no DML, DDL, `LOCK`, `FOR UPDATE`, or commit is
+permitted. The adapter is not exported by `trading.persistence` and has no
+production runtime consumer. The result remains explicitly stale-on-return and
+`snapshot_authoritative == False`; the PostgreSQL matrix includes a concurrent
+legacy commit that is intentionally absent from the already-open repeatable-read
+snapshot. Consequently, `PREPARED_FOR_FENCE` is evidence for a later locked
+transition, not permission to start trading.
+
+This slice adds no migration, fence record, runtime generation, trigger,
+database-role restriction, legacy-writer shutdown, startup or health wiring,
+reconciliation mutation, shadow execution, or cut-over. A later activation
+boundary must install and lock the global fence, wait out in-flight legacy
+writes, repeat this assessment under `fence -> account -> position`, and prevent
+old binaries from writing after activation. Full global replay is currently
+unbounded, so bounded replay or snapshots, operational timeouts, soak evidence,
+and an explicit rollback decision remain mandatory.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_paper_account_readiness_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_paper_account_readiness_postgres.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_order_position_journal.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_account_readiness_postgres.py
+.venv/bin/isort --check-only \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_account_readiness_postgres.py
+.venv/bin/flake8 \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_paper_account_readiness_postgres.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The literal M9b.13b verification commands above passed the contract-plus-
+repository pair with 184 tests under each Python interpreter, and the exact
+adjacent five-file set with 308 tests under each interpreter. The focused
+PostgreSQL 15 readiness suite passed 22 tests under each interpreter; the full
+PostgreSQL 15 `tests/postgres` suite passed 132 tests under `.venv/bin/python`.
+The full non-PostgreSQL Honolulu run passed 2,308 tests, with 50 skipped, 135
+deselected, and 7 subtests. Black, isort, flake8, Python 3.10 compilation, and
+the diff check were green.
 
 ## Cut-over policy
 

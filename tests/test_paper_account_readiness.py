@@ -344,18 +344,49 @@ def test_matching_supplied_migration_finding_is_replaced_by_canonical_subject() 
     )
 
 
-def test_conflicting_supplied_migration_finding_is_rejected() -> None:
-    with pytest.raises(ValueError, match="migration"):
-        assessment(
-            applied_migrations=(),
-            findings=(
-                finding(
-                    PaperAccountReadinessFindingKind.MIGRATION_DRIFT,
-                    "np.schema_migrations",
-                    subject_kind="migration_ledger",
-                ),
+def test_explicit_raw_migration_drift_overrides_a_decodable_prefix() -> None:
+    result = assessment(
+        applied_migrations=(),
+        findings=(
+            finding(
+                PaperAccountReadinessFindingKind.MIGRATION_DRIFT,
+                "raw-malformed-row",
+                subject_kind="raw_migration_row",
             ),
-        )
+        ),
+    )
+
+    assert result.findings == (
+        PaperAccountReadinessFinding(
+            PaperAccountReadinessFindingKind.MIGRATION_DRIFT,
+            "migration_ledger",
+            "np.schema_migrations",
+        ),
+    )
+
+
+def test_explicit_raw_migration_drift_survives_complete_decodable_prefix() -> None:
+    result = assessment(
+        findings=(
+            finding(
+                PaperAccountReadinessFindingKind.MIGRATION_DRIFT,
+                "malformed-trailing-row",
+                subject_kind="raw_migration_row",
+            ),
+        ),
+    )
+
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert result.findings == (
+        PaperAccountReadinessFinding(
+            PaperAccountReadinessFindingKind.MIGRATION_DRIFT,
+            "migration_ledger",
+            "np.schema_migrations",
+        ),
+    )
+
+
+def test_conflicting_supplied_migration_finding_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="migration"):
         assessment(
@@ -794,7 +825,9 @@ def test_readiness_contract_is_pure_and_has_no_runtime_consumer() -> None:
         if _uses_paper_account_readiness(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == []
+    assert consumers == [
+        Path("trading/persistence/paper_account_readiness.py"),
+    ]
     assert {Path("main.py"), Path("core/bootstrap.py")} <= set(scanned)
 
     tree = ast.parse(module_path.read_text(encoding="utf-8"))

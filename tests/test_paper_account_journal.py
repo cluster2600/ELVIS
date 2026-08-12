@@ -798,5 +798,6 @@ def test_paper_account_repository_is_unwired_and_not_facade_exported():
 
     assert consumers == [
         Path("trading/persistence/atomic_paper_account_owner.py"),
+        Path("trading/persistence/paper_account_readiness.py"),
     ]
     assert not _uses_paper_account_journal(facade_path.read_text(encoding="utf-8"))

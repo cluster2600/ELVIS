@@ -313,15 +313,28 @@ class PaperAccountReadinessAssessment:
             for finding in findings_by_identity.values()
             if finding.kind in _MIGRATION_FINDINGS
         }
+        raw_drift = (
+            PaperAccountReadinessFindingKind.MIGRATION_DRIFT in supplied_migration_kinds
+        )
         if expected_migration_kind is None:
-            if supplied_migration_kinds:
+            if supplied_migration_kinds - {
+                PaperAccountReadinessFindingKind.MIGRATION_DRIFT
+            }:
                 raise ValueError("migration findings conflict with matching ledgers")
-            if watermark_relations != _LEGACY_RELATIONS:
+            if raw_drift:
+                expected_migration_kind = (
+                    PaperAccountReadinessFindingKind.MIGRATION_DRIFT
+                )
+            elif watermark_relations != _LEGACY_RELATIONS:
                 raise ValueError(
                     "legacy_watermarks must cover every legacy relation once"
                 )
-        else:
-            if supplied_migration_kinds - {expected_migration_kind}:
+        if expected_migration_kind is not None:
+            if raw_drift:
+                expected_migration_kind = (
+                    PaperAccountReadinessFindingKind.MIGRATION_DRIFT
+                )
+            elif supplied_migration_kinds - {expected_migration_kind}:
                 raise ValueError("migration finding conflicts with migration evidence")
             findings_by_identity = {
                 identity: finding
