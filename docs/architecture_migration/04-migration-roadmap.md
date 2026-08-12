@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission contract; M9b.8 FIFO economics and M9b.9 quote settlement without SQL) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.7 durable-submission result contract; M9b.10a terminal paper plan; M9b.10b PostgreSQL owner deferred) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -2054,6 +2054,115 @@ contract itself passes 50 tests under both supported Python interpreters.
 Black, isort, flake8, Python 3.10 compilation, and the diff check pass. The
 complete non-PostgreSQL suite passes 1,797 tests, skips 50, deselects 43, and
 passes 7 subtests under `Pacific/Honolulu`.
+
+### M9b.10a pure terminal paper-submission plan
+
+M9b.10a extends only the pure `trading.application.durable_submission`
+boundary and its package exports. `PaperPlannedFill(event_id, fill)` couples one
+non-durable `ConfirmedFill` candidate to the event identity it would receive in
+the journal. `PaperSubmissionPlan(attempt, submission, fills)` contains the
+exact `SubmissionAttemptContext`, exactly one `SubmissionAcknowledged`, and a
+non-empty tuple containing only exact `PaperPlannedFill` values. It is a set of
+candidate facts, not a receipt, execution result, or persistence claim.
+
+The plan validates the complete terminal full-fill batch before a future owner
+may write it. The acknowledgement preserves the attempt's client order ID and
+exact observation time. Its event ID and every fill event ID are distinct. Each
+fill preserves the intent's client order ID, symbol, and side, does not predate
+the acknowledgement, and shares one venue order ID with the acknowledgement.
+Trade IDs are unique. Exact-`Decimal` fill quantities must sum to exactly the
+intent quantity, so an empty, partial, or over-filled candidate batch fails
+closed. An ambiguous or failed submission cannot carry planned fills.
+
+`PaperSubmissionPlanner.plan(attempt, /) -> PaperSubmissionPlan` is the narrow
+future-owner dependency. It supplies already stable, precomputed candidate
+facts and promises to retain the exact attempt object. Its data must not depend
+on a hidden clock, random draw, network/database read, mutable market snapshot,
+or a price inferred from `OrderIntent.reference_price`. The protocol cannot by
+itself prove those properties; the later owner must call it only after proving
+under the stream lock that the order is genuinely new, require
+`plan.attempt is attempt`, and cover the concrete planner/composition with
+determinism tests. Replay and reconciliation paths must never invoke it.
+
+This slice deliberately implements no SQL, repository method, migration,
+transaction, paper simulator, venue/market I/O, clock, runtime consumer, or
+composition-root wiring. It does not alter or consume migration
+`0002_order_position_journal.sql`. M9b.10b remains responsible for the first
+narrow PostgreSQL owner: one fresh connection and transaction must lock and
+replay the stream, reserve a genuinely new instruction, append the ACK and all
+terminal full fills at consecutive versions, and commit once. Composing the
+existing public `reserve_instruction` and `append_event` methods is invalid
+because each owns a separate transaction. An exact already-terminal batch may
+return `REPLAYED` without planning; an existing `PENDING`, ACK-only, partial,
+mismatched, gapped, or corrupt history requires reconciliation with no planner
+call, guessed suffix, append, or resubmission. A lost commit acknowledgement
+must preserve `SubmissionCommitUnknown`, and a fresh retry must replay before
+any possible plan.
+
+Migration `0002` is sufficient only for that journal-only ACK/full-fill batch.
+It has no batch manifest and proves no durable balance, posting, margin,
+instrument-snapshot, or legacy-projection invariant. Even after M9b.10b,
+activation remains blocked on all of the following:
+
+- durable balance/posting ownership and margin/admission policy;
+- persisted instrument identity/version and explicit price, fee, tick, and
+  lot-rule snapshot provenance;
+- funding, borrowing, liquidation, and unrealised mark-to-market rules;
+- generation and execution-scope provenance;
+- durable reconciliation and quarantine, including pre-atomic `PENDING`,
+  ACK-only, and partial histories;
+- startup migration/readiness verification and an explicit repository factory;
+- bounded replay or snapshots;
+- a proved sole-writer fence over the legacy executor, inline exits, Balanced
+  Starter, and every other legacy database writer;
+- PostgreSQL rollback, concurrency, exact-replay, and commit-unknown tests; and
+- side-effect-free shadow parity followed by an explicit cut-over decision.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_durable_submission.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  tests/test_domain_contracts.py \
+  tests/test_journaled_order_service.py
+/usr/local/bin/python3.10 -m pytest -q tests/test_durable_submission.py
+.venv/bin/black --target-version py310 --check \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  tests/test_durable_submission.py
+.venv/bin/isort --check-only \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  tests/test_durable_submission.py
+.venv/bin/flake8 \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  tests/test_durable_submission.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/durable_submission.py \
+  trading/application/__init__.py \
+  trading/domain/order_lifecycle.py \
+  trading/domain/orders.py \
+  tests/test_durable_submission.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused application/domain regression suite passes 523 tests. The durable
+submission contract itself passes 135 tests under both supported Python
+interpreters. Black, isort, flake8, Python 3.10 compilation, and the diff check
+pass. The complete non-PostgreSQL suite passes 1,823 tests, skips 50, deselects
+43, and passes 7 subtests under `Pacific/Honolulu`.
 
 ## Cut-over policy
 

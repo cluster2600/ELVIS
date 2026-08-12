@@ -207,6 +207,11 @@ confirmed fills, still without SQL or runtime composition.
 M9b.9 adds the pure, linear quote-settled transition from one such confirmed
 fill to explicitly denominated realised-PnL, fee-debit, and cash deltas. It
 still adds no account state, SQL, or runtime composition.
+M9b.10a adds the pure terminal paper-submission plan consumed by the future
+transaction owner: one acknowledgement followed by one or more correlated
+fills whose exact quantities sum to the complete order quantity. Candidate
+facts remain non-durable, precomputed inputs; this slice still adds no SQL,
+repository, clock, price source, or runtime composition.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -301,6 +306,40 @@ unwired and contains no SQL, repository implementation, venue call, or runtime
 activation. It also does not project balances, fees, realised PnL, trades, or
 open positions, establish a sole-writer mechanism, or fence the legacy writers.
 Those economic projections and ownership gates remain mandatory before cut-over.
+
+M9b.10a narrows the candidate-fact boundary for the first future atomic paper
+owner. `PaperPlannedFill(event_id, fill)` binds each non-durable
+`ConfirmedFill` candidate to its future durable event identity.
+`PaperSubmissionPlan(attempt, submission, fills)` accepts the exact
+`SubmissionAttemptContext`, exactly one `SubmissionAcknowledged`, and a
+non-empty tuple of exact `PaperPlannedFill` values. It requires the
+acknowledgement to preserve the attempt's client order ID and observation time;
+all event IDs, including the attempt ID, must be distinct. Every fill must
+preserve the intent's client order ID, symbol, and side, must not predate the
+acknowledgement, and must share the acknowledgement's venue order ID. Trade IDs
+are unique and the exact-`Decimal` fill quantities must sum to exactly the
+intent quantity. Empty, partial, and over-filled plans fail before persistence.
+
+`PaperSubmissionPlanner.plan(attempt, /) -> PaperSubmissionPlan` is a narrow
+source for those candidate facts. The future composition root must bind it to
+stable, precomputed data for the attempt; planning must not sample a clock,
+randomness, network or database state, manufacture a fill price from
+`OrderIntent.reference_price`, or make any fact durable. The protocol alone
+does not prove those operational properties, so the concrete owner and its
+composition tests remain responsible for them. Candidate facts become durable
+only if the future owner commits the reservation, acknowledgement, and all
+fills in one PostgreSQL transaction.
+
+M9b.10a remains a pure, unwired contract. It adds no SQL, repository, schema
+migration, transaction owner, paper simulator, venue or price I/O, account
+state, or runtime consumer. Migration `0002_order_position_journal.sql` can
+support only the narrow journal batch later planned for M9b.10b: one new order
+reservation followed by an ACK and its terminal exact full fills at consecutive
+stream versions. It does not encode a batch manifest or any balance, posting,
+margin, instrument-snapshot, or compatibility-projection invariant. Therefore,
+an existing `PENDING`, ACK-only, partial-fill, mismatched, or corrupt history is
+reconciliation work; it is never permission to invoke the planner, append a
+guessed suffix, or resubmit.
 
 ### `JournaledOrderService`
 
@@ -552,12 +591,24 @@ implement that owner. M9b.8 defines the pure FIFO economic fold over the exact
 existing journal facts and therefore requires no SQL or schema migration of its
 own. M9b.9 defines only exact quote-settled deltas over that fold and likewise
 requires no SQL or schema migration of its own. None of these slices enforces
-sole ownership or fences the legacy writers. The deterministic in-memory
-projection and settlement are not an activation claim. Cut-over still requires
-the exact durable fill ledger, durable account and margin policy, atomic
-compatibility projections where they remain necessary, one transaction owner,
-startup verification that legacy writers are fenced, and PostgreSQL
-commit-unknown/replay tests.
+sole ownership or fences the legacy writers. M9b.10a supplies only the stable
+candidate ACK/full-fill plan for the future M9b.10b owner; it neither uses nor
+extends migration `0002`, and an existing `PENDING` stream remains mandatory
+reconciliation rather than a planner or append input. The deterministic
+in-memory projections, settlement, and submission plan are not an activation
+claim.
+
+Cut-over still requires: an exact durable fill ledger and one atomic PostgreSQL
+transaction owner; durable balance/posting semantics and margin/admission
+policy; persisted instrument identity and version plus price, fee, tick, and
+lot-rule snapshot provenance; funding, borrowing, liquidation, and unrealised
+mark-to-market rules; generation and execution-scope provenance; atomic legacy
+compatibility projections where they remain necessary; durable reconciliation
+and quarantine; startup migration/readiness checks and an explicit repository
+factory; bounded replay or snapshots; a proved sole-writer fence over every
+legacy executor and database writer; PostgreSQL rollback,
+commit-unknown/replay, and concurrency tests; and shadow parity followed by an
+explicit cut-over decision.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.

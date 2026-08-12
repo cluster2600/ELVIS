@@ -40,6 +40,7 @@ class InvalidOrderTransition(ValueError):
     """Raised when an event contradicts the known order lifecycle."""
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionAcknowledged:
     """Proof that a venue accepted an order, never proof of a fill."""
@@ -54,6 +55,7 @@ class SubmissionAcknowledged:
         require_aware_datetime("observed_at", self.observed_at)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionAmbiguous:
     """A submission which may exist at the venue and must be reconciled."""
@@ -70,6 +72,7 @@ class SubmissionAmbiguous:
         require_optional_clean_text("venue_order_id", self.venue_order_id)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionFailed:
     """Proof that no live venue order resulted from the submission."""

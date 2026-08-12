@@ -1,10 +1,12 @@
 """Contract tests for the unwired durable-submission boundary."""
 
 import ast
+import copy
 import importlib.util
 import inspect
+import pickle
 import sys
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, is_dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +18,9 @@ from trading.application.durable_submission import (
     DurableSubmissionDisposition,
     DurableSubmissionOwner,
     DurableSubmissionReceipt,
+    PaperPlannedFill,
+    PaperSubmissionPlan,
+    PaperSubmissionPlanner,
     SubmissionAttemptContext,
     SubmissionCommitUnknown,
 )
@@ -49,6 +54,9 @@ PUBLIC_EXPORTS = {
     "DurableSubmissionDisposition",
     "DurableSubmissionOwner",
     "DurableSubmissionReceipt",
+    "PaperPlannedFill",
+    "PaperSubmissionPlan",
+    "PaperSubmissionPlanner",
     "SubmissionAttemptContext",
     "SubmissionCommitUnknown",
 }
@@ -169,6 +177,49 @@ def make_receipt(
         attempt=chosen_attempt,
         submission=lifecycle_receipt(chosen_event),
         fills=fills,
+    )
+
+
+def planned_fill(
+    *,
+    event_id: str = "fill-trade-1",
+    fill: ConfirmedFill | None = None,
+    **fill_changes,
+) -> PaperPlannedFill:
+    return PaperPlannedFill(
+        event_id=event_id,
+        fill=fill or make_fill(**fill_changes),
+    )
+
+
+def make_plan(
+    *,
+    attempt: SubmissionAttemptContext | None = None,
+    submission: SubmissionAcknowledged | None = None,
+    fills: tuple[PaperPlannedFill, ...] | None = None,
+) -> PaperSubmissionPlan:
+    chosen_attempt = attempt or make_attempt()
+    chosen_submission = submission or make_ack(
+        client_order_id=chosen_attempt.client_order_id,
+        observed_at=chosen_attempt.observed_at,
+    )
+    chosen_fills = (
+        fills
+        if fills is not None
+        else (
+            planned_fill(
+                client_order_id=chosen_attempt.client_order_id,
+                symbol=chosen_attempt.instruction.order_intent.symbol,
+                side=chosen_attempt.instruction.order_intent.side,
+                quantity=chosen_attempt.instruction.order_intent.quantity,
+                executed_at=chosen_attempt.observed_at + timedelta(seconds=1),
+            ),
+        )
+    )
+    return PaperSubmissionPlan(
+        attempt=chosen_attempt,
+        submission=chosen_submission,
+        fills=chosen_fills,
     )
 
 
@@ -310,6 +361,14 @@ def test_attempt_context_rejects_instruction_timestamps_unrepresentable_in_utc(
             make_instruction(created_at=created_at),
             "paper:test",
             NOW,
+        )
+
+
+def test_attempt_context_rejects_observation_before_instruction_creation() -> None:
+    with pytest.raises(ValueError, match="cannot predate"):
+        make_attempt(
+            instruction=make_instruction(created_at=NOW),
+            observed_at=NOW - timedelta(microseconds=1),
         )
 
 
@@ -727,6 +786,248 @@ def test_submission_receipt_is_frozen_and_slotted() -> None:
     assert not hasattr(receipt, "__dict__")
     with pytest.raises(FrozenInstanceError):
         receipt.fills = ()
+
+
+def test_paper_plan_requires_one_exact_terminal_full_fill() -> None:
+    attempt = make_attempt()
+    fills = (
+        planned_fill(quantity=Decimal("0.40")),
+        planned_fill(
+            event_id="fill-trade-2",
+            trade_id="trade-2",
+            quantity=Decimal("0.60"),
+            executed_at=NOW + timedelta(seconds=2),
+        ),
+    )
+
+    plan = make_plan(attempt=attempt, fills=fills)
+
+    assert plan.attempt is attempt
+    assert type(plan.submission) is SubmissionAcknowledged
+    assert plan.fills == fills
+    assert sum((candidate.fill.quantity for candidate in fills), Decimal(0)) == (
+        attempt.instruction.order_intent.quantity
+    )
+
+
+@pytest.mark.parametrize(
+    ("fills", "message"),
+    [
+        ((), "at least one fill"),
+        ((planned_fill(quantity=Decimal("0.99")),), "exact full fills"),
+        ((planned_fill(quantity=Decimal("1.01")),), "exceed"),
+    ],
+)
+def test_paper_plan_rejects_empty_partial_and_overfill_batches(fills, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        make_plan(fills=fills)
+
+
+@pytest.mark.parametrize("fills", [[], (object(),)])
+def test_paper_plan_requires_an_exact_tuple_of_planned_fills(fills) -> None:
+    with pytest.raises(TypeError):
+        make_plan(fills=fills)
+
+
+def test_paper_plan_rejects_a_tuple_subclass_with_mutable_iteration() -> None:
+    class MutableTuple(tuple):
+        def __iter__(self):
+            return iter((planned_fill(quantity=Decimal("1.00")),))
+
+    with pytest.raises(TypeError, match="fills must be a tuple"):
+        make_plan(fills=MutableTuple())
+
+
+@pytest.mark.parametrize("submission", [make_ambiguous(), make_failed()])
+def test_paper_plan_requires_an_acknowledgement(submission) -> None:
+    with pytest.raises(TypeError, match="submission"):
+        PaperSubmissionPlan(
+            attempt=make_attempt(),
+            submission=submission,
+            fills=(planned_fill(quantity=Decimal("1.00")),),
+        )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "message"),
+    [
+        (
+            planned_fill(client_order_id="order-other", quantity=Decimal("1.00")),
+            "client_order_id",
+        ),
+        (planned_fill(symbol="ETHUSDT", quantity=Decimal("1.00")), "symbol"),
+        (planned_fill(side=OrderSide.SELL, quantity=Decimal("1.00")), "side"),
+        (
+            planned_fill(
+                executed_at=NOW - timedelta(microseconds=1),
+                quantity=Decimal("1.00"),
+            ),
+            "cannot predate",
+        ),
+        (
+            planned_fill(venue_order_id="venue-other", quantity=Decimal("1.00")),
+            "venue order ID",
+        ),
+    ],
+)
+def test_paper_plan_binds_each_fill_to_the_exact_attempt_and_ack(
+    candidate, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        make_plan(fills=(candidate,))
+
+
+@pytest.mark.parametrize(
+    ("submission", "message"),
+    [
+        (make_ack(client_order_id="order-other"), "client_order_id"),
+        (make_ack(observed_at=NOW + timedelta(microseconds=1)), "timestamp"),
+    ],
+)
+def test_paper_plan_binds_acknowledgement_to_the_exact_attempt(
+    submission, message
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        make_plan(submission=submission)
+
+
+def test_paper_plan_rejects_duplicate_event_and_trade_identities() -> None:
+    with pytest.raises(ValueError, match="event IDs"):
+        make_plan(
+            fills=(
+                planned_fill(
+                    event_id="submission-attempt-1",
+                    quantity=Decimal("1.00"),
+                ),
+            )
+        )
+
+    with pytest.raises(ValueError, match="trade IDs"):
+        make_plan(
+            fills=(
+                planned_fill(quantity=Decimal("0.40")),
+                planned_fill(
+                    event_id="fill-observation-2",
+                    quantity=Decimal("0.60"),
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("event_id", "fill", "error"),
+    [
+        ("", make_fill(quantity=Decimal("1.00")), ValueError),
+        ("f" * 256, make_fill(quantity=Decimal("1.00")), ValueError),
+        ("fill-1", object(), TypeError),
+    ],
+)
+def test_planned_fill_requires_a_durable_event_id_and_confirmed_fill(
+    event_id, fill, error
+) -> None:
+    with pytest.raises(error):
+        PaperPlannedFill(event_id=event_id, fill=fill)
+
+
+def test_planner_protocol_receives_the_exact_attempt_positionally() -> None:
+    attempt = make_attempt()
+    expected = make_plan(attempt=attempt)
+
+    class FakePlanner:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def plan(self, candidate, /):
+            self.calls.append(candidate)
+            return expected
+
+    planner = FakePlanner()
+
+    assert planner.plan(attempt) is expected
+    assert planner.calls == [attempt]
+    with pytest.raises(TypeError):
+        planner.plan(candidate=attempt)
+
+    parameters = inspect.signature(PaperSubmissionPlanner.plan).parameters
+    assert tuple(parameters) == ("self", "attempt")
+    assert parameters["attempt"].kind is inspect.Parameter.POSITIONAL_ONLY
+
+
+def test_paper_plan_value_graph_rejects_generated_setstate_mutation() -> None:
+    plan = make_plan()
+    original_identity = (repr(plan), hash(plan))
+    visited: set[int] = set()
+    protected_types: set[type] = set()
+
+    def assert_protected(value: object) -> None:
+        if id(value) in visited or not is_dataclass(value) or isinstance(value, type):
+            return
+        visited.add(id(value))
+        state = [getattr(value, field.name) for field in fields(value)]
+        assert hasattr(value, "__setstate__")
+        protected_types.add(type(value))
+        with pytest.raises(TypeError, match="state mutation"):
+            value.__setstate__(state)
+        for field in fields(value):
+            child = getattr(value, field.name)
+            if isinstance(child, tuple):
+                for item in child:
+                    assert_protected(item)
+            else:
+                assert_protected(child)
+
+    assert_protected(plan)
+
+    assert protected_types == {
+        ConfirmedFill,
+        OrderIntent,
+        PaperPlannedFill,
+        PaperSubmissionPlan,
+        PositionExitContext,
+        PositionInstruction,
+        SubmissionAcknowledged,
+        SubmissionAttemptContext,
+    }
+    assert (repr(plan), hash(plan)) == original_identity
+
+
+def test_paper_plan_copy_and_pickle_round_trips_revalidate() -> None:
+    plan = make_plan()
+
+    for restored in (
+        copy.copy(plan),
+        copy.deepcopy(plan),
+        pickle.loads(pickle.dumps(plan)),
+    ):
+        assert restored == plan
+        assert hash(restored) == hash(plan)
+
+
+def test_commit_unknown_copy_and_pickle_round_trips_retain_the_attempt() -> None:
+    error = SubmissionCommitUnknown(make_attempt())
+
+    for restored in (
+        copy.copy(error),
+        copy.deepcopy(error),
+        pickle.loads(pickle.dumps(error)),
+    ):
+        assert type(restored) is SubmissionCommitUnknown
+        assert restored.attempt == error.attempt
+        assert restored.client_order_id == error.client_order_id
+        assert restored.requires_reconciliation is True
+
+
+def test_paper_plan_invalid_state_restore_cleans_partial_object() -> None:
+    plan = make_plan()
+    field_names = tuple(field.name for field in fields(plan))
+    state = [getattr(plan, name) for name in field_names]
+    state[field_names.index("fills")] = ()
+    restored = object.__new__(PaperSubmissionPlan)
+
+    with pytest.raises(ValueError, match="at least one fill"):
+        restored.__setstate__(state)
+
+    assert all(not hasattr(restored, name) for name in field_names)
 
 
 def test_owner_protocol_fake_receives_the_exact_call_contract() -> None:

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Protocol
 
 from trading.domain._decimal import exact_decimal_sum
+from trading.domain._validation import protect_frozen_dataclass_state
 from trading.domain.order_lifecycle import (
     ConfirmedFill,
     SubmissionAcknowledged,
@@ -83,6 +84,7 @@ def _event_timestamp(event: SubmissionEvent | ConfirmedFill) -> datetime:
     return event.observed_at
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionAttemptContext:
     """Stable caller-selected identity and timestamp for one submission attempt."""
@@ -109,6 +111,8 @@ class SubmissionAttemptContext:
         _require_identifier("decision_id", intent.decision_id)
         _require_identifier("symbol", intent.symbol, _SYMBOL_MAX_LENGTH)
         _require_durable_datetime("instruction.created_at", intent.created_at)
+        if self.observed_at < intent.created_at:
+            raise ValueError("observed_at cannot predate the instruction")
 
     @property
     def client_order_id(self) -> str:
@@ -131,6 +135,117 @@ class SubmissionAttemptContext:
         )
 
 
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperPlannedFill:
+    """One non-durable fill candidate with its future event identity."""
+
+    event_id: str
+    fill: ConfirmedFill
+
+    def __post_init__(self) -> None:
+        _require_identifier("event_id", self.event_id)
+        if type(self.fill) is not ConfirmedFill:
+            raise TypeError("fill must be a ConfirmedFill")
+
+
+def _validate_submission_facts(
+    attempt: SubmissionAttemptContext,
+    submission: SubmissionEvent,
+    fills: tuple[tuple[str, ConfirmedFill], ...],
+) -> None:
+    if type(submission) not in _SUBMISSION_EVENT_TYPES:
+        raise TypeError("submission must be a submission lifecycle event")
+    _validate_event_identifiers(submission)
+    _require_durable_datetime("submission timestamp", submission.observed_at)
+    if submission.client_order_id != attempt.client_order_id:
+        raise ValueError("submission client_order_id must match the attempt")
+    if submission.observed_at != attempt.observed_at:
+        raise ValueError("submission must retain the attempt timestamp")
+
+    event_ids = (attempt.event_id,) + tuple(event_id for event_id, _fill in fills)
+    if len(event_ids) != len(set(event_ids)):
+        raise ValueError("submission and fill event IDs must be distinct")
+    if fills and type(submission) is not SubmissionAcknowledged:
+        raise ValueError("only an acknowledged submission may contain fills")
+
+    intent = attempt.instruction.order_intent
+    confirmed_fills = tuple(fill for _event_id, fill in fills)
+    for fill in confirmed_fills:
+        _validate_event_identifiers(fill)
+        _require_durable_datetime("fill timestamp", fill.executed_at)
+        if fill.client_order_id != intent.client_order_id:
+            raise ValueError("fill client_order_id must match the instruction")
+        if fill.symbol != intent.symbol:
+            raise ValueError("fill symbol must match the instruction")
+        if fill.side is not intent.side:
+            raise ValueError("fill side must match the instruction")
+        if fill.executed_at < attempt.observed_at:
+            raise ValueError("fill execution cannot predate the submission")
+
+    if confirmed_fills:
+        first_fill = confirmed_fills[0]
+        if any(
+            fill.venue_order_id != first_fill.venue_order_id for fill in confirmed_fills
+        ):
+            raise ValueError("fills must use one venue order ID")
+        if first_fill.venue_order_id != submission.venue_order_id:
+            raise ValueError("acknowledgement and fills must use one venue order ID")
+        trade_ids = tuple(fill.trade_id for fill in confirmed_fills)
+        if len(trade_ids) != len(set(trade_ids)):
+            raise ValueError("fill trade IDs must be unique")
+        filled_quantity = exact_decimal_sum(
+            tuple(fill.quantity for fill in confirmed_fills)
+        )
+        if filled_quantity > intent.quantity:
+            raise ValueError("confirmed fills exceed the instruction quantity")
+
+
+@protect_frozen_dataclass_state
+@dataclass(frozen=True, slots=True)
+class PaperSubmissionPlan:
+    """Pure candidate facts for one future atomic paper transaction."""
+
+    attempt: SubmissionAttemptContext
+    submission: SubmissionAcknowledged
+    fills: tuple[PaperPlannedFill, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.attempt) is not SubmissionAttemptContext:
+            raise TypeError("attempt must be a SubmissionAttemptContext")
+        if type(self.submission) is not SubmissionAcknowledged:
+            raise TypeError("submission must be a SubmissionAcknowledged event")
+        if type(self.fills) is not tuple:
+            raise TypeError("fills must be a tuple")
+        if not self.fills:
+            raise ValueError("a paper submission plan requires at least one fill")
+        if any(type(candidate) is not PaperPlannedFill for candidate in self.fills):
+            raise TypeError("fills must contain only PaperPlannedFill values")
+        _validate_submission_facts(
+            self.attempt,
+            self.submission,
+            tuple((candidate.event_id, candidate.fill) for candidate in self.fills),
+        )
+        filled_quantity = exact_decimal_sum(
+            tuple(candidate.fill.quantity for candidate in self.fills)
+        )
+        if filled_quantity != self.attempt.instruction.order_intent.quantity:
+            raise ValueError("paper submission plans must be exact full fills")
+
+
+class PaperSubmissionPlanner(Protocol):
+    """Stable source that supplies facts without claiming they are durable."""
+
+    def plan(
+        self,
+        attempt: SubmissionAttemptContext,
+        /,
+    ) -> PaperSubmissionPlan:
+        """Return a precomputed plan while retaining the exact attempt object."""
+        ...
+
+
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class DurableLifecycleReceipt:
     """One lifecycle fact whose identity and stream version are committed."""
@@ -162,6 +277,7 @@ class DurableSubmissionDisposition(str, Enum):
     REPLAYED = "REPLAYED"
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class DurableSubmissionReceipt:
     """A complete, validated durable result for one submission attempt."""
@@ -187,20 +303,8 @@ class DurableSubmissionReceipt:
         if any(type(receipt.event) is not ConfirmedFill for receipt in self.fills):
             raise TypeError("fill receipts must contain only ConfirmedFill events")
 
-        submission_event = self.submission.event
-        if submission_event.client_order_id != self.attempt.client_order_id:
-            raise ValueError("submission client_order_id must match the attempt")
         if self.submission.event_id != self.attempt.event_id:
             raise ValueError("submission event_id must match the attempt")
-
-        if submission_event.observed_at != self.attempt.observed_at:
-            raise ValueError("the durable submission must retain the attempt timestamp")
-
-        event_ids = (self.submission.event_id,) + tuple(
-            receipt.event_id for receipt in self.fills
-        )
-        if len(event_ids) != len(set(event_ids)):
-            raise ValueError("durable event IDs must be distinct")
 
         expected_version = self.submission.position_version + 1
         for receipt in self.fills:
@@ -210,35 +314,11 @@ class DurableSubmissionReceipt:
                 )
             expected_version += 1
 
-        fills = tuple(receipt.event for receipt in self.fills)
-        if fills and not isinstance(submission_event, SubmissionAcknowledged):
-            raise ValueError("only an acknowledged submission may contain fills")
-
-        intent = self.attempt.instruction.order_intent
-        for fill in fills:
-            if fill.client_order_id != intent.client_order_id:
-                raise ValueError("fill client_order_id must match the instruction")
-            if fill.symbol != intent.symbol:
-                raise ValueError("fill symbol must match the instruction")
-            if fill.side is not intent.side:
-                raise ValueError("fill side must match the instruction")
-            if fill.executed_at < self.attempt.observed_at:
-                raise ValueError("fill execution cannot predate the submission")
-
-        if fills:
-            first_fill = fills[0]
-            if any(fill.venue_order_id != first_fill.venue_order_id for fill in fills):
-                raise ValueError("fills must use one venue order ID")
-            if first_fill.venue_order_id != submission_event.venue_order_id:
-                raise ValueError(
-                    "acknowledgement and fills must use one venue order ID"
-                )
-            trade_ids = tuple(fill.trade_id for fill in fills)
-            if len(trade_ids) != len(set(trade_ids)):
-                raise ValueError("fill trade IDs must be unique")
-            filled_quantity = exact_decimal_sum(tuple(fill.quantity for fill in fills))
-            if filled_quantity > intent.quantity:
-                raise ValueError("confirmed fills exceed the instruction quantity")
+        _validate_submission_facts(
+            self.attempt,
+            self.submission.event,
+            tuple((receipt.event_id, receipt.event) for receipt in self.fills),
+        )
 
     @property
     def canonical_report(self) -> SubmissionReport:
@@ -284,6 +364,7 @@ class DurableSubmissionOwner(Protocol):
         ...
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionCommitUnknown(RuntimeError):
     """Preserve an attempt whose durable commit acknowledgement was lost."""
@@ -294,6 +375,10 @@ class SubmissionCommitUnknown(RuntimeError):
         if type(self.attempt) is not SubmissionAttemptContext:
             raise TypeError("attempt must be a SubmissionAttemptContext")
         RuntimeError.__init__(self, "durable submission commit outcome is unknown")
+
+    def __reduce__(self) -> tuple[object, tuple[SubmissionAttemptContext]]:
+        """Reconstruct the typed exception from its attempt, not its message."""
+        return (type(self), (self.attempt,))
 
     @property
     def client_order_id(self) -> str:
@@ -311,6 +396,9 @@ __all__ = [
     "DurableSubmissionDisposition",
     "DurableSubmissionOwner",
     "DurableSubmissionReceipt",
+    "PaperPlannedFill",
+    "PaperSubmissionPlan",
+    "PaperSubmissionPlanner",
     "SubmissionAttemptContext",
     "SubmissionCommitUnknown",
 ]

@@ -79,6 +79,7 @@ class OrderIntent:
         require_aware_datetime("created_at", self.created_at)
 
 
+@protect_frozen_dataclass_state
 @dataclass(frozen=True, slots=True)
 class SubmissionReport:
     """The transport-level result of one submission attempt, never a fill."""
