@@ -3030,6 +3030,89 @@ compilation, and the diff check pass. The complete non-PostgreSQL gate passes
 `Pacific/Honolulu`. Pytest exits successfully; the legacy background threads
 still emit their known post-success logging errors after the result.
 
+### M9b.13a pure pre-fence assessment contract
+
+M9b.13a introduces the application-only contract for describing evidence that
+may later support a sole-writer fence. `PaperAccountReadinessContext` carries an
+approved execution scope, account key, immutable provisioning generation, and
+opening-envelope hash. `MigrationIdentity` records the exact expected and
+applied migration prefixes. `LegacyRelationWatermark` inventories every
+migration-`0001` table without adopting or deleting its rows.
+
+`PaperAccountReadinessFindingKind` distinguishes migration absence, pending
+versions and drift; missing, unexpected, insolvent, or provenance-incompatible
+accounts; account and position replay failures; unresolved submissions and
+unaccounted orders; margin reservations; and durable or legacy open positions.
+`PaperAccountReadinessAssessment` sorts and deduplicates stable findings,
+derives a legacy-open-position blocker from the corresponding watermark, and
+returns exactly `PREPARED_FOR_FENCE`, `BLOCKED`, or
+`RECONCILIATION_REQUIRED`. Reconciliation findings take precedence over ordinary
+blockers.
+
+Every assessment reports `snapshot_authoritative == False`. In particular,
+`PREPARED_FOR_FENCE` is not permission to start or activate trading. This slice
+has no SQL, repository, migration, runtime consumer, health/readiness endpoint,
+generation fence, trigger, role change, shadow execution, or cut-over. M9b.13b
+must collect the evidence in one `REPEATABLE READ READ ONLY` PostgreSQL snapshot;
+the eventual activation transaction must independently re-check it under the
+global lock order `fence -> account -> position`.
+
+Verification commands for this slice:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_paper_account_readiness.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_readiness.py
+.venv/bin/python -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_submission.py \
+  tests/test_atomic_paper_account_owner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_accounting.py \
+  tests/test_paper_settlement.py \
+  tests/test_paper_economics.py \
+  tests/test_order_position_journal.py
+.venv/bin/black --target-version py310 --check \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  tests/test_paper_account_readiness.py
+.venv/bin/isort --check-only \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  tests/test_paper_account_readiness.py
+.venv/bin/flake8 \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  tests/test_paper_account_readiness.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/paper_account_readiness.py \
+  trading/application/__init__.py \
+  tests/test_paper_account_readiness.py
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The dedicated contract suite passes 120 tests under each supported Python
+interpreter, and the exact adjacent command passes 567 tests under each
+interpreter. Black, isort, flake8, Python 3.10 compilation, and the diff check
+pass. The complete non-PostgreSQL gate passes 2,244 tests, skips 50, deselects
+113, and passes 7 subtests under `Pacific/Honolulu`. Pytest exits successfully;
+the legacy background threads still emit their known post-success logging
+errors after the result.
+
 ## Cut-over policy
 
 Each later behavioural migration has three modes:

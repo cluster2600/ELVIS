@@ -879,6 +879,31 @@ application-contract, owner-unit, PostgreSQL concurrency/fault matrix, adjacent
 regression, and full non-PostgreSQL gates are complete; those proofs do not make
 the dormant adapter runtime-ready.
 
+M9b.13a defines the pure evidence vocabulary for the first pre-fence assessment.
+`PaperAccountReadinessContext` binds one approved execution scope, account key,
+immutable provisioning generation, and exact opening-envelope SHA-256 rather
+than trusting whichever provenance happens to be stored. `MigrationIdentity`
+captures an exact contiguous migration-ledger prefix, while
+`LegacyRelationWatermark` records the row count and maximum integer identity for
+each of the seven migration-`0001` relations.
+
+`PaperAccountReadinessAssessment` canonicalizes those values and stable typed
+findings. Matching migrations, one proven account at a non-negative version,
+all seven legacy watermarks, zero legacy open positions, and no findings derive
+`PREPARED_FOR_FENCE`. Missing, pending, or drifted migrations and other
+preconditions derive `BLOCKED`; failed account or position replay, unresolved
+submissions, or unaccounted orders derive `RECONCILIATION_REQUIRED`, which takes
+priority when both classes are present. A non-empty `np.open_positions`
+watermark always derives its own blocker.
+
+The assessment is explicitly non-authoritative and stale as soon as its source
+snapshot ends. `PREPARED_FOR_FENCE` is not `READY`, does not grant a runtime
+lease, and cannot activate an owner. M9b.13a contains no database access,
+readiness endpoint, startup wiring, fence row, role or trigger, writer shutdown,
+shadow path, or cut-over. A following PostgreSQL adapter must obtain all evidence
+from one repeatable-read, read-only snapshot; a still later activation boundary
+must repeat the assessment under its own fence, account, and position locks.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,

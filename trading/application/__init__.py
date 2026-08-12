@@ -30,6 +30,16 @@ from trading.application.journaled_order_service import (
     SubmissionObservationNotRecorded,
 )
 from trading.application.order_service import ExecutionPort, OrderService
+from trading.application.paper_account_readiness import (
+    LegacyRelationWatermark,
+    MigrationIdentity,
+    PaperAccountReadinessAssessment,
+    PaperAccountReadinessContext,
+    PaperAccountReadinessDisposition,
+    PaperAccountReadinessFinding,
+    PaperAccountReadinessFindingKind,
+    PaperAccountReadinessPort,
+)
 from trading.application.rsi_gate_policy import RsiGatePolicy
 from trading.application.signal_policy import (
     SignalPolicy,
@@ -49,6 +59,8 @@ __all__ = [
     "JournaledOrderService",
     "JournaledSubmissionDisposition",
     "JournaledSubmissionResult",
+    "LegacyRelationWatermark",
+    "MigrationIdentity",
     "OrderJournalPort",
     "OrderService",
     "PaperAccountSubmissionCommitUnknown",
@@ -57,6 +69,12 @@ __all__ = [
     "PaperAccountSubmissionReconciliationRequired",
     "PaperAccountSubmissionRejected",
     "PaperAccountSubmissionResult",
+    "PaperAccountReadinessAssessment",
+    "PaperAccountReadinessContext",
+    "PaperAccountReadinessDisposition",
+    "PaperAccountReadinessFinding",
+    "PaperAccountReadinessFindingKind",
+    "PaperAccountReadinessPort",
     "PaperPlannedFill",
     "PaperSubmissionPlan",
     "PaperSubmissionPlanner",
