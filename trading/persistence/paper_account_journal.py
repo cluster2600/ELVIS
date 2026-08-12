@@ -139,7 +139,8 @@ SELECT
     batch_version,
     batch_payload,
     batch_payload_sha256,
-    recorded_at
+    recorded_at,
+    runtime_generation
 FROM np.paper_account_batch_manifests
 WHERE account_key = %s
 """
@@ -460,7 +461,7 @@ def _decode_stream_row(value: object) -> _AccountStreamRow:
 
 
 def _decode_batch_row(value: object) -> _BatchRow:
-    row = _stored_row(value, 21, "paper account batch")
+    row = _stored_row(value, 22, "paper account batch")
     try:
         manifest = decode_paper_account_batch(
             execution_scope=row[2],
@@ -479,6 +480,7 @@ def _decode_batch_row(value: object) -> _BatchRow:
             batch_version=row[17],
             batch_payload=row[18],
             batch_payload_sha256=row[19],
+            runtime_generation=row[21],
         )
     except JournalQuarantineError as exc:
         raise PaperAccountReplayError("stored account batch cannot be decoded") from exc

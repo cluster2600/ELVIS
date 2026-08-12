@@ -43,8 +43,11 @@ _LEGACY_RELATIONS = (
     "np.trading_session_resets",
 )
 _RUNTIME_CONTROL_RELATION = "np.paper_runtime_control"
+_RUNTIME_GENERATION_RELATION = "np.paper_runtime_generations"
 _RUNTIME_CONTROL_FUNCTION = "enforce_legacy_paper_runtime_fence"
 _RUNTIME_CONTROL_TRIGGER_PREFIX = "legacy_paper_runtime_fence_"
+_RUNTIME_GENERATION_FUNCTION = "reject_paper_runtime_generation_mutation"
+_RUNTIME_GENERATION_TRIGGER = "paper_runtime_generations_append_only"
 _RUNTIME_CONTROL_MODES = frozenset({"LEGACY", "SHADOW", "PAUSED", "ACTIVE"})
 _EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE = """DECLARE
     current_mode TEXT;
@@ -83,6 +86,11 @@ BEGIN
 
     RETURN NULL;
 END"""
+_EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE = """BEGIN
+    RAISE EXCEPTION USING
+        ERRCODE = '55000',
+        MESSAGE = 'paper runtime generations are append-only';
+END"""
 _DURABLE_BUSINESS_RELATIONS = tuple(
     sorted(
         _LEGACY_RELATIONS
@@ -96,6 +104,7 @@ _DURABLE_BUSINESS_RELATIONS = tuple(
             "np.paper_account_streams",
             "np.paper_margin_reservations",
             _RUNTIME_CONTROL_RELATION,
+            _RUNTIME_GENERATION_RELATION,
             "np.position_streams",
         )
     )
@@ -299,6 +308,189 @@ _SELECT_RUNTIME_CONTROL_SQL = """
 SELECT control_key, mode, runtime_generation
 FROM np.paper_runtime_control
 """
+_SELECT_RUNTIME_GENERATION_COLUMNS_SQL = """
+SELECT
+    ordinal_position,
+    column_name,
+    udt_name,
+    is_nullable,
+    CASE
+        WHEN column_default IS NULL THEN 'none'
+        WHEN LOWER(column_default) = 'clock_timestamp()' THEN 'clock_timestamp'
+        ELSE 'other'
+    END,
+    character_maximum_length
+FROM information_schema.columns
+WHERE table_schema = 'np'
+  AND table_name = 'paper_runtime_generations'
+ORDER BY ordinal_position
+"""
+_SELECT_RUNTIME_GENERATION_CONSTRAINTS_SQL = """
+SELECT
+    constraint_row.conname,
+    constraint_row.contype,
+    constraint_row.conkey,
+    constraint_row.condeferrable,
+    constraint_row.condeferred,
+    constraint_row.convalidated,
+    pg_get_expr(constraint_row.conbin, constraint_row.conrelid)
+FROM pg_constraint constraint_row
+JOIN pg_class table_row
+  ON table_row.oid = constraint_row.conrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_runtime_generations'
+ORDER BY constraint_row.conname
+"""
+_SELECT_RUNTIME_GENERATION_FKS_SQL = """
+SELECT
+    constraint_row.conname,
+    FORMAT('%I.%I', target_namespace.nspname, target_row.relname),
+    constraint_row.confkey,
+    constraint_row.confupdtype,
+    constraint_row.confdeltype,
+    constraint_row.confmatchtype
+FROM pg_constraint constraint_row
+JOIN pg_class table_row
+  ON table_row.oid = constraint_row.conrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+JOIN pg_class target_row
+  ON target_row.oid = constraint_row.confrelid
+JOIN pg_namespace target_namespace
+  ON target_namespace.oid = target_row.relnamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_runtime_generations'
+  AND constraint_row.contype = 'f'
+ORDER BY constraint_row.conname
+"""
+_SELECT_RUNTIME_GENERATION_FUNCTION_SQL = """
+SELECT
+    routine_row.prosecdef,
+    routine_row.provolatile,
+    routine_row.proleakproof,
+    routine_row.proisstrict,
+    routine_row.pronargs,
+    routine_row.prorettype = 'trigger'::regtype,
+    language_row.lanname,
+    routine_row.proconfig,
+    routine_row.prosrc,
+    routine_row.proowner = generation_row.relowner
+FROM pg_proc routine_row
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = routine_row.pronamespace
+JOIN pg_language language_row
+  ON language_row.oid = routine_row.prolang
+JOIN pg_class generation_row
+  ON generation_row.relname = 'paper_runtime_generations'
+JOIN pg_namespace generation_namespace
+  ON generation_namespace.oid = generation_row.relnamespace
+ AND generation_namespace.nspname = 'np'
+WHERE namespace_row.nspname = 'np'
+  AND routine_row.proname = 'reject_paper_runtime_generation_mutation'
+ORDER BY routine_row.oid
+"""
+_SELECT_RUNTIME_GENERATION_TRIGGER_SQL = """
+SELECT
+    table_row.relname,
+    trigger_row.tgname,
+    trigger_row.tgenabled,
+    trigger_row.tgtype,
+    routine_namespace.nspname,
+    routine_row.proname
+FROM pg_trigger trigger_row
+JOIN pg_class table_row
+  ON table_row.oid = trigger_row.tgrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+JOIN pg_proc routine_row
+  ON routine_row.oid = trigger_row.tgfoid
+JOIN pg_namespace routine_namespace
+  ON routine_namespace.oid = routine_row.pronamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_runtime_generations'
+  AND NOT trigger_row.tgisinternal
+ORDER BY trigger_row.tgname
+"""
+_SELECT_RUNTIME_MANIFEST_COLUMN_SQL = """
+SELECT
+    ordinal_position,
+    column_name,
+    udt_name,
+    is_nullable,
+    CASE WHEN column_default IS NULL THEN 'none' ELSE 'other' END
+FROM information_schema.columns
+WHERE table_schema = 'np'
+  AND table_name = 'paper_account_batch_manifests'
+  AND column_name = 'runtime_generation'
+"""
+_SELECT_RUNTIME_MANIFEST_CONSTRAINTS_SQL = """
+SELECT
+    constraint_row.conname,
+    constraint_row.contype,
+    constraint_row.conkey,
+    constraint_row.condeferrable,
+    constraint_row.condeferred,
+    constraint_row.convalidated,
+    pg_get_expr(constraint_row.conbin, constraint_row.conrelid)
+FROM pg_constraint constraint_row
+JOIN pg_class table_row
+  ON table_row.oid = constraint_row.conrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_account_batch_manifests'
+  AND 22 = ANY(constraint_row.conkey)
+ORDER BY constraint_row.conname
+"""
+_SELECT_RUNTIME_MANIFEST_FKS_SQL = """
+SELECT
+    constraint_row.conname,
+    FORMAT('%I.%I', target_namespace.nspname, target_row.relname),
+    constraint_row.confkey,
+    constraint_row.confupdtype,
+    constraint_row.confdeltype,
+    constraint_row.confmatchtype
+FROM pg_constraint constraint_row
+JOIN pg_class table_row
+  ON table_row.oid = constraint_row.conrelid
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = table_row.relnamespace
+JOIN pg_class target_row
+  ON target_row.oid = constraint_row.confrelid
+JOIN pg_namespace target_namespace
+  ON target_namespace.oid = target_row.relnamespace
+WHERE namespace_row.nspname = 'np'
+  AND table_row.relname = 'paper_account_batch_manifests'
+  AND constraint_row.conname =
+      'paper_account_batch_manifests_runtime_generation_fk'
+"""
+_SELECT_RUNTIME_GENERATIONS_SQL = """
+SELECT
+    runtime_generation,
+    activation_id,
+    execution_scope,
+    account_key,
+    owner_generation,
+    opening_version,
+    opening_payload_sha256
+FROM np.paper_runtime_generations
+ORDER BY runtime_generation
+"""
+_SELECT_RUNTIME_MANIFEST_GENERATIONS_SQL = """
+SELECT
+    account_key,
+    client_order_id,
+    execution_scope,
+    owner_generation,
+    opening_version,
+    opening_payload_sha256,
+    batch_version,
+    runtime_generation
+FROM np.paper_account_batch_manifests
+ORDER BY account_key, client_order_id
+"""
 _SELECT_ACCOUNT_IDENTITIES_SQL = """
 SELECT account_key, execution_scope
 FROM np.paper_account_streams
@@ -494,7 +686,7 @@ def _durable_business_relations_are_authoritative(cursor: object) -> bool:
             False,
             False,
             False,
-            relation in _LEGACY_RELATIONS,
+            relation in _LEGACY_RELATIONS or relation == _RUNTIME_GENERATION_RELATION,
             False,
             False,
         )
@@ -583,17 +775,258 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
         cursor.execute(_SELECT_RUNTIME_CONTROL_TRIGGERS_SQL)
         trigger_rows = tuple(tuple(row) for row in cursor.fetchall())
         expected_triggers = tuple(
-            (
-                relation.removeprefix("np."),
-                _RUNTIME_CONTROL_TRIGGER_PREFIX + relation.removeprefix("np."),
-                "A",
-                62,
-                "np",
-                _RUNTIME_CONTROL_FUNCTION,
+            sorted(
+                tuple(
+                    (
+                        relation.removeprefix("np."),
+                        _RUNTIME_CONTROL_TRIGGER_PREFIX + relation.removeprefix("np."),
+                        "A",
+                        62,
+                        "np",
+                        _RUNTIME_CONTROL_FUNCTION,
+                    )
+                    for relation in _LEGACY_RELATIONS
+                )
+                + (
+                    (
+                        _RUNTIME_GENERATION_RELATION.removeprefix("np."),
+                        _RUNTIME_GENERATION_TRIGGER,
+                        "A",
+                        58,
+                        "np",
+                        _RUNTIME_GENERATION_FUNCTION,
+                    ),
+                )
             )
-            for relation in _LEGACY_RELATIONS
         )
         return trigger_rows == expected_triggers
+    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        return False
+
+
+def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
+    try:
+        cursor.execute(_SELECT_RUNTIME_GENERATION_COLUMNS_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (1, "runtime_generation", "int8", "NO", "none", None),
+            (2, "activation_id", "varchar", "NO", "none", 255),
+            (3, "execution_scope", "varchar", "NO", "none", 128),
+            (4, "account_key", "varchar", "NO", "none", 255),
+            (5, "owner_generation", "int8", "NO", "none", None),
+            (6, "opening_version", "int2", "NO", "none", None),
+            (7, "opening_payload_sha256", "bpchar", "NO", "none", 64),
+            (8, "activated_at", "timestamptz", "NO", "clock_timestamp", None),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_GENERATION_CONSTRAINTS_SQL)
+        constraints = tuple(tuple(row) for row in cursor.fetchall())
+        if constraints != (
+            (
+                "paper_runtime_generations_account_key_clean",
+                "c",
+                [4],
+                False,
+                False,
+                True,
+                "(((account_key)::text = btrim((account_key)::text)) AND "
+                "((account_key)::text <> ''::text))",
+            ),
+            (
+                "paper_runtime_generations_activated_at_finite",
+                "c",
+                [8],
+                False,
+                False,
+                True,
+                "isfinite(activated_at)",
+            ),
+            (
+                "paper_runtime_generations_activation_id_clean",
+                "c",
+                [2],
+                False,
+                False,
+                True,
+                "(((activation_id)::text = btrim((activation_id)::text)) AND "
+                "((activation_id)::text <> ''::text))",
+            ),
+            (
+                "paper_runtime_generations_activation_id_uq",
+                "u",
+                [2],
+                False,
+                False,
+                True,
+                None,
+            ),
+            (
+                "paper_runtime_generations_execution_scope_clean",
+                "c",
+                [3],
+                False,
+                False,
+                True,
+                "(((execution_scope)::text = btrim((execution_scope)::text)) AND "
+                "((execution_scope)::text <> ''::text))",
+            ),
+            (
+                "paper_runtime_generations_generation_positive",
+                "c",
+                [1],
+                False,
+                False,
+                True,
+                "(runtime_generation > 0)",
+            ),
+            (
+                "paper_runtime_generations_manifest_ref_uq",
+                "u",
+                [1, 3, 4, 5, 6, 7],
+                False,
+                False,
+                True,
+                None,
+            ),
+            (
+                "paper_runtime_generations_opening_fk",
+                "f",
+                [3, 4, 5, 6, 7],
+                False,
+                False,
+                True,
+                None,
+            ),
+            (
+                "paper_runtime_generations_opening_sha256_valid",
+                "c",
+                [7],
+                False,
+                False,
+                True,
+                "(opening_payload_sha256 ~ '^[0-9a-f]{64}$'::text)",
+            ),
+            (
+                "paper_runtime_generations_opening_version_known",
+                "c",
+                [6],
+                False,
+                False,
+                True,
+                "(opening_version = 1)",
+            ),
+            (
+                "paper_runtime_generations_owner_generation_positive",
+                "c",
+                [5],
+                False,
+                False,
+                True,
+                "(owner_generation > 0)",
+            ),
+            (
+                "paper_runtime_generations_pkey",
+                "p",
+                [1],
+                False,
+                False,
+                True,
+                None,
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_GENERATION_FKS_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (
+                "paper_runtime_generations_opening_fk",
+                "np.paper_account_streams",
+                [2, 1, 3, 7, 9],
+                "a",
+                "r",
+                "s",
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_GENERATION_FUNCTION_SQL)
+        function_rows = tuple(tuple(row) for row in cursor.fetchall())
+        if len(function_rows) != 1:
+            return False
+        function = function_rows[0]
+        if function[:8] != (
+            True,
+            "v",
+            False,
+            False,
+            0,
+            True,
+            "plpgsql",
+            ["search_path=pg_catalog"],
+        ):
+            return False
+        if type(function[8]) is not str:
+            return False
+        if function[8].strip() != _EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE:
+            return False
+        if function[9] is not True:
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_GENERATION_TRIGGER_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (
+                "paper_runtime_generations",
+                _RUNTIME_GENERATION_TRIGGER,
+                "A",
+                58,
+                "np",
+                _RUNTIME_GENERATION_FUNCTION,
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_MANIFEST_COLUMN_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (22, "runtime_generation", "int8", "YES", "none"),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_MANIFEST_CONSTRAINTS_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (
+                "paper_account_batch_manifests_runtime_generation_fk",
+                "f",
+                [22, 3, 1, 4, 5, 6],
+                False,
+                False,
+                True,
+                None,
+            ),
+            (
+                "paper_account_batch_manifests_version_known",
+                "c",
+                [18, 22],
+                False,
+                False,
+                True,
+                "(((batch_version = 1) AND (runtime_generation IS NULL)) OR "
+                "((batch_version = 2) AND (runtime_generation IS NOT NULL) AND "
+                "(runtime_generation > 0)))",
+            ),
+        ):
+            return False
+
+        cursor.execute(_SELECT_RUNTIME_MANIFEST_FKS_SQL)
+        return tuple(tuple(row) for row in cursor.fetchall()) == (
+            (
+                "paper_account_batch_manifests_runtime_generation_fk",
+                "np.paper_runtime_generations",
+                [1, 3, 4, 5, 6, 7],
+                "a",
+                "r",
+                "s",
+            ),
+        )
     except (PaperAccountReadinessStorageError, TypeError, ValueError):
         return False
 
@@ -616,6 +1049,90 @@ def _read_runtime_control(
         return row[1], row[2]
     except (PaperAccountReadinessStorageError, TypeError, ValueError):
         return None
+
+
+def _runtime_generation_evidence_is_exact(
+    cursor: object,
+    *,
+    context: PaperAccountReadinessContext,
+    runtime_mode: str,
+    runtime_generation: int,
+) -> bool:
+    try:
+        cursor.execute(_SELECT_RUNTIME_GENERATIONS_SQL)
+        rows = tuple(cursor.fetchall())
+        if runtime_mode == "LEGACY" and runtime_generation != 0:
+            return False
+        if runtime_mode == "ACTIVE" and runtime_generation == 0:
+            return False
+        if len(rows) != runtime_generation:
+            return False
+        activation_ids = set()
+        generations = {}
+        for expected_generation, raw in enumerate(rows, start=1):
+            row = _one_row(raw, "paper runtime generation", 7)
+            if type(row[0]) is not int or row[0] != expected_generation:
+                return False
+            activation_id = _stored_key(row[1], "activation ID", 255)
+            if activation_id in activation_ids:
+                return False
+            activation_ids.add(activation_id)
+            if (
+                _stored_key(row[2], "execution scope", 128) != context.execution_scope
+                or _stored_key(row[3], "account key", _ACCOUNT_KEY_MAX_LENGTH)
+                != context.account_key
+                or type(row[4]) is not int
+                or row[4] != context.owner_generation
+                or type(row[5]) is not int
+                or row[5] != 1
+                or type(row[6]) is not str
+                or row[6] != context.opening_payload_sha256
+            ):
+                return False
+            generations[expected_generation] = (
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+            )
+
+        cursor.execute(_SELECT_RUNTIME_MANIFEST_GENERATIONS_SQL)
+        manifest_rows = tuple(cursor.fetchall())
+        if runtime_generation == 0:
+            return not manifest_rows
+        for raw in manifest_rows:
+            row = _one_row(raw, "paper account batch generation", 8)
+            account_key = _stored_key(
+                row[0], "manifest account key", _ACCOUNT_KEY_MAX_LENGTH
+            )
+            _stored_key(row[1], "manifest client order ID", _CLIENT_ORDER_ID_MAX_LENGTH)
+            execution_scope = _stored_key(row[2], "manifest execution scope", 128)
+            owner_generation = row[3]
+            opening_version = row[4]
+            batch_version = row[6]
+            manifest_generation = row[7]
+            if (
+                type(owner_generation) is not int
+                or type(opening_version) is not int
+                or type(batch_version) is not int
+                or type(manifest_generation) is not int
+                or batch_version != 2
+                or not 1 <= manifest_generation <= runtime_generation
+                or type(row[5]) is not str
+            ):
+                return False
+            if generations.get(manifest_generation) != (
+                execution_scope,
+                account_key,
+                owner_generation,
+                opening_version,
+                row[5],
+            ):
+                return False
+        return True
+    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        return False
 
 
 def _decode_order_references(rows: object) -> tuple[tuple[str, str, str], ...]:
@@ -730,6 +1247,7 @@ def _assess_exact_schema(
     expected: tuple[MigrationIdentity, ...],
     applied: tuple[MigrationIdentity, ...],
     runtime_mode: str,
+    runtime_generation_evidence_is_exact: bool,
 ) -> PaperAccountReadinessAssessment:
     findings = []
     account_version = None
@@ -740,6 +1258,15 @@ def _assess_exact_schema(
                 PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
                 "runtime_control",
                 _RUNTIME_CONTROL_RELATION,
+            )
+        )
+
+    if not runtime_generation_evidence_is_exact:
+        findings.append(
+            _finding(
+                PaperAccountReadinessFindingKind.RUNTIME_GENERATION_MISMATCH,
+                "runtime_generation",
+                _RUNTIME_GENERATION_RELATION,
             )
         )
 
@@ -1055,6 +1582,7 @@ class PostgresPaperAccountReadiness:
                         runtime_control = (
                             _read_runtime_control(cursor)
                             if _runtime_control_catalog_is_exact(cursor)
+                            and _runtime_generation_catalog_is_exact(cursor)
                             else None
                         )
                         if runtime_control is None:
@@ -1070,6 +1598,14 @@ class PostgresPaperAccountReadiness:
                                 expected=expected,
                                 applied=applied,
                                 runtime_mode=runtime_control[0],
+                                runtime_generation_evidence_is_exact=(
+                                    _runtime_generation_evidence_is_exact(
+                                        cursor,
+                                        context=context,
+                                        runtime_mode=runtime_control[0],
+                                        runtime_generation=runtime_control[1],
+                                    )
+                                ),
                             )
             except psycopg2.Error as exc:
                 if getattr(exc, "pgcode", None) in _SCHEMA_DRIFT_SQLSTATES:

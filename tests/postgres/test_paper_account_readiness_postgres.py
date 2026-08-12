@@ -425,14 +425,34 @@ def test_nonlegacy_runtime_control_mode_is_an_explicit_blocker(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
+            if mode == "ACTIVE":
+                cursor.execute(
+                    """
+                    INSERT INTO np.paper_runtime_generations (
+                        runtime_generation,
+                        activation_id,
+                        execution_scope,
+                        account_key,
+                        owner_generation,
+                        opening_version,
+                        opening_payload_sha256
+                    ) VALUES (1, 'activation-1', %s, %s, %s, 1, %s)
+                    """,
+                    (
+                        encoded.execution_scope,
+                        encoded.account_key,
+                        encoded.owner_generation,
+                        encoded.opening_payload_sha256,
+                    ),
+                )
             cursor.execute(
                 """
                 UPDATE np.paper_runtime_control
                 SET mode = %s,
-                    runtime_generation = runtime_generation + 1
+                    runtime_generation = %s
                 WHERE control_key
                 """,
-                (mode,),
+                (mode, 1 if mode == "ACTIVE" else 0),
             )
         connection.commit()
     finally:
@@ -474,9 +494,29 @@ def test_nonlegacy_runtime_control_mode_is_an_explicit_blocker(
         ALTER TABLE np.paper_runtime_control
         ADD CONSTRAINT paper_runtime_control_mode CHECK (TRUE)
         """,
+        """
+        CREATE OR REPLACE FUNCTION np.reject_paper_runtime_generation_mutation()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = pg_catalog
+        AS $function$
+        BEGIN
+            RETURN NULL;
+        END
+        $function$
+        """,
+        """
+        ALTER TABLE np.paper_runtime_generations
+        DISABLE TRIGGER paper_runtime_generations_append_only
+        """,
+        """
+        ALTER TABLE np.paper_runtime_generations
+        DROP CONSTRAINT paper_runtime_generations_activated_at_finite
+        """,
     ),
 )
-def test_runtime_control_or_fence_tamper_is_early_schema_drift(
+def test_runtime_control_generation_or_fence_tamper_is_early_schema_drift(
     migrated_postgres_dsn,
     tamper,
 ):

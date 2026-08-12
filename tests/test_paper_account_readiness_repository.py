@@ -58,7 +58,8 @@ DURABLE_RELATION_ROWS = tuple(
         False,
         False,
         False,
-        relation in readiness_module._LEGACY_RELATIONS,
+        relation in readiness_module._LEGACY_RELATIONS
+        or relation == readiness_module._RUNTIME_GENERATION_RELATION,
         False,
         False,
     )
@@ -121,16 +122,208 @@ RUNTIME_CONTROL_FUNCTION = (
     readiness_module._EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE,
     True,
 )
+RUNTIME_GENERATION_FUNCTION = (
+    True,
+    "v",
+    False,
+    False,
+    0,
+    True,
+    "plpgsql",
+    ["search_path=pg_catalog"],
+    readiness_module._EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE,
+    True,
+)
+RUNTIME_GENERATION_TRIGGER = (
+    "paper_runtime_generations",
+    readiness_module._RUNTIME_GENERATION_TRIGGER,
+    "A",
+    58,
+    "np",
+    readiness_module._RUNTIME_GENERATION_FUNCTION,
+)
 RUNTIME_CONTROL_TRIGGERS = tuple(
-    (
-        relation.removeprefix("np."),
-        readiness_module._RUNTIME_CONTROL_TRIGGER_PREFIX + relation.removeprefix("np."),
-        "A",
-        62,
-        "np",
-        readiness_module._RUNTIME_CONTROL_FUNCTION,
+    sorted(
+        tuple(
+            (
+                relation.removeprefix("np."),
+                readiness_module._RUNTIME_CONTROL_TRIGGER_PREFIX
+                + relation.removeprefix("np."),
+                "A",
+                62,
+                "np",
+                readiness_module._RUNTIME_CONTROL_FUNCTION,
+            )
+            for relation in readiness_module._LEGACY_RELATIONS
+        )
+        + (RUNTIME_GENERATION_TRIGGER,)
     )
-    for relation in readiness_module._LEGACY_RELATIONS
+)
+RUNTIME_GENERATION_COLUMNS = (
+    (1, "runtime_generation", "int8", "NO", "none", None),
+    (2, "activation_id", "varchar", "NO", "none", 255),
+    (3, "execution_scope", "varchar", "NO", "none", 128),
+    (4, "account_key", "varchar", "NO", "none", 255),
+    (5, "owner_generation", "int8", "NO", "none", None),
+    (6, "opening_version", "int2", "NO", "none", None),
+    (7, "opening_payload_sha256", "bpchar", "NO", "none", 64),
+    (8, "activated_at", "timestamptz", "NO", "clock_timestamp", None),
+)
+RUNTIME_GENERATION_CONSTRAINTS = (
+    (
+        "paper_runtime_generations_account_key_clean",
+        "c",
+        [4],
+        False,
+        False,
+        True,
+        "(((account_key)::text = btrim((account_key)::text)) AND "
+        "((account_key)::text <> ''::text))",
+    ),
+    (
+        "paper_runtime_generations_activated_at_finite",
+        "c",
+        [8],
+        False,
+        False,
+        True,
+        "isfinite(activated_at)",
+    ),
+    (
+        "paper_runtime_generations_activation_id_clean",
+        "c",
+        [2],
+        False,
+        False,
+        True,
+        "(((activation_id)::text = btrim((activation_id)::text)) AND "
+        "((activation_id)::text <> ''::text))",
+    ),
+    (
+        "paper_runtime_generations_activation_id_uq",
+        "u",
+        [2],
+        False,
+        False,
+        True,
+        None,
+    ),
+    (
+        "paper_runtime_generations_execution_scope_clean",
+        "c",
+        [3],
+        False,
+        False,
+        True,
+        "(((execution_scope)::text = btrim((execution_scope)::text)) AND "
+        "((execution_scope)::text <> ''::text))",
+    ),
+    (
+        "paper_runtime_generations_generation_positive",
+        "c",
+        [1],
+        False,
+        False,
+        True,
+        "(runtime_generation > 0)",
+    ),
+    (
+        "paper_runtime_generations_manifest_ref_uq",
+        "u",
+        [1, 3, 4, 5, 6, 7],
+        False,
+        False,
+        True,
+        None,
+    ),
+    (
+        "paper_runtime_generations_opening_fk",
+        "f",
+        [3, 4, 5, 6, 7],
+        False,
+        False,
+        True,
+        None,
+    ),
+    (
+        "paper_runtime_generations_opening_sha256_valid",
+        "c",
+        [7],
+        False,
+        False,
+        True,
+        "(opening_payload_sha256 ~ '^[0-9a-f]{64}$'::text)",
+    ),
+    (
+        "paper_runtime_generations_opening_version_known",
+        "c",
+        [6],
+        False,
+        False,
+        True,
+        "(opening_version = 1)",
+    ),
+    (
+        "paper_runtime_generations_owner_generation_positive",
+        "c",
+        [5],
+        False,
+        False,
+        True,
+        "(owner_generation > 0)",
+    ),
+    (
+        "paper_runtime_generations_pkey",
+        "p",
+        [1],
+        False,
+        False,
+        True,
+        None,
+    ),
+)
+RUNTIME_GENERATION_FKS = (
+    (
+        "paper_runtime_generations_opening_fk",
+        "np.paper_account_streams",
+        [2, 1, 3, 7, 9],
+        "a",
+        "r",
+        "s",
+    ),
+)
+RUNTIME_MANIFEST_COLUMN = ((22, "runtime_generation", "int8", "YES", "none"),)
+RUNTIME_MANIFEST_CONSTRAINTS = (
+    (
+        "paper_account_batch_manifests_runtime_generation_fk",
+        "f",
+        [22, 3, 1, 4, 5, 6],
+        False,
+        False,
+        True,
+        None,
+    ),
+    (
+        "paper_account_batch_manifests_version_known",
+        "c",
+        [18, 22],
+        False,
+        False,
+        True,
+        "(((batch_version = 1) AND (runtime_generation IS NULL)) OR "
+        "((batch_version = 2) AND (runtime_generation IS NOT NULL) AND "
+        "(runtime_generation > 0)))",
+    ),
+)
+RUNTIME_MANIFEST_FKS = (
+    (
+        "paper_account_batch_manifests_runtime_generation_fk",
+        "np.paper_runtime_generations",
+        [1, 3, 4, 5, 6, 7],
+        "a",
+        "r",
+        "s",
+    ),
 )
 
 
@@ -317,6 +510,16 @@ def snapshot_responder(
     runtime_control_function=(RUNTIME_CONTROL_FUNCTION,),
     runtime_control_triggers=RUNTIME_CONTROL_TRIGGERS,
     runtime_control_rows=((True, "LEGACY", 0),),
+    runtime_generation_columns=RUNTIME_GENERATION_COLUMNS,
+    runtime_generation_constraints=RUNTIME_GENERATION_CONSTRAINTS,
+    runtime_generation_fks=RUNTIME_GENERATION_FKS,
+    runtime_generation_function=(RUNTIME_GENERATION_FUNCTION,),
+    runtime_generation_trigger=(RUNTIME_GENERATION_TRIGGER,),
+    runtime_manifest_column=RUNTIME_MANIFEST_COLUMN,
+    runtime_manifest_constraints=RUNTIME_MANIFEST_CONSTRAINTS,
+    runtime_manifest_fks=RUNTIME_MANIFEST_FKS,
+    runtime_generation_rows=(),
+    runtime_manifest_generation_rows=(),
 ):
     applied_rows = migration_rows() if applied is None else tuple(applied)
     watermarks = {} if legacy_rows is None else dict(legacy_rows)
@@ -336,12 +539,13 @@ def snapshot_responder(
             return [(relation,)]
         if sql.startswith("SELECT table_row.relkind, table_row.relpersistence"):
             return migration_relation_rows
-        if (
-            "FROM information_schema.columns" in sql
-            and "table_name = 'paper_runtime_control'" in sql
-        ):
-            return runtime_control_columns
         if "FROM information_schema.columns" in sql:
+            if "table_name = 'paper_runtime_control'" in sql:
+                return runtime_control_columns
+            if "table_name = 'paper_runtime_generations'" in sql:
+                return runtime_generation_columns
+            if "table_name = 'paper_account_batch_manifests'" in sql:
+                return runtime_manifest_column
             return migration_columns
         if (
             "FROM pg_constraint constraint_row" in sql
@@ -349,20 +553,36 @@ def snapshot_responder(
         ):
             return runtime_control_constraints
         if "FROM pg_constraint constraint_row" in sql:
+            if "table_row.relname = 'paper_runtime_generations'" in sql:
+                if "target_namespace" in sql:
+                    return runtime_generation_fks
+                return runtime_generation_constraints
+            if "table_row.relname = 'paper_account_batch_manifests'" in sql:
+                if "target_namespace" in sql:
+                    return runtime_manifest_fks
+                return runtime_manifest_constraints
             return migration_constraints
         if sql.startswith("SELECT version, name, checksum"):
             return applied_rows
         if "table_row.relname = ANY(%s)" in sql:
             return durable_relation_rows
         if "FROM pg_proc routine_row" in sql:
+            if "reject_paper_runtime_generation_mutation" in sql:
+                return runtime_generation_function
             return runtime_control_function
         if "FROM pg_trigger trigger_row" in sql:
+            if "table_row.relname = 'paper_runtime_generations'" in sql:
+                return runtime_generation_trigger
             return runtime_control_triggers
         if "FROM np.paper_runtime_control" in sql:
             return runtime_control_rows
+        if "FROM np.paper_runtime_generations" in sql:
+            return runtime_generation_rows
         if "FROM np.orders" in sql:
             return raw_order_references
         if "FROM np.paper_account_batch_manifests" in sql:
+            if "batch_version" in sql and "runtime_generation" in sql:
+                return runtime_manifest_generation_rows
             return raw_manifest_references
         if "FROM np.paper_account_streams" in sql and "account_key" in sql:
             return identity_rows(account_keys)
@@ -631,9 +851,24 @@ def test_nonlegacy_runtime_control_mode_is_a_stable_blocker(
     monkeypatch,
     mode,
 ) -> None:
+    epochs = tuple(
+        (
+            generation,
+            f"activation-{generation}",
+            SCOPE,
+            ACCOUNT_KEY,
+            GENERATION,
+            1,
+            OPENING_SHA256,
+        )
+        for generation in range(1, 10)
+    )
     database, _calls, result = assess_snapshot(
         monkeypatch,
-        responder=snapshot_responder(runtime_control_rows=((True, mode, 9),)),
+        responder=snapshot_responder(
+            runtime_control_rows=((True, mode, 9),),
+            runtime_generation_rows=epochs,
+        ),
     )
 
     assert finding_kinds(result) == (
@@ -643,6 +878,150 @@ def test_nonlegacy_runtime_control_mode_is_a_stable_blocker(
     assert result.account_version == 0
     assert len(result.legacy_watermarks) == len(readiness_module._LEGACY_RELATIONS)
     assert_read_only_snapshot(database.connections[0])
+
+
+def _epoch(generation, *, activation_id=None, **changes):
+    values = {
+        "runtime_generation": generation,
+        "activation_id": activation_id or f"activation-{generation}",
+        "execution_scope": SCOPE,
+        "account_key": ACCOUNT_KEY,
+        "owner_generation": GENERATION,
+        "opening_version": 1,
+        "opening_payload_sha256": OPENING_SHA256,
+    }
+    values.update(changes)
+    return tuple(values.values())
+
+
+def _versioned_manifest(generation, **changes):
+    values = {
+        "account_key": ACCOUNT_KEY,
+        "client_order_id": f"order-{generation}",
+        "execution_scope": SCOPE,
+        "owner_generation": GENERATION,
+        "opening_version": 1,
+        "opening_payload_sha256": OPENING_SHA256,
+        "batch_version": 2,
+        "runtime_generation": generation,
+    }
+    values.update(changes)
+    return tuple(values.values())
+
+
+def test_active_zero_generation_is_generation_mismatch(monkeypatch):
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            runtime_control_rows=((True, "ACTIVE", 0),),
+        ),
+    )
+
+    assert finding_kinds(result) == (
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
+        PaperAccountReadinessFindingKind.RUNTIME_GENERATION_MISMATCH,
+    )
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+
+
+@pytest.mark.parametrize("mode", ("SHADOW", "PAUSED"))
+def test_pre_activation_nonlegacy_zero_generation_has_only_mode_blocker(
+    monkeypatch,
+    mode,
+):
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            runtime_control_rows=((True, mode, 0),),
+        ),
+    )
+
+    assert finding_kinds(result) == (
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
+    )
+
+
+def test_legacy_zero_with_any_v1_manifest_is_generation_mismatch(monkeypatch):
+    legacy_manifest = (
+        ACCOUNT_KEY,
+        "legacy-order",
+        SCOPE,
+        GENERATION,
+        1,
+        OPENING_SHA256,
+        1,
+        None,
+    )
+
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            runtime_manifest_generation_rows=(legacy_manifest,),
+        ),
+    )
+
+    assert finding_kinds(result) == (
+        PaperAccountReadinessFindingKind.RUNTIME_GENERATION_MISMATCH,
+    )
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+
+
+def test_future_generation_accepts_contiguous_epochs_and_exact_v2_stamps(
+    monkeypatch,
+):
+    epochs = (_epoch(1), _epoch(2))
+    manifests = (_versioned_manifest(1), _versioned_manifest(2))
+
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            runtime_control_rows=((True, "PAUSED", 2),),
+            runtime_generation_rows=epochs,
+            runtime_manifest_generation_rows=manifests,
+        ),
+    )
+
+    assert finding_kinds(result) == (
+        PaperAccountReadinessFindingKind.RUNTIME_CONTROL_NOT_LEGACY,
+    )
+
+
+@pytest.mark.parametrize(
+    ("epochs", "manifests"),
+    (
+        ((_epoch(2),), ()),
+        ((_epoch(1), _epoch(3)), ()),
+        ((_epoch(1), _epoch(2), _epoch(3)), ()),
+        ((_epoch(True), _epoch(2)), ()),
+        ((_epoch(1, activation_id="same"), _epoch(2, activation_id="same")), ()),
+        ((_epoch(1, execution_scope="paper:other"), _epoch(2)), ()),
+        ((_epoch(1), _epoch(2)), (_versioned_manifest(1, batch_version=1),)),
+        ((_epoch(1), _epoch(2)), (_versioned_manifest(1, runtime_generation=True),)),
+        ((_epoch(1), _epoch(2)), (_versioned_manifest(3),)),
+        (
+            (_epoch(1), _epoch(2)),
+            (_versioned_manifest(1, account_key="paper-other"),),
+        ),
+    ),
+)
+def test_future_generation_gap_extra_or_provenance_drift_fails_closed(
+    monkeypatch,
+    epochs,
+    manifests,
+):
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            runtime_control_rows=((True, "PAUSED", 2),),
+            runtime_generation_rows=epochs,
+            runtime_manifest_generation_rows=manifests,
+        ),
+    )
+
+    assert PaperAccountReadinessFindingKind.RUNTIME_GENERATION_MISMATCH in (
+        finding_kinds(result)
+    )
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
 
 
 @pytest.mark.parametrize(
@@ -674,9 +1053,31 @@ def test_nonlegacy_runtime_control_mode_is_a_stable_blocker(
                 *RUNTIME_CONTROL_CONSTRAINTS[1:],
             )
         },
+        {
+            "runtime_generation_function": (
+                (
+                    *RUNTIME_GENERATION_FUNCTION[:8],
+                    "BEGIN RETURN NULL; END",
+                    True,
+                ),
+            )
+        },
+        {
+            "runtime_generation_trigger": (
+                (
+                    *RUNTIME_GENERATION_TRIGGER[:2],
+                    "D",
+                    *RUNTIME_GENERATION_TRIGGER[3:],
+                ),
+            )
+        },
+        {
+            "runtime_generation_constraints": RUNTIME_GENERATION_CONSTRAINTS[:1]
+            + RUNTIME_GENERATION_CONSTRAINTS[2:]
+        },
     ),
 )
-def test_runtime_control_catalog_or_row_tamper_is_early_drift(
+def test_runtime_catalog_or_control_row_tamper_is_early_drift(
     monkeypatch,
     control_changes,
 ) -> None:

@@ -57,7 +57,7 @@ def fake_connection(*, applied_rows=()):
 def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4)
+    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4, 5)
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -173,6 +173,52 @@ def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
         "ALTER",
         "CREATE",
         "INSERT",
+    }
+
+    runtime_generation = migrations[4]
+    assert runtime_generation.name == "paper_runtime_generation"
+    assert runtime_generation.checksum == (
+        "ac995eae0477697dc5517cc377d9af6f" "2411a53c0fd342e4773964c74d2a3358"
+    )
+    assert "CREATE TABLE np.paper_runtime_generations" in runtime_generation.sql
+    assert "runtime_generation BIGINT PRIMARY KEY" in runtime_generation.sql
+    assert "activation_id VARCHAR(255) NOT NULL" in runtime_generation.sql
+    assert "activation_id = BTRIM(activation_id)" in runtime_generation.sql
+    assert "UNIQUE (\n        activation_id\n    )" in runtime_generation.sql
+    assert "paper_runtime_generations_opening_fk" in runtime_generation.sql
+    assert "REFERENCES np.paper_account_streams" in runtime_generation.sql
+    assert "ADD COLUMN runtime_generation BIGINT" in runtime_generation.sql
+    assert "batch_version = 1 AND runtime_generation IS NULL" in (
+        runtime_generation.sql
+    )
+    assert "batch_version = 2" in runtime_generation.sql
+    assert "runtime_generation IS NOT NULL" in runtime_generation.sql
+    assert "runtime_generation > 0" in runtime_generation.sql
+    assert "paper_account_batch_manifests_runtime_generation_fk" in (
+        runtime_generation.sql
+    )
+    assert "REFERENCES np.paper_runtime_generations" in runtime_generation.sql
+    assert "paper_runtime_generations_activated_at_finite" in runtime_generation.sql
+    assert "isfinite(activated_at)" in runtime_generation.sql
+    assert "CREATE FUNCTION np.reject_paper_runtime_generation_mutation()" in (
+        runtime_generation.sql
+    )
+    assert "ERRCODE = '55000'" in runtime_generation.sql
+    assert "paper runtime generations are append-only" in runtime_generation.sql
+    assert "CREATE TRIGGER paper_runtime_generations_append_only" in (
+        runtime_generation.sql
+    )
+    assert "BEFORE UPDATE OR DELETE OR TRUNCATE" in runtime_generation.sql
+    assert "ENABLE ALWAYS TRIGGER paper_runtime_generations_append_only" in (
+        runtime_generation.sql
+    )
+    assert "INSERT " not in runtime_generation.sql.upper()
+    assert "\nUPDATE " not in runtime_generation.sql.upper()
+    assert "\nDELETE " not in runtime_generation.sql.upper()
+    assert "\nTRUNCATE " not in runtime_generation.sql.upper()
+    assert {prefix[0] for prefix in _statement_prefixes(runtime_generation.sql)} == {
+        "ALTER",
+        "CREATE",
     }
 
 

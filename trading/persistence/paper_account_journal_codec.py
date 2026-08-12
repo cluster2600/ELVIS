@@ -28,6 +28,7 @@ from trading.persistence.journal_codec import (
 )
 
 _PAYLOAD_VERSION = 1
+_RUNTIME_BATCH_PAYLOAD_VERSION = 2
 _BIGINT_MAX = (1 << 63) - 1
 _EXECUTION_SCOPE_MAX_LENGTH = 128
 _ACCOUNT_KEY_MAX_LENGTH = 255
@@ -513,6 +514,7 @@ class PaperAccountBatchManifest:
     submission_observed_at: datetime
     submission_event_payload_sha256: str
     fills: tuple[PaperAccountBatchFill, ...]
+    runtime_generation: int | None = None
 
     def __post_init__(self) -> None:
         for field, value, maximum in (
@@ -557,6 +559,12 @@ class PaperAccountBatchManifest:
             "submission_event_payload",
             error_type=ValueError,
         )
+        if self.runtime_generation is not None:
+            _checked_bigint(
+                self.runtime_generation,
+                "runtime_generation",
+                error_type=ValueError,
+            )
         if type(self.fills) is not tuple or not self.fills:
             raise TypeError("fills must be a non-empty exact tuple")
         if any(type(fill) is not PaperAccountBatchFill for fill in self.fills):
@@ -611,6 +619,7 @@ class EncodedPaperAccountBatch:
     batch_version: int
     batch_payload: str
     batch_payload_sha256: str
+    runtime_generation: int | None = None
 
     def __post_init__(self) -> None:
         for field, value, maximum in (
@@ -657,8 +666,22 @@ class EncodedPaperAccountBatch:
             self.fill_count
         ):
             raise JournalEncodeError("account-version range conflicts with fill_count")
-        if type(self.batch_version) is not int or self.batch_version != 1:
+        if type(self.batch_version) is not int or self.batch_version not in {
+            _PAYLOAD_VERSION,
+            _RUNTIME_BATCH_PAYLOAD_VERSION,
+        }:
             raise JournalEncodeError("batch_version is unknown")
+        if self.runtime_generation is None:
+            if self.batch_version != _PAYLOAD_VERSION:
+                raise JournalEncodeError("batch_version requires a runtime generation")
+        else:
+            _checked_bigint(
+                self.runtime_generation,
+                "runtime_generation",
+                error_type=JournalEncodeError,
+            )
+            if self.batch_version != _RUNTIME_BATCH_PAYLOAD_VERSION:
+                raise JournalEncodeError("runtime generation requires batch_version 2")
         if type(self.batch_payload) is not str:
             raise JournalEncodeError("batch_payload must be text")
         _checked_sha256(
@@ -1019,7 +1042,7 @@ def _batch_payload(manifest: PaperAccountBatchManifest) -> dict[str, object]:
         manifest.submission_observed_at,
         "submission_observed_at",
     )
-    return {
+    payload = {
         "execution_scope": manifest.execution_scope,
         "account_key": manifest.account_key,
         "owner_generation": manifest.owner_generation,
@@ -1048,6 +1071,9 @@ def _batch_payload(manifest: PaperAccountBatchManifest) -> dict[str, object]:
             for fill in manifest.fills
         ],
     }
+    if manifest.runtime_generation is not None:
+        payload["runtime_generation"] = manifest.runtime_generation
+    return payload
 
 
 def encode_paper_account_batch(
@@ -1076,9 +1102,14 @@ def encode_paper_account_batch(
         last_account_version=manifest.fills[-1].account_version,
         last_position_version=manifest.fills[-1].position_version,
         fill_count=len(manifest.fills),
-        batch_version=_PAYLOAD_VERSION,
+        batch_version=(
+            _PAYLOAD_VERSION
+            if manifest.runtime_generation is None
+            else _RUNTIME_BATCH_PAYLOAD_VERSION
+        ),
         batch_payload=payload_json,
         batch_payload_sha256=_payload_sha256(payload_json),
+        runtime_generation=manifest.runtime_generation,
     )
 
 
@@ -1100,25 +1131,54 @@ def decode_paper_account_batch(
     batch_version: object,
     batch_payload: object,
     batch_payload_sha256: object,
+    runtime_generation: object = None,
 ) -> PaperAccountBatchManifest:
     """Decode and cross-check one untrusted atomic-owner batch manifest."""
-    if type(batch_version) is not int or batch_version != _PAYLOAD_VERSION:
+    if type(batch_version) is not int or batch_version not in {
+        _PAYLOAD_VERSION,
+        _RUNTIME_BATCH_PAYLOAD_VERSION,
+    }:
         raise JournalQuarantineError("batch_version is unknown")
+    if batch_version == _PAYLOAD_VERSION:
+        if runtime_generation is not None:
+            raise JournalQuarantineError(
+                "batch_version 1 cannot have a runtime generation"
+            )
+        decoded_runtime_generation = None
+    else:
+        decoded_runtime_generation = _checked_bigint(
+            runtime_generation,
+            "indexed runtime_generation",
+            error_type=JournalQuarantineError,
+        )
     payload = _verified_payload(batch_payload, batch_payload_sha256, "batch_payload")
+    expected_payload_keys = {
+        "execution_scope",
+        "account_key",
+        "owner_generation",
+        "position_key",
+        "client_order_id",
+        "instruction_payload_sha256",
+        "submission",
+        "fills",
+    }
+    if batch_version == _RUNTIME_BATCH_PAYLOAD_VERSION:
+        expected_payload_keys.add("runtime_generation")
     payload = _exact_keys(
         payload,
-        {
-            "execution_scope",
-            "account_key",
-            "owner_generation",
-            "position_key",
-            "client_order_id",
-            "instruction_payload_sha256",
-            "submission",
-            "fills",
-        },
+        expected_payload_keys,
         "batch_payload",
     )
+    if batch_version == _RUNTIME_BATCH_PAYLOAD_VERSION:
+        payload_runtime_generation = _checked_bigint(
+            payload["runtime_generation"],
+            "runtime_generation",
+            error_type=JournalQuarantineError,
+        )
+        if payload_runtime_generation != decoded_runtime_generation:
+            raise JournalQuarantineError(
+                "runtime generation indexed column conflicts with payload"
+            )
     submission = _exact_keys(
         payload["submission"],
         {"event_id", "position_version", "observed_at", "event_payload_sha256"},
@@ -1246,6 +1306,7 @@ def decode_paper_account_batch(
                     ),
                 )
             ),
+            runtime_generation=decoded_runtime_generation,
         )
     except JournalQuarantineError:
         raise
@@ -1327,6 +1388,7 @@ def decode_paper_account_batch(
             "indexed fill_count",
             error_type=JournalQuarantineError,
         ),
+        decoded_runtime_generation,
     )
     expected = (
         encoded.execution_scope,
@@ -1342,6 +1404,7 @@ def decode_paper_account_batch(
         encoded.last_account_version,
         encoded.last_position_version,
         encoded.fill_count,
+        encoded.runtime_generation,
     )
     if indexed != expected:
         raise JournalQuarantineError("batch indexed columns conflict with payload")

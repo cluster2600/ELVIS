@@ -26,6 +26,12 @@ from trading.persistence.paper_account_journal import (
     PaperAccountStorageError,
     PostgresPaperAccountJournal,
     ProvisionDisposition,
+    _decode_batch_row,
+)
+from trading.persistence.paper_account_journal_codec import (
+    PaperAccountBatchFill,
+    PaperAccountBatchManifest,
+    encode_paper_account_batch,
 )
 
 NOW = datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc)
@@ -399,6 +405,93 @@ def test_replay_opening_only_uses_repeatable_read_and_rolls_back(journal):
     assert connection.commits == 0
     assert connection.rollbacks == 1
     assert connection.closed is True
+
+
+@pytest.mark.parametrize("runtime_generation", (None, 9))
+def test_stored_batch_replay_preserves_optional_runtime_generation(
+    runtime_generation,
+):
+    manifest = PaperAccountBatchManifest(
+        execution_scope="paper:test",
+        account_key="account-1",
+        owner_generation=7,
+        position_key="position-1",
+        client_order_id="order-1",
+        instruction_payload_sha256="a" * 64,
+        submission_event_id="submission-1",
+        submission_position_version=1,
+        submission_observed_at=NOW,
+        submission_event_payload_sha256="b" * 64,
+        fills=(
+            PaperAccountBatchFill(
+                position_key="position-1",
+                client_order_id="order-1",
+                event_id="fill-1",
+                trade_id="trade-1",
+                position_version=2,
+                account_version=1,
+                event_payload_sha256="c" * 64,
+                account_settlement_payload_sha256="d" * 64,
+            ),
+        ),
+        runtime_generation=runtime_generation,
+    )
+    encoded = encode_paper_account_batch(manifest)
+    row = (
+        encoded.account_key,
+        encoded.client_order_id,
+        encoded.execution_scope,
+        encoded.owner_generation,
+        1,
+        "e" * 64,
+        encoded.position_key,
+        encoded.instruction_payload_sha256,
+        encoded.submission_event_id,
+        "SUBMISSION_ACKNOWLEDGED",
+        encoded.submission_position_version,
+        encoded.submission_observed_at,
+        manifest.submission_event_payload_sha256,
+        encoded.first_account_version,
+        encoded.last_account_version,
+        encoded.last_position_version,
+        encoded.fill_count,
+        encoded.batch_version,
+        encoded.batch_payload,
+        encoded.batch_payload_sha256,
+        NOW,
+        encoded.runtime_generation,
+    )
+
+    decoded = _decode_batch_row(row)
+
+    assert decoded.manifest.runtime_generation == runtime_generation
+    assert decoded.manifest == manifest
+
+
+def test_account_batch_query_appends_nullable_generation_after_legacy_columns(
+    journal,
+):
+    _database, repository = journal
+    repository.provision_account(
+        execution_scope="paper:test",
+        owner_generation=7,
+        account=_account(),
+    )
+
+    repository.replay_account(
+        execution_scope="paper:test",
+        account_key="account-1",
+    )
+
+    command = next(
+        value
+        for value in journal[0].connections[-1].commands
+        if "FROM np.paper_account_batch_manifests" in value
+    )
+    assert command.endswith(
+        "recorded_at, runtime_generation "
+        "FROM np.paper_account_batch_manifests WHERE account_key = %s"
+    )
 
 
 def test_replay_reports_missing_and_wrong_scope(journal):

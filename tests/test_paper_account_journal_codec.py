@@ -386,6 +386,7 @@ def test_batch_golden_vector_round_trips_all_provenance_links() -> None:
     decoded = _decode_batch(encoded)
 
     assert encoded.batch_version == 1
+    assert encoded.runtime_generation is None
     assert encoded.batch_payload == BATCH_GOLDEN_JSON
     assert encoded.batch_payload_sha256 == BATCH_GOLDEN_SHA
     assert decoded == replace(manifest, submission_observed_at=UTC_TIME)
@@ -398,6 +399,41 @@ def test_batch_golden_vector_round_trips_all_provenance_links() -> None:
         encode_paper_account_settlement(admissions[0]).settlement_payload_sha256,
         encode_paper_account_settlement(admissions[1]).settlement_payload_sha256,
     )
+
+
+def test_runtime_generation_batch_v2_has_exact_golden_vector_and_round_trip() -> None:
+    manifest, admissions = _batch_artifacts()
+    versioned = replace(manifest, runtime_generation=42)
+
+    encoded = encode_paper_account_batch(versioned)
+    decoded = _decode_batch(encoded)
+
+    assert encoded.batch_version == 2
+    assert encoded.runtime_generation == 42
+    assert encoded.batch_payload == BATCH_V2_GOLDEN_JSON
+    assert encoded.batch_payload_sha256 == BATCH_V2_GOLDEN_SHA
+    assert decoded == replace(versioned, submission_observed_at=UTC_TIME)
+    assert decoded.runtime_generation == 42
+    assert tuple(fill.account_settlement_payload_sha256 for fill in decoded.fills) == (
+        encode_paper_account_settlement(admissions[0]).settlement_payload_sha256,
+        encode_paper_account_settlement(admissions[1]).settlement_payload_sha256,
+    )
+
+
+def test_adding_runtime_generation_changes_only_the_v2_envelope_field() -> None:
+    manifest, _ = _batch_artifacts()
+
+    legacy = encode_paper_account_batch(manifest)
+    active = encode_paper_account_batch(replace(manifest, runtime_generation=42))
+    legacy_payload = json.loads(legacy.batch_payload)
+    active_payload = json.loads(active.batch_payload)
+
+    assert active_payload.pop("runtime_generation") == 42
+    assert active_payload == legacy_payload
+    assert legacy.batch_version == 1
+    assert legacy.runtime_generation is None
+    assert legacy.batch_payload == BATCH_GOLDEN_JSON
+    assert legacy.batch_payload_sha256 == BATCH_GOLDEN_SHA
 
 
 @pytest.mark.parametrize("codec", ("opening", "settlement", "batch"))
@@ -605,17 +641,114 @@ def test_unknown_or_ill_typed_envelope_versions_are_quarantined(
     opening = encode_paper_account_opening("paper:test", 7, _opening_account())
     admission = _single_admission()
     settlement = encode_paper_account_settlement(admission)
-    manifest, _ = _batch_artifacts()
-    batch = encode_paper_account_batch(manifest)
-
     with pytest.raises(JournalQuarantineError, match="version is unknown"):
         _decode_opening(opening, opening_version=version)
     with pytest.raises(JournalQuarantineError, match="version is unknown"):
         _decode_settlement(admission, settlement, settlement_version=version)
     with pytest.raises(JournalQuarantineError, match="version is unknown"):
         _decode_settlement(admission, settlement, instrument_version=version)
+
+
+@pytest.mark.parametrize("version", (True, 0, 3, "1", None))
+def test_unknown_or_ill_typed_batch_versions_are_quarantined(
+    version: object,
+) -> None:
+    manifest, _ = _batch_artifacts()
+    batch = encode_paper_account_batch(manifest)
+
     with pytest.raises(JournalQuarantineError, match="version is unknown"):
         _decode_batch(batch, batch_version=version)
+
+
+@pytest.mark.parametrize("value", (True, 0, -1, 1 << 63, 1.0, "1"))
+def test_manifest_runtime_generation_rejects_bool_bounds_and_wrong_types(
+    value: object,
+) -> None:
+    manifest, _ = _batch_artifacts()
+
+    with pytest.raises((TypeError, ValueError), match="storage bounds|integer"):
+        replace(manifest, runtime_generation=value)
+
+
+@pytest.mark.parametrize(
+    ("batch_version", "runtime_generation"),
+    (
+        (1, 1),
+        (2, None),
+        (2, True),
+        (2, 0),
+        (2, -1),
+        (2, 1 << 63),
+        (2, 1.0),
+        (3, None),
+    ),
+)
+def test_encoded_batch_rejects_incoherent_version_generation_pairs(
+    batch_version: object,
+    runtime_generation: object,
+) -> None:
+    encoded = encode_paper_account_batch(_manifest())
+
+    with pytest.raises(JournalEncodeError):
+        replace(
+            encoded,
+            batch_version=batch_version,
+            runtime_generation=runtime_generation,
+        )
+
+
+@pytest.mark.parametrize(
+    ("batch_version", "runtime_generation"),
+    (
+        (1, 1),
+        (2, None),
+        (2, True),
+        (2, 0),
+        (2, -1),
+        (2, 1 << 63),
+        (2, 1.0),
+        (2, "1"),
+    ),
+)
+def test_batch_decoder_quarantines_incoherent_version_generation_pairs(
+    batch_version: object,
+    runtime_generation: object,
+) -> None:
+    manifest, _ = _batch_artifacts()
+    encoded = encode_paper_account_batch(manifest)
+
+    with pytest.raises(JournalQuarantineError):
+        _decode_batch(
+            encoded,
+            batch_version=batch_version,
+            runtime_generation=runtime_generation,
+        )
+
+
+@pytest.mark.parametrize("mutation", ("missing", "indexed_drift", "payload_drift"))
+def test_batch_v2_runtime_generation_is_required_and_cross_checked(
+    mutation: str,
+) -> None:
+    manifest, _ = _batch_artifacts()
+    encoded = encode_paper_account_batch(replace(manifest, runtime_generation=42))
+    overrides: dict[str, object] = {}
+    if mutation == "missing":
+        payload = json.loads(encoded.batch_payload)
+        payload.pop("runtime_generation")
+        overrides["batch_payload"], overrides["batch_payload_sha256"] = _canonical(
+            payload
+        )
+    elif mutation == "indexed_drift":
+        overrides["runtime_generation"] = 43
+    else:
+        payload = json.loads(encoded.batch_payload)
+        payload["runtime_generation"] = 43
+        overrides["batch_payload"], overrides["batch_payload_sha256"] = _canonical(
+            payload
+        )
+
+    with pytest.raises(JournalQuarantineError):
+        _decode_batch(encoded, **overrides)
 
 
 @pytest.mark.parametrize("value", (True, 0, -1, 1 << 63, 1.0, "1"))
@@ -1222,6 +1355,34 @@ def test_copy_and_pickle_round_trips_revalidate_codec_values() -> None:
             assert hash(restored) == hash(value)
 
 
+@pytest.mark.parametrize("protocol", range(6))
+def test_v2_manifest_and_encoded_batch_copy_and_pickle_protocols(protocol: int) -> None:
+    manifest, _ = _batch_artifacts()
+    manifest = replace(manifest, runtime_generation=42)
+    encoded = encode_paper_account_batch(manifest)
+
+    for value in (manifest, encoded):
+        for restored in (
+            copy.copy(value),
+            copy.deepcopy(value),
+            pickle.loads(pickle.dumps(value, protocol=protocol)),
+        ):
+            assert restored == value
+            assert restored.runtime_generation == 42
+            assert hash(restored) == hash(value)
+
+
+def test_v2_manifest_and_encoded_batch_reject_setstate_mutation() -> None:
+    manifest, _ = _batch_artifacts()
+    manifest = replace(manifest, runtime_generation=42)
+
+    for value in (manifest, encode_paper_account_batch(manifest)):
+        state = [getattr(value, field.name) for field in fields(value)]
+        assert hasattr(value, "__setstate__")
+        with pytest.raises(TypeError, match="state mutation"):
+            value.__setstate__(state)
+
+
 def test_non_objects_invalid_constants_and_excessive_nesting_are_quarantined() -> None:
     opening = encode_paper_account_opening("paper:test", 7, _opening_account())
     for payload in ("NaN", "[]", "null"):
@@ -1538,3 +1699,8 @@ BATCH_GOLDEN_JSON = (
     '"position_version":1}}'
 )
 BATCH_GOLDEN_SHA = "af498a278a3b37017225518237c911914f9aeba8d13532b969b0fa4b3971595e"
+BATCH_V2_GOLDEN_JSON = BATCH_GOLDEN_JSON.replace(
+    ',"submission":',
+    ',"runtime_generation":42,"submission":',
+)
+BATCH_V2_GOLDEN_SHA = "f647482b66591e350f9b8155d0b316f65939aa7dddd84ad954c0df18901f4948"

@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14a dormant global legacy-writer fence implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14b1 dormant runtime-generation provenance implemented and verified; no runtime cut-over) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -3463,6 +3463,222 @@ fence command passed 181 tests under each interpreter; the complete PostgreSQL
 15 suite passed 282 tests under `.venv/bin/python`. The full non-PostgreSQL
 Honolulu run passed 2,317 tests, with 50 skipped, 285 deselected, and 7 subtests.
 Black, isort, flake8, Python 3.10 compilation, and `git diff --check` were green.
+
+### M9b.14b1 dormant runtime-generation provenance
+
+M9b.14b1 adds forward migration
+`0005_paper_runtime_generation.sql`. Its immutable SHA-256 is
+`ac995eae0477697dc5517cc377d9af6f2411a53c0fd342e4773964c74d2a3358`.
+The migration deliberately leaves its new
+`np.paper_runtime_generations` table empty and does not change the M9b.14a
+`LEGACY/0` seed. Each future epoch row contains:
+
+- positive primary-key `runtime_generation`;
+- one globally unique, trimmed, non-empty `activation_id`, reserved as the
+  retry identity for resolving a commit-unknown activation;
+- the exact `execution_scope`, `account_key`, positive immutable
+  `owner_generation`, opening version, and opening-payload SHA-256;
+- finite `activated_at timestamptz NOT NULL DEFAULT clock_timestamp()`; and
+- an exact foreign key from the complete opening identity to
+  `np.paper_account_streams`, plus the composite uniqueness required as the
+  manifest provenance target.
+
+`runtime_generation` is an activation epoch and remains distinct from
+`owner_generation`: the latter records how an account was provisioned and does
+not rotate. The transition contract for a later slice must append epoch `N`
+only when entering `ACTIVE N`. `PAUSED` retains `N`; a subsequent entry into
+`ACTIVE` appends `N+1`. The unique `activation_id` lets a caller resolve whether
+an activation transaction committed without creating another epoch or binding
+the wrong account.
+
+The epoch table is append-only at the database boundary. The migration creates
+the exact zero-argument function
+`np.reject_paper_runtime_generation_mutation()`, which is `SECURITY DEFINER`,
+uses PL/pgSQL, and fixes `search_path=pg_catalog`. Its exact
+`paper_runtime_generations_append_only` trigger is statement-level, `ENABLE
+ALWAYS`, and fires before `UPDATE`, `DELETE`, or `TRUNCATE`; statements that
+reach it fail with SQLSTATE `55000` and
+`paper runtime generations are append-only`. A referenced epoch is also
+protected by the manifest foreign key. PostgreSQL may reject a plain
+`TRUNCATE` with `0A000` during foreign-key graph validation before the trigger;
+`TRUNCATE ... CASCADE` reaches the guard and returns `55000`. Both outcomes are
+zero-mutation and are covered explicitly rather than overclaiming one error
+path.
+
+The migration appends nullable `runtime_generation bigint` to
+`np.paper_account_batch_manifests` and replaces its version check with exactly
+two admissible forms:
+
+- version 1 and `runtime_generation IS NULL`; or
+- version 2 and `runtime_generation IS NOT NULL AND runtime_generation > 0`.
+
+The explicit `IS NOT NULL` is required because a PostgreSQL `CHECK` otherwise
+accepts an unknown result for version 2 plus `NULL`. A version-2 row also has a
+composite foreign key from its generation and full opening identity to the
+same epoch. It therefore cannot stamp another account's activation merely by
+guessing a valid generation number.
+
+The journal codec and replay remain backward compatible without adopting old
+history. A manifest with no runtime generation emits the byte-identical,
+hash-identical version-1 canonical JSON. A positive generation selects version
+2, includes `runtime_generation` in the canonical payload and payload hash, and
+cross-checks it against the indexed column while decoding. Replay now exposes
+`runtime_generation: int | None`; it performs no rewrite or implicit V1-to-V2
+upgrade.
+
+Readiness advances both its catalog and raw-data authority. Its durable
+inventory now expects the original sixteen business relations, M9b.14a control,
+and the generation registry. The seven legacy-fence triggers plus the one
+append-only epoch trigger are the complete allowed user-trigger set. Exact
+catalog checks cover every new column, default, validated constraint, foreign
+key, function property/source/owner/configuration, trigger target/event
+mask/state, and the manifest column at ordinal 22. Extra or altered
+generation-bearing schema remains early `MIGRATION_DRIFT`.
+
+After catalog validation, raw generation evidence must satisfy all of these
+invariants:
+
+- control generation `N` has exactly the immutable epoch rows `1..N`, with no
+  gap, duplicate activation identity, or context/opening mismatch;
+- every raw manifest is version 2, carries a non-boolean integer generation in
+  `1..N`, and has the full provenance recorded by that exact epoch;
+- `LEGACY/0` has no epoch rows and no manifests; `ACTIVE/0` is always invalid;
+  and `SHADOW/0` or `PAUSED/0` may be structurally valid but remain blocked by
+  their existing non-legacy control finding.
+
+Failure adds stable `RUNTIME_GENERATION_MISMATCH` for
+`np.paper_runtime_generations`. It is an ordinary `BLOCKED` readiness finding,
+not a claim that automated reconciliation is available. Existing V1 histories
+remain replayable, but their presence blocks activation and is never treated as
+durable-owner provenance. With an empty registry and manifest inventory, the
+new generation evidence does not change an otherwise exact `LEGACY/0`
+`PREPARED_FOR_FENCE` result. The snapshot remains non-authoritative and cannot
+transition the runtime.
+
+This slice is strictly dormant. It adds no generation-aware owner write, epoch
+insert API, mode transition, same-cursor readiness lock, startup/runtime/health
+composition, shadow executor, role or grant change, credential rotation,
+compatibility projection, reconciliation mutation, policy digest, cut-over, or
+rollback authority. No current production path can create version-2 manifests
+or enter `ACTIVE`.
+
+The remaining slices are ordered as follows:
+
+1. M9b.14b2 makes the atomic owner generation-aware but keeps that owner
+   dormant; every new durable batch must be V2 and use the supplied epoch's
+   exact account provenance.
+2. M9b.14b3 adds a dormant locked transition contract, including the
+   same-cursor authoritative readiness re-check and commit-unknown recovery by
+   `activation_id`. It may define transition behavior before database-role
+   separation, but it must still make `ACTIVE` unreachable in production.
+3. M9b.14c adds the migration/bootstrap entrypoint, separates migration/admin
+   ownership from the non-superuser runtime identity, removes runtime DDL and
+   schema `CREATE`, applies exact grants, and rotates the affected secret.
+4. M9b.14d adds fail-closed startup/composition and side-effect-free shadow
+   operation. Explicit reconciliation/quarantine, bounded replay or snapshots,
+   compatibility policy, stale-writer removal, tested pause/rollback, soak
+   evidence, and an operator-approved cut-over still gate `ACTIVE`.
+
+Literal verification commands for M9b.14b1 are recorded below. Their focused
+shared, both-interpreter, PostgreSQL, full-suite, and static-check results were
+captured from the final shared tree.
+
+```bash
+/usr/bin/shasum -a 256 \
+  trading/persistence/sql_migrations/0005_paper_runtime_generation.sql
+.venv/bin/python -m pytest -q \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py \
+  tests/postgres/test_paper_account_repository_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  /usr/local/bin/python3.10 -m pytest -q \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py \
+  tests/postgres/test_paper_account_repository_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=postgresql://postgres:review@127.0.0.1:55440/elvis_review \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q tests/postgres
+TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+.venv/bin/black --target-version py310 --check \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_journal.py \
+  trading/persistence/paper_account_journal_codec.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py
+.venv/bin/isort --check-only \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_journal.py \
+  trading/persistence/paper_account_journal_codec.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py
+.venv/bin/flake8 \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_journal.py \
+  trading/persistence/paper_account_journal_codec.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/application/paper_account_readiness.py \
+  trading/persistence/paper_account_journal.py \
+  trading/persistence/paper_account_journal_codec.py \
+  trading/persistence/paper_account_readiness.py \
+  tests/test_migration_runner.py \
+  tests/test_paper_account_journal.py \
+  tests/test_paper_account_journal_codec.py \
+  tests/test_paper_account_readiness.py \
+  tests/test_paper_account_readiness_repository.py \
+  tests/postgres/test_migration_runner_postgres.py \
+  tests/postgres/test_paper_account_readiness_postgres.py \
+  tests/postgres/test_paper_runtime_generation_postgres.py
+git diff --check
+```
+
+The exact focused shared command passed 465 tests under each Python interpreter.
+The focused PostgreSQL 15 command passed 63 tests under each interpreter; the
+complete PostgreSQL 15 suite passed 304 tests under `.venv/bin/python`. The full
+non-PostgreSQL Honolulu run passed 2,377 tests, with 50 skipped, 307 deselected,
+and 7 subtests. Black, isort, flake8, Python 3.10 compilation, and
+`git diff --check` were green.
 
 ## Cut-over policy
 

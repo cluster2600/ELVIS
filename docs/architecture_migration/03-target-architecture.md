@@ -242,7 +242,10 @@ mutation, or commit the journal batch and every account fact together.
 M9b.13 adds the pure readiness vocabulary and its dormant global PostgreSQL
 assessment. M9b.14a adds migration `0004`, whose default-`LEGACY` singleton and
 seven database triggers prepare the global legacy-writer fence without exposing
-an activation API or changing runtime authority.
+an activation API or changing runtime authority. M9b.14b1 adds dormant
+migration `0005`, an empty append-only activation-epoch registry, version-2
+manifest stamping, backward-compatible replay, and exact readiness evidence;
+it still exposes no owner, transition, or runtime path.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1077,6 +1080,70 @@ snapshots, operational timeouts, reconciliation/quarantine, shadow parity,
 restart recovery, compatibility-projection policy, soak evidence, and removal
 of every legacy writer remain explicit `ACTIVE` blockers.
 
+M9b.14b1 adds only the dormant durable provenance needed to distinguish those
+future runtime epochs. Forward migration
+`0005_paper_runtime_generation.sql`, with immutable SHA-256
+`ac995eae0477697dc5517cc377d9af6f2411a53c0fd342e4773964c74d2a3358`,
+creates an initially empty `np.paper_runtime_generations` registry. One row
+binds a positive `runtime_generation` to a unique, trimmed, non-empty
+`activation_id`, the exact `execution_scope`, `account_key`, positive immutable
+`owner_generation`, version-1 opening envelope and opening-payload SHA-256, and
+a finite `activated_at`. Its opening identity has an exact foreign key to
+`np.paper_account_streams`. The registry's generation plus that same opening
+identity is unique and is the only provenance target accepted from a stamped
+batch manifest. `activation_id` is the future idempotency identity for resolving
+a commit-unknown activation; it is not a second generation or an owner token.
+
+The registry is append-only. The zero-argument, `SECURITY DEFINER`
+`np.reject_paper_runtime_generation_mutation()` function fixes its `search_path`
+to `pg_catalog` and the `ENABLE ALWAYS`, statement-level
+`paper_runtime_generations_append_only` trigger covers `UPDATE`, `DELETE`, and
+`TRUNCATE`. Mutating statements that reach the trigger fail with SQLSTATE
+`55000` and `paper runtime generations are append-only`. The inbound manifest
+foreign key also prevents an epoch referenced by a manifest from being
+removed. PostgreSQL can reject a plain `TRUNCATE` with SQLSTATE `0A000` while it
+checks that dependency before firing the trigger; `TRUNCATE ... CASCADE`
+reaches the trigger and fails with `55000`. Neither path can erase an epoch.
+
+Migration `0005` also appends nullable `runtime_generation bigint` to
+`np.paper_account_batch_manifests`. Its strict version constraint admits only
+version 1 with `NULL`, or version 2 with an explicitly non-`NULL`, positive
+generation; the explicit null predicate closes PostgreSQL's three-valued
+`CHECK` hole. A version-2 manifest has a composite foreign key from its
+generation and full opening identity to the matching epoch row. The version-1
+codec remains byte-for-byte and hash-for-hash unchanged, so existing version-1
+history still decodes and replays with `runtime_generation is None`. Supplying
+a positive generation selects version 2, adds `runtime_generation` to the
+canonical payload, and therefore binds it into the payload SHA-256 as well as
+the indexed column. Replay exposes that optional generation without upgrading,
+rewriting, or silently adopting a version-1 manifest.
+
+Readiness treats the epoch registry, its append-only function and trigger, the
+new manifest column, both foreign keys, and every named constraint as exact
+catalog authority. Its data evidence separately requires generations `1..N`
+without a gap for control generation `N`, with every row bound to the requested
+account opening. Every manifest in the raw inventory must be version 2, carry a
+real integer generation in `1..N`, and match that epoch's full opening
+provenance. Boolean lookalikes are not integers. `LEGACY/0` is prepared only
+when both the registry and manifest inventory are empty; version-1 history
+remains replay-compatible but yields the blocking
+`RUNTIME_GENERATION_MISMATCH` finding rather than being adopted. `ACTIVE/0` is
+always a mismatch, while `SHADOW/0` and `PAUSED/0` remain structurally valid
+control states and retain their ordinary non-legacy mode finding.
+
+`runtime_generation` means an entry into `ACTIVE`, not an account provision and
+not every control-state change. A later pause retains epoch `N`; a later
+reactivation must append epoch `N+1`. M9b.14b1 does not perform either action:
+it seeds no epoch, changes no owner, transition, runtime composition, role,
+grant, secret, policy, or readiness digest, and leaves the singleton control at
+`LEGACY/0`. Delivery remains ordered as M9b.14b2's dormant generation-aware
+atomic owner, M9b.14b3's dormant locked transition and same-cursor authoritative
+readiness re-check, M9b.14c's migration/bootstrap entrypoint plus separated
+roles, grants, and secret rotation, and M9b.14d's startup composition and
+side-effect-free shadow operation. Only after those slices and the remaining
+reconciliation, bounded-replay, compatibility, stale-writer, rollback, and soak
+gates may an explicit cut-over make `ACTIVE` reachable.
+
 ## Runtime and configuration
 
 The runner has explicit `STARTING`, `RUNNING`, `PAUSED`, `DEGRADED`, `STOPPING`,
@@ -1235,13 +1302,14 @@ Cut-over still requires: completion and soak evidence for the dormant integrated
 owner; persisted instrument identity and version plus price, fee, tick, lot, and
 opening-capital provenance;
 funding, borrowing, liquidation, and unrealised mark-to-market rules;
-rotating runtime generation and execution-scope fencing; atomic legacy compatibility
+the M9b.14b1 dormant epoch registry and manifest format must be consumed by a
+generation-aware owner and locked transition; atomic legacy compatibility
 projections where they remain necessary; durable reconciliation and quarantine
 for unsupported, unresolved, or incompatible pre-atomic histories; startup
-composition of the non-authoritative assessment plus its locked activation
-re-check; bounded replay or snapshots; a proved sole-writer fence over every
-legacy executor and database writer; side-effect-free shadow parity; and an
-explicit cut-over decision.
+composition of the non-authoritative assessment plus its same-cursor locked
+activation re-check; bounded replay or snapshots; separated database roles and
+a proved sole-writer fence over every legacy executor and database writer;
+side-effect-free shadow parity; and an explicit cut-over decision.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.
