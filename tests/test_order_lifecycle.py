@@ -1082,7 +1082,7 @@ def test_order_consumer_detector_allows_explicit_unrelated_domain_imports(
     assert not _uses_order_lifecycle_contract(source)
 
 
-def test_order_lifecycle_module_is_pure_and_only_codec_consumes_contract() -> None:
+def test_order_lifecycle_only_journal_modules_consume_contract() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "domain" / "order_lifecycle.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
@@ -1119,4 +1119,7 @@ def test_order_lifecycle_module_is_pure_and_only_codec_consumes_contract() -> No
         if _uses_order_lifecycle_contract(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert sorted(consumers) == [Path("trading/persistence/journal_codec.py")]
+    assert sorted(consumers) == [
+        Path("trading/persistence/journal_codec.py"),
+        Path("trading/persistence/order_position_journal.py"),
+    ]

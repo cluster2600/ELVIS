@@ -31,7 +31,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b pure position reducer; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.2 pure lossless journal codecs; no repository or runtime wiring) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.3 transactional repository and replay; no runtime wiring) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -878,17 +878,18 @@ clear a newer attempt B. Partial fills during cancellation remain
 cancel-pending; late fills after confirmed cancellation are still counted, and
 an exact full fill wins over cancellation. The reducer has no clock, UUID,
 logger, environment read, I/O, database, executor, or runtime consumer. M8b's
-pure position reducer and M9b.2's pure persistence codec are its only consumers
-outside the lifecycle module; neither is wired to the runtime.
+pure position reducer and M9b.2/M9b.3 persistence modules are its only consumers
+outside the lifecycle module; none is wired to the runtime.
 
 This is deliberately not a runtime cut-over. ELVIS does not yet provide a
 reliable fill stream, a truthful paper cancellation adapter, or startup
 reconciliation. M8b now supplies explicit `OPEN`/`REDUCE_ONLY` position effects
 and entry-time exit context, still without runtime wiring. M9b.1 prepares the
-correlated order/event schema and uniqueness constraints, and M9b.2 adds strict
-lossless codecs. Later M9b slices must add a transactional repository,
-register-before-submit, restart replay, reconciliation, and durable quarantine
-before lifecycle idempotence can be described as durable.
+correlated order/event schema and uniqueness constraints, M9b.2 adds strict
+lossless codecs, and M9b.3 adds committed repository writes plus reducer-based
+restart replay. Later M9b slices must add register-before-submit,
+reconciliation, and durable quarantine before runtime lifecycle ownership can
+be described as complete.
 
 Verification at implementation time:
 
@@ -908,8 +909,9 @@ mismatches, state-construction invariants, stale cancellation responses, late
 fills, and ACK/fill/cancel permutations. Its full-suite snapshot recorded 1,238
 passes, 9 skips, 3 deselections, and only the unchanged local PostgreSQL
 baseline failure because `np.trades` was absent. M8b subsequently became the
-first internal consumer. M9b.2 now permits the pure persistence codec as the
-only infrastructure consumer; there is still no runtime consumer.
+first internal consumer. M9b.2/M9b.3 now permit the exact persistence codec and
+repository modules as infrastructure consumers; there is still no runtime
+consumer.
 
 ### M8 prerequisite: make legacy exits one-shot and transactional
 
@@ -936,11 +938,11 @@ This is a containment fix, not the M8 cut-over. The legacy tables still use
 `REAL`, carry no position key/effect or entry-time exit context, and cannot be
 replayed from confirmed fills. Balanced Starter and the inline loop remain
 separate position owners. M8b defines those missing pure domain contracts;
-M9b.1 prepares their journal tables; a later transactional repository must
-append and replay directives and confirmed fills before a single
-`PositionService` can replace these owners. A lost connection while `COMMIT` is
-being acknowledged also remains an ambiguous outcome that only durable
-reconciliation can resolve; this boolean helper is not an exactly-once protocol.
+M9b.1 prepares their journal tables and M9b.3 now appends and replays directives
+and confirmed fills transactionally. A single future `PositionService` must
+still replace these owners. A lost connection while `COMMIT` is being
+acknowledged also remains an ambiguous outcome that only durable reconciliation
+can resolve; this boolean helper is not an exactly-once protocol.
 
 Verification at implementation time:
 
@@ -1000,15 +1002,15 @@ realised PnL, fee conversion, lot allocation, or exit triggers.
 
 This slice remains pure and unused by the runtime. The package facade re-exports
 the contracts, so loading another `trading.domain` submodule may load the file;
-M9b.2's pure persistence codec is the only production module outside
-`trading.domain` allowed to reference its journal values, and it does not apply
-the position reducer. An import-aware AST gate covers direct, facade, relative,
-aliased, and literal dynamic imports without confusing the generic name
-`Position` with unrelated classes. The legacy inline and Balanced Starter
-owners, paper executor, and positional PostgreSQL tables remain authoritative.
-M9b.1 prepares the journal schema and M9b.2 encodes its instruction and
-correlated event payloads; later slices must append them transactionally, replay
-the projection, and reconcile ambiguous submissions before any runtime cut-over.
+M9b.2's codec and M9b.3's repository are the only production modules outside
+`trading.domain` allowed to reference its journal values. An import-aware AST
+gate covers direct, facade, relative, aliased, and literal dynamic imports
+without confusing the generic name `Position` with unrelated classes. The
+legacy inline and Balanced Starter owners, paper executor, and positional
+PostgreSQL tables remain authoritative. M9b.1 prepares the journal schema,
+M9b.2 encodes its instruction and event payloads, and M9b.3 appends and replays
+them without runtime wiring; later slices must reconcile ambiguous submissions
+before any cut-over.
 
 Verification at implementation time:
 
@@ -1027,9 +1029,9 @@ Decimal boundaries, open/scale/reduce/close transitions, long and short
 directions, fill and lifecycle correlation, per-order caps, canonical
 permutations, duplicate and terminal precedence, direct-construction
 invariants, and zero runtime consumers. Its isolated non-PostgreSQL snapshot
-recorded 1,317 passes, 49 skips, and 12 deselections under UTC. M9b.2 now permits
-one pure persistence-codec consumer while preserving the zero-runtime-consumer
-gate.
+recorded 1,317 passes, 49 skips, and 12 deselections under UTC. M9b.2/M9b.3 now
+permit the exact codec and repository consumers while preserving the
+zero-runtime-consumer gate.
 
 ### M9 prerequisite: preserve open positions during initialization
 
@@ -1197,8 +1199,8 @@ confirmed-fill identities. There is deliberately no mutable `np.positions`
 table: the M8b position remains a projection to rebuild by replay.
 
 Indexed identifiers are bounded; M9b.2's codec rejects the domain-sourced values
-it cannot represent, while the future repository must enforce its own scope and
-event identifiers before any external submission. SQL rejects empty and
+it cannot represent, while M9b.3's repository enforces its own scope and event
+identifiers before persistence. SQL rejects empty and
 ordinary space-padded identifiers, while the codec enforces the complete domain
 clean-text rule. Venue order IDs are unique only within `(execution_scope,
 symbol)`, rather than incorrectly assumed global across accounts or adapters.
@@ -1208,21 +1210,18 @@ Version columns reject unknown envelope versions, payload columns require JSON
 objects, and foreign keys prevent events from escaping their order and position
 stream. The JSON objects are storage envelopes, not a permissive serializer.
 M9b.2's strict codec encodes every exact `Decimal` as a JSON string and validates
-the full typed payload and SHA-256 digest before a future repository writes.
+the full typed payload and SHA-256 digest before M9b.3 writes.
 PostgreSQL `NUMERIC` and JSON numbers are intentionally absent because their
 range is narrower than the already accepted pure-domain Decimal range.
 
-This slice prepares storage only. The migration runner remains unwired to
-startup, and no production module imports a journal repository because none
-exists yet. `stream_version` is not allocated by application code in this
-slice. M9b.2 now supplies the lossless codecs only. Later slices must add an
-explicit transaction/repository boundary that reports a committed reservation,
-per-position locking/version allocation, reducer-based replay, a single
-application owner for register-before-submit and outcome persistence,
-reconciliation, and durable quarantine. Until those gates pass, the legacy
-executor and positional tables remain authoritative. Rolling application code
-back leaves these unused, additive tables in place; there is no destructive
-down migration.
+M9b.1 itself prepares storage only, and the migration runner remains unwired to
+startup. M9b.2 supplies the lossless codecs, and M9b.3 now supplies the
+transaction boundary, committed reservation, per-position locking/version
+allocation, and reducer-based replay. Later slices must add a single application
+owner for register-before-submit and outcome persistence, reconciliation, and
+durable quarantine. Until those gates pass, the legacy executor and positional
+tables remain authoritative. Rolling application code back leaves these unused,
+additive tables in place; there is no destructive down migration.
 
 Verification at implementation time:
 
@@ -1270,8 +1269,8 @@ digest, and duplicated indexed columns before returning a domain value.
 The codec does not serialize `RiskDecision`, `SubmissionReport`,
 `OrderLifecycle`, `Position`, or either reducer: reports are translated to typed
 events before the journal boundary, while order and position projections remain
-replay products. It is the only infrastructure consumer of these M8a/M8b values
-and has no database, executor, environment, clock, UUID, or runtime dependency.
+replay products. The codec has no database, executor, environment, clock, UUID,
+or runtime dependency. M9b.3 is now its only database consumer.
 
 The version-1 wire contract uses exact JSON object shapes, sorted keys, compact
 separators, and ASCII escaping. Every `Decimal` and the positive integer
@@ -1298,11 +1297,10 @@ fail before persistence. The codec deliberately invents no storage limit for
 unindexed payload-only reason, cancellation-request, or fee-asset text beyond
 clean Unicode representability.
 
-This remains a representation slice, not a durable journal implementation.
-There is no repository, stream lock, `position_version` allocation, append
-transaction, replay, register-before-submit owner, reconciliation path, or
-runtime cut-over. Durable quarantine also remains a repository/replay
-responsibility. Activation has an additional adapter gate: every
+M9b.2 itself remains a representation slice. M9b.3 now supplies the repository,
+stream lock, `position_version` allocation, append transaction, and replay, but
+there is still no register-before-submit owner, reconciliation path, durable
+quarantine, or runtime cut-over. Activation has an additional adapter gate: every
 `venue_order_id` and `trade_id` emitted by an execution adapter must already be
 clean Unicode and no longer than the schema limit of 255 characters. A codec
 failure discovered only after the venue effect or fill observation would be too
@@ -1311,10 +1309,10 @@ late to make the active path safe.
 Verification must cover golden version-1 JSON and SHA-256 vectors, lossless
 round trips for `OPEN`, `REDUCE_ONLY`, and all seven event types, malformed and
 tampered envelopes, metadata correlation, storage bounds, Python 3.10
-compatibility, and an import-aware AST gate. That gate permits the codec as the
-single persistence consumer while proving that no application, adapter,
-composition root, or runtime module imports it. PostgreSQL integration remains
-the M9b.1 schema gate; M9b.2 adds no SQL or database I/O.
+compatibility, and an import-aware AST gate. M9b.3 advances that gate to permit
+the exact codec and repository modules while proving that no application,
+adapter, composition root, or runtime module imports them. PostgreSQL
+integration remains the M9b.1 schema gate; M9b.2 adds no SQL or database I/O.
 
 Verification at implementation time:
 
@@ -1363,6 +1361,118 @@ because that test subtracts two hours and still expects the same calendar day;
 it otherwise reports 1,428 passes, 49 skips, and 24 deselections. M9b.2 does
 not change that test or the risk manager. No PostgreSQL run is required for
 this pure slice because neither migration nor schema changed.
+
+### M9b.3 transactional order/position repository and replay
+
+M9b.3 adds the unwired `trading.persistence.order_position_journal` boundary.
+`PostgresOrderPositionJournal` receives only an injected connection factory and
+offers three explicit operations: `reserve_instruction`, `append_event`, and
+`replay_position`. Every call obtains a fresh, idle, `autocommit=False`
+connection. Writes use `READ COMMITTED`, own rollback/commit/close, and return a
+`ReservationCommit` or `EventCommit` only after PostgreSQL acknowledges the
+commit. A lost commit acknowledgement raises `JournalCommitUnknown`; it is never
+reported as a reservation or append success. Repeating the same stable identity
+on a fresh connection resolves whether the fact exists without an automatic
+external retry.
+
+Reservation creates or locks one globally stable position stream, verifies its
+execution scope, decodes and replays any existing rows, and inserts the exact
+version-1 instruction envelope. `CREATED` is the only disposition a future
+register-before-submit owner may treat as a new reservation. `EXISTING` means a
+canonical reservation already exists and must be reconciled rather than blindly
+resubmitted. Client-order and scoped decision conflicts roll the transaction
+back, including any transient stream row, so a losing registration cannot
+commit an empty stream.
+
+Append locks the `position_streams` row before resolving identities or
+allocating a version. It compares complete canonical envelopes, not domain
+numeric equality: significant Decimal representation such as `1.0` versus
+`1.00` cannot mutate an existing fact. The stable `(client_order_id, event_id)`
+identity deduplicates every observation, while confirmed fills also use
+`(client_order_id, trade_id)`; an exact fill observed under another event ID
+returns the original durable event/version, and a different envelope conflicts.
+After the current stream passes replay, the candidate is applied to the M8a
+order reducer and, for a confirmed fill, the M8b position reducer. Historical
+venue correlation, event insert, and `stream_version + 1` update commit in one
+transaction. Allocation never uses `MAX(position_version)`.
+
+Replay uses one `REPEATABLE READ READ ONLY` snapshot, requires versions to be
+the exact prefix `1..stream_version`, decodes every instruction and event, and
+applies facts in global `position_version` order even when client IDs or venue
+timestamps sort differently. It returns frozen, named `ReplayedOrder`,
+`JournalEventRecord`, and `PositionStreamProjection` values only after the whole
+history succeeds. Bad hashes, missing versions, conflicting venue identities,
+unknown orders, or reducer-invalid history raise `JournalReplayError`; no row is
+skipped and no partial projection escapes.
+
+This is still not a runtime cut-over. The repository is not exported through
+the persistence facade and no application, adapter, composition root, startup,
+or runtime module imports it. There is no durable quarantine record yet;
+M9b.3 promises typed fail-closed detection only. A forward migration and a
+separate post-rollback workflow are required before the word "quarantined" can
+describe durable state. Before activation, a pre-submission validator must also
+reject incompatible scale-ins and unavailable `REDUCE_ONLY` capacity, and the
+application owner must prevent or reserve collectively unsafe concurrent
+orders, reconcile unresolved reservations, and guarantee the adapter's
+venue/trade identifier bounds. Append currently performs two complete stream
+replays under the position lock, so snapshots or another bounded replay strategy
+are also required before activation; M9b.3 treats correctness as authoritative
+and makes no production-throughput claim.
+
+Verification at implementation time:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_order_position_journal.py \
+  tests/test_journal_codec.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  tests/test_domain_contracts.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres \
+  tests/postgres/test_order_position_repository_postgres.py
+ELVIS_TEST_POSTGRES_ADMIN_DSN=<admin-dsn> \
+  ELVIS_TEST_POSTGRES_REQUIRED=1 \
+  .venv/bin/python -m pytest -q -ra -m postgres tests/postgres
+.venv/bin/black --target-version py310 --check \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+.venv/bin/isort --check-only \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py
+.venv/bin/flake8 \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py \
+  tests/postgres/test_order_position_repository_postgres.py \
+  tests/test_order_lifecycle.py \
+  tests/test_position_lifecycle.py \
+  --max-line-length=88
+/usr/local/bin/python3.10 -m compileall -q \
+  trading/persistence/order_position_journal.py \
+  tests/test_order_position_journal.py
+/usr/local/bin/python3.10 -m pytest -q \
+  tests/test_order_position_journal.py
+env -u ELVIS_TEST_POSTGRES_ADMIN_DSN \
+  -u ELVIS_TEST_POSTGRES_REQUIRED \
+  TZ=Pacific/Honolulu .venv/bin/python -m pytest -q --disable-warnings \
+  tests/ -m 'not perf and not postgres'
+git diff --check
+```
+
+The focused repository, codec, lifecycle, position, and domain-contract suite
+passes 446 tests. The repository unit suite passes 34 tests on Python 3.10.
+The repository PostgreSQL 15 matrix passes 10 tests, including concurrent
+distinct/exact appends and competing `REDUCE_ONLY` fills; the complete isolated
+PostgreSQL suite passes 31 tests. Black, isort, flake8, Python 3.10 compilation,
+and the diff check pass. The isolated non-PostgreSQL suite passes 1,463 tests,
+skips 49, and deselects 34 under `Pacific/Honolulu`.
 
 ## Cut-over policy
 

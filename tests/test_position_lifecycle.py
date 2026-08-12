@@ -900,7 +900,7 @@ def test_position_consumer_detector_allows_explicit_unrelated_domain_imports(
     assert not _uses_position_contract(source)
 
 
-def test_position_module_is_pure_and_only_codec_consumes_contract() -> None:
+def test_position_only_journal_modules_consume_contract() -> None:
     root = Path(__file__).parents[1]
     domain_root = root / "trading" / "domain"
     module_path = domain_root / "positions.py"
@@ -933,4 +933,7 @@ def test_position_module_is_pure_and_only_codec_consumes_contract() -> None:
         if _uses_position_contract(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert sorted(consumers) == [Path("trading/persistence/journal_codec.py")]
+    assert sorted(consumers) == [
+        Path("trading/persistence/journal_codec.py"),
+        Path("trading/persistence/order_position_journal.py"),
+    ]

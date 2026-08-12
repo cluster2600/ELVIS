@@ -196,10 +196,11 @@ M2 implements `SignalAction`, `OrderSide`, `Signal`, the market-only
 contract. M8a adds the pure `OrderLifecycle` reducer without wiring it into the
 runtime. M8b adds pure `PositionInstruction`, `PositionFill`, and `Position`
 transitions without a runtime consumer. M9b.1 prepares the durable journal
-schema, and M9b.2 adds its pure, lossless persistence codec as the only
-infrastructure consumer of the M8a/M8b journal values. The repository, replay
-service, runtime `PositionService`, pre-trade service, and `CycleOutcome` remain
-later slices; they are not placeholder classes in the current package.
+schema, M9b.2 adds its pure, lossless persistence codec, and M9b.3 adds the
+unwired transactional repository and reducer-based replay boundary. The
+runtime `JournaledOrderService`, `PositionService`, pre-trade service, and
+`CycleOutcome` remain later slices; they are not placeholder classes in the
+current package.
 
 Constructors validate symbol presence, finite positive prices and quantities,
 confidence bounds, non-negative fees, legal state transitions, and timezone-
@@ -254,7 +255,8 @@ coordinates those steps itself. A failed registration makes no adapter call;
 an existing unresolved reservation is reconciled and is never automatically
 resubmitted. The transport `SubmissionReport` remains distinct from the
 journal-write disposition, including an unknown commit acknowledgement. M9b.1
-prepares the tables and M9b.2 prepares their typed codec for this service; the
+prepares the tables, M9b.2 prepares their typed codec, and M9b.3 provides the
+committed reservation and append operations for this future service. The
 service itself and its runtime consumer do not exist yet.
 
 ### `PositionService`
@@ -266,8 +268,8 @@ behaviour. M8b supplies its pure confirmed-fill transition contract: an `OPEN`
 fill can create or scale a stable position key, while `REDUCE_ONLY` can only
 reduce the opposite side and can never create or flip a position. That reducer
 does not yet constitute this service, select an exit, calculate cost basis or
-PnL, or perform I/O. The pure persistence codec consumes the instruction and
-event values, but no runtime module applies this reducer yet.
+PnL, or perform runtime I/O. The persistence codec and repository replay these
+instruction and event values, but no runtime module applies the reducer yet.
 
 ## Runtime and configuration
 
@@ -351,20 +353,39 @@ quarantine inputs and are never coerced into domain values. Version 1 is
 immutable. Any change to its keys, types, canonicalization, or hash contract
 requires a new envelope version and a matching schema migration.
 
-The codec is the sole persistence consumer of these domain journal contracts
-and performs no I/O. There is still no repository, stream lock or
-`position_version` allocator, append transaction, replay path,
-register-before-submit service, reconciliation path, or runtime consumer, and
-the migration runner is not a startup readiness gate. Before any cut-over, the
+M9b.3 adds `PostgresOrderPositionJournal` as the only database consumer of the
+codec and reducers. Each public operation obtains a fresh connection from an
+injected factory and owns its transaction. Registration and append return only
+after PostgreSQL acknowledges commit; an unacknowledged commit becomes the
+typed `JournalCommitUnknown` outcome and is never reported as success. Exact
+retries compare the complete canonical version-1 envelopes rather than domain
+numeric equality, so `Decimal("1.0")` and `Decimal("1.00")` cannot silently
+change a durable fact. Writers lock one `position_streams` row, replay and
+validate the complete stream, resolve duplicate event and fill identities,
+allocate `stream_version + 1`, update historical venue correlation, and append
+the event in one transaction. Public replay uses one repeatable-read, read-only
+snapshot and requires event versions to equal exactly `1..stream_version`.
+Every event is decoded and applied first to its `OrderLifecycle`, then every
+confirmed fill is applied to the M8b position reducer in global
+`position_version` order. Corrupt, gapped, or reducer-invalid history fails the
+whole replay with no partial projection.
+
+This remains an unwired persistence boundary. There is no
+register-before-submit application owner, startup readiness gate,
+reconciliation path, or runtime consumer. Failed replay is detected and typed,
+but it is not yet durably quarantined because the schema and operational
+workflow for quarantine are deliberately deferred. Each append currently
+replays the complete stream before validation and again after insertion; that
+cost is acceptable for an unwired correctness slice, but bounded replay or
+snapshots are required before activation. Before any cut-over, the
 execution adapter must guarantee clean Unicode and the schema limits of 255
 characters for every venue order ID and trade ID it emits; detecting an
 unrepresentable identifier only after an external effect is not an acceptable
 activation boundary. The codec rejects NUL characters, isolated Unicode
 surrogates, and over-length domain-sourced identifiers, but this validation
 cannot retroactively make an already accepted venue identifier safe. Later M9b
-slices must add the transactional repository, rebuild the exact M8a/M8b
-projections through their reducers, quarantine failed decodes durably, and
-complete reconciliation before `PositionService` can own the runtime boundary.
+slices must add durable quarantine, reconciliation, and the single application
+owner before `PositionService` can own the runtime boundary.
 
 Read models for API/dashboard use separate repository methods or immutable
 snapshots so presentation queries cannot mutate trading state.
