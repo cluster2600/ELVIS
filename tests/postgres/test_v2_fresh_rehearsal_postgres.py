@@ -579,7 +579,21 @@ def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
             "postgres",
             expected_exit_codes=(1,),
         )
-        log_result = rehearsal.run_compose("logs", "--no-color", "postgres")
+        container_id = rehearsal.run_compose(
+            "ps", "--all", "--quiet", "postgres"
+        ).stdout.strip()
+        assert re.fullmatch(r"[0-9a-f]{12,64}", container_id)
+        state = _run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Status}}:{{.State.ExitCode}}:{{.State.Error}}",
+                container_id,
+            ]
+        )
+        assert state.stdout.strip() == "exited:1:"
+        log_result = _run(["docker", "logs", container_id])
         logs = log_result.stdout + "\n" + log_result.stderr
         assert "rehearsal volume is not empty" in logs
         assert _volume_fingerprint(volume_name) == before
