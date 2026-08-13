@@ -1576,6 +1576,62 @@ V1 lacks the immutable order/fill/account/effect/generation provenance required
 to invent those durable facts. The exact operational contract and rollback are
 in the [legacy snapshot import runbook](../V2_LEGACY_SNAPSHOT_IMPORT.md).
 
+M9b.14c3c3b adds a separate read-only reconciliation review over that imported
+target. It canonically hashes the supplied configuration and c3c3a receipt,
+requires the receipt's combined seven-relation hash to be internally
+consistent, and rereads the target identity, terminal catalog, `LEGACY/0`
+control, raw-row fingerprints, and sequences through distinct readiness and
+admin identities. It opens no source connection. These hashes bind documents
+and target evidence; they do not authenticate who produced the documents or
+the declared source cluster.
+
+The pure application contract lives in
+`trading.application.legacy_snapshot_reconciliation`.
+`LegacySnapshotReconciliationContext` binds the import context and both
+canonical input-document SHA-256 values to the future execution scope, account
+key, positive owner generation, collateral asset, positive exact margin
+quantum, and non-negative operator starting-collateral hypothesis.
+`LegacyOpeningCandidateSource` fixes `IMPORTED_ACCOUNT_BALANCES` followed by
+`OPERATOR_EQUITY_HYPOTHESIS`. The canonical opening-document SHA-256 is derived
+from the complete policy, generation, scope, and sorted unreserved balance
+tuple. `LegacySnapshotReconciliationEvidence` retains the canonical naive reset
+timestamp and three separate `hypothesis_*` Decimal folds. The positional-only
+port remains `LegacySnapshotReconciliationPort.reconcile(context,
+import_receipt)`.
+
+The PostgreSQL adapter is
+`PostgresLegacySnapshotReconciliation(target_admin_connection_factory,
+target_readiness_connection_factory)`. It uses only repeatable-read, read-only
+transactions and performs no DML, DDL, sequence change, `SET ROLE`, source
+connection, opening, provisioning, or activation. Its terminal, admin, and
+readiness observations are sequential and do not share one database snapshot.
+The client-session query is only a point-in-time check and does not enforce the
+operator-declared review window. Every receipt therefore hard-codes
+`coherent_snapshot_observed`, `source_provenance_authenticated`, and
+`target_observations_authenticated`, and `database_window_enforced` to false,
+alongside the false opening, provisioning, activation, and snapshot-authority
+flags. The adapter derives the three hypothesis folds from target reads, but
+the typed receipt alone does not authenticate those observations.
+
+The imported candidate preserves every exact `np.account_balances` float4 row
+in canonical asset order and requires the declared collateral. The operator
+hypothesis reads exact float4 bytes for rows at or after the latest reset, or
+all rows without a reset, then performs deterministic binary64 folds in primary
+key order. It keeps PnL, trade fees, and liquidation fees separate and derives
+the USDT hypothesis tuple `BNB=0`, `BTC=0`, and
+`USDT=max(0, declared starting hypothesis + folded PnL)`. This algorithm is not
+PostgreSQL `SUM`, source replay, or proof of the active compatibility runtime's
+starting capital, ordering, algorithm, or state.
+
+The only dispositions are `DECISION_REQUIRED` and `BLOCKED`.
+`DECISION_REQUIRED` always includes `RUNTIME_PROVENANCE_UNPROVEN`, even when
+both complete candidate documents and hashes are equal; a difference adds
+`CANDIDATE_MISMATCH`. `BLOCKED` exposes no partial opening or numeric evidence.
+There is no match state, busy error, account-opening authority, provisioning
+authority, or runtime-activation authority. The complete operator contract is
+in the [legacy snapshot reconciliation
+runbook](../V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
+
 This slice still has no credential writer, session terminator, activation call,
 startup hook, runtime container wiring, or runtime consumer. The remaining c3
 deployment workflow must supply production Compose/Ansible role and
@@ -1583,9 +1639,11 @@ SCRAM-secret provisioning, production HBA/network policy, credential rotation,
 real-volume rehearsal, and removal of migration or other DDL authority from
 runtime processes. M9b.14d must then compose the dedicated runtime identities
 with fail-closed startup and health gates while keeping bootstrap and activation
-offline. Reconciliation, bounded replay, side-effect-free shadow comparison,
-stale-writer removal, tested pause/rollback, soak evidence, and explicit
-operator approval still block cut-over. `ACTIVE` remains a **NO-GO**.
+offline. C3c3b neither authenticates source/runtime provenance nor selects
+opening provenance or creates a V2 account. Source-authenticated provenance,
+opening, bounded replay, side-effect-free shadow comparison, stale-writer
+removal, tested pause/rollback, soak evidence, and explicit operator approval
+still block cut-over. `ACTIVE` remains a **NO-GO**.
 
 ## Runtime and configuration
 

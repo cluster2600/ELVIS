@@ -1,0 +1,22 @@
+flowchart TD
+    START["bound input documents<br/>target opened read-only"] --> ADMIT{"target admission evidence<br/>acceptable?"}
+    ADMIT -->|"no"| BLOCKED["BLOCKED<br/>no partial opening evidence"]
+    ADMIT -->|"yes"| IMPORTED{"imported opening candidate<br/>representable?"}
+    IMPORTED -->|"no"| BLOCKED
+    IMPORTED -->|"yes"| HYP{"operator equity hypothesis<br/>derivable?"}
+    HYP -->|"no"| BLOCKED
+    HYP -->|"yes"| COMPARE["compare canonical balances<br/>and document SHA-256"]
+    COMPARE --> PROVENANCE["runtime provenance<br/>unproven finding retained"]
+    PROVENANCE --> DECIDE["DECISION_REQUIRED<br/>equal or different candidates"]
+    DECIDE --> RECEIPT["stale cross-snapshot<br/>review receipt"]
+    BLOCKED --> RECEIPT
+    RECEIPT --> FUTURE["separate source-authenticated<br/>provenance decision"]
+    RECEIPT --> NOGO["V2 remains dormant<br/>ACTIVE is NO-GO"]
+    FUTURE -. "not invoked by C3C3B" .-> NOGO
+
+    classDef inspect fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    classDef review fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+    class START,ADMIT,IMPORTED,HYP,COMPARE inspect;
+    class PROVENANCE,DECIDE,RECEIPT,FUTURE review;
+    class BLOCKED,NOGO stop;

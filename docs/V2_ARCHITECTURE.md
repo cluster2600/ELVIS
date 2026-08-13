@@ -115,8 +115,9 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Isolated fresh PostgreSQL 15 rehearsal composition | Implemented as a disposable operator harness | Separate internal-only Compose project; never mounts the active volume or composes bot, trainer, or activation |
 | Fresh-target cut-over preflight | Implemented as a dormant read-only operator capability | Inspects a stopped source clone and a separate fresh target, requires distinct cluster system identifiers, streams canonical typed-row evidence, and returns only a stale-on-return sanitized receipt; it copies nothing |
 | Bounded legacy snapshot importer | Implemented as a dormant offline operator capability | Revalidates the c3c2 pair, copies only the seven raw V1 tables in one transaction, preserves explicit IDs, requires `open_positions` to remain empty, and normalizes sequences after row commit; it synthesizes no V2 journal or ledger |
+| Legacy snapshot reconciliation review | Implemented as a dormant read-only operator capability | Sequentially revalidates the imported target and compares its complete opening candidate with an explicitly non-runtime operator hypothesis; every usable result is `DECISION_REQUIRED`, source provenance and a coherent database snapshot remain unproven, and no account is opened or provisioned |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
-| V2 replay/reconciliation of imported history, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
+| Opening-provenance selection, V2 replay of imported history, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
 
 “Implemented” means present on this branch with the checks recorded in the
 roadmap. “Dormant” means there is no production composition or authority.
@@ -129,8 +130,8 @@ Neither word means deployed.
 | Foundation | Audit, target design, typed domain and application boundaries | Implemented |
 | Progressive runtime extraction | Signal policy, risk, execution, and position ownership moved in small reversible slices | In progress |
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
-| Deployment composition | Offline bootstrap, read-only fresh-target preflight, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
-| Cut-over evidence | Raw V1 snapshot preservation implemented; V2 replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
+| Deployment composition | Offline bootstrap, read-only fresh-target preflight and reconciliation review, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
+| Cut-over evidence | Raw V1 snapshot preservation and a non-authoritative two-candidate opening review implemented; source/runtime provenance, a coherent enforced review window, provenance selection, account opening, V2 replay, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
 | Cleanup | Remove superseded legacy owners only after parity and cut-over proof | Pending |
 
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
@@ -192,6 +193,18 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
   order, fill, position, account, fee, or generation provenance.
   Row commit and non-transactional sequence normalization are separate recovery
   phases; every returned receipt remains stale and non-authoritative.
+- The [legacy snapshot reconciliation
+  reviewer](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) consumes the supplied c3c3a
+  receipt as a canonically bound but unauthenticated input and rereads the target
+  through distinct read-only identities. It preserves the complete
+  imported balance tuple and a separate `OPERATOR_EQUITY_HYPOTHESIS`, including
+  deterministic, separately folded PnL, trade-fee, and liquidation-fee values.
+  The observations span database snapshots, the session check is point-in-time,
+  and the source is never contacted. The adapter derives hypothesis values from
+  target reads, but the typed receipt authenticates neither those observations
+  nor source provenance. Only `DECISION_REQUIRED` or `BLOCKED` can result;
+  neither selects provenance, opens or provisions an account, or authorises
+  activation.
 - Startup and health must fail closed when the durable database authority,
   generation, credentials, or catalog cannot be proven exactly.
 - Shadow evaluation must be side-effect free. It cannot submit twice or mutate
@@ -211,6 +224,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Fresh PostgreSQL 15 SCRAM/HBA rehearsal | [Rehearsal runbook](V2_POSTGRES_REHEARSAL.md) |
 | Stopped-clone/fresh-target admission and rollback phases | [Fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) |
 | Bounded raw V1 copy, resume, sequence recovery, and rollback | [Legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) |
+| Read-only opening-candidate comparison and no-opening boundary | [Legacy snapshot reconciliation](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |

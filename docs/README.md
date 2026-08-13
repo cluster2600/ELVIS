@@ -20,7 +20,12 @@ owners and activation capabilities are not composed into deployment, and
 5. [V2 legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) — bounded raw
    seven-table copy, exact resume and commit-unknown recovery, post-commit
    sequence normalization, and the explicit no-ledger/no-activation boundary.
-6. [Compatibility-runtime architecture](architecture.md) — verified topology
+6. [V2 legacy snapshot reconciliation](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) —
+   read-only comparison of the complete imported opening candidate and an
+   explicitly non-runtime operator hypothesis; every usable result still needs
+   a provenance decision and grants no opening, provisioning, or activation
+   authority.
+7. [Compatibility-runtime architecture](architecture.md) — verified topology
    of the runtime that remains active during migration.
 
 ## Documentation authority matrix
@@ -30,7 +35,7 @@ owners and activation capabilities are not composed into deployment, and
 | [V2 overview](V2_ARCHITECTURE.md) | V2 intent, boundaries, and reader map | Canonical overview |
 | [Target architecture](architecture_migration/03-target-architecture.md) | Detailed V2 component and data contracts | Canonical design |
 | [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Slice status, verification, rollback, and cut-over gates | Canonical status |
-| [PostgreSQL bootstrap](V2_POSTGRES_BOOTSTRAP.md), [fresh rehearsal](V2_POSTGRES_REHEARSAL.md), [fresh-target preflight](V2_FRESH_TARGET_CUTOVER.md), and [legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) | Dormant operator contracts, disposable proof, read-only admission, and bounded raw data preservation | V2 operator runbooks; not deployment authority |
+| [PostgreSQL bootstrap](V2_POSTGRES_BOOTSTRAP.md), [fresh rehearsal](V2_POSTGRES_REHEARSAL.md), [fresh-target preflight](V2_FRESH_TARGET_CUTOVER.md), [legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md), and [legacy snapshot reconciliation](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) | Dormant operator contracts, disposable proof, read-only admission, bounded raw data preservation, and stale cross-snapshot opening review with no authenticated source provenance | V2 operator runbooks; not deployment authority |
 | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) | Immutable audited baseline | Historical evidence |
 | [Runtime architecture](architecture.md), [components](COMPONENTS.md), and [system topology](ELVIS_SYSTEM_ARCHITECTURE.md) | Current compatibility-runtime references | Legacy operational context |
 | [Deployment guide](DEPLOYMENT.md) | Existing Compose/Ansible workflow | Legacy deployment only; not V2 cut-over |

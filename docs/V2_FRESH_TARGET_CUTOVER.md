@@ -412,6 +412,7 @@ Rollback depends on the latest phase:
 |---|---|---|
 | c3c2 inspection | Legacy runtime | Close the read-only connections. Keep or discard only the fresh target under a separately verified operator procedure; the source clone and active source are untouched. |
 | c3c3a raw import, before authority change | Legacy runtime | Stop the importer, preserve evidence, and use its exact empty/exact/conflicting readback procedure. Discard or rebuild only the fresh target under a separate verified procedure. |
+| c3c3b read-only candidate review | Legacy runtime | Close the target connections and preserve the stale review receipt. `DECISION_REQUIRED` or `BLOCKED` never permits opening, provisioning, or activation; c3c3b has no match outcome. |
 | Future validation or shadow | Legacy runtime | Reject cut-over, keep V2 non-authoritative, and rebuild the target if exact replay or reconciliation cannot be proved. |
 | Future `PAUSED` transition | No writer until reconciled | Preserve the fence, reconcile both sides, and explicitly select one writer before resuming. |
 | Future `ACTIVE` | V2 only | Return to `PAUSED`, drain and reconcile the V2 owner, then explicitly select legacy or V2. Never enable both writers. |
@@ -421,7 +422,7 @@ own the production source, clone mechanism, backup store, or target lifecycle.
 An operator must resolve and verify an exact disposable target before deleting
 anything.
 
-## Next bounded importer
+## Next bounded import and reconciliation
 
 M9b.14c3c3a adds the separately reviewed
 [bounded legacy snapshot importer](V2_LEGACY_SNAPSHOT_IMPORT.md). It binds this
@@ -435,10 +436,24 @@ This c3c2 slice still contains no importer implementation and makes no claim
 that historical ELVIS data was copied by the inspection. A later c3c3a receipt
 is also stale, non-authoritative, and cannot activate V2.
 
+M9b.14c3c3b adds the separate read-only
+[legacy snapshot reconciliation review](V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
+It canonically binds the supplied c3c3a receipt, checks the receipt's relation
+hash for internal consistency, and sequentially revalidates the imported target
+without contacting or authenticating the source. It preserves the complete
+imported balance tuple and one deterministic `OPERATOR_EQUITY_HYPOTHESIS`; that
+hypothesis is not proof of the compatibility runtime's starting capital,
+algorithm, or state. Even identical candidate documents remain
+`DECISION_REQUIRED` because runtime provenance is unproven. The review spans
+database snapshots, enforces no window, performs no DML, chooses no candidate,
+and never opens or provisions a V2 account.
+
 ## Remaining `ACTIVE` blockers
 
-- V2 replay and semantic reconciliation of the raw imported history are not
-  implemented; c3c3a deliberately synthesizes no journal or ledger;
+- The read-only c3c3b candidate comparison does not authenticate source/runtime
+  provenance, prove a coherent database snapshot, select opening provenance,
+  provision an account, or synthesize a journal or ledger; V2 opening and replay
+  remain pending;
 - runtime DDL remains in the compatibility path;
 - production bot and trainer identities, SCRAM secrets, HBA, and network policy
   are not composed;

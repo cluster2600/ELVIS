@@ -422,19 +422,37 @@ runtime authoritative:
 | Commit acknowledgement lost | The same invocation performs an independent readback. Exact rows continue; partial or foreign rows conflict; an empty or unprovable outcome returns `COMMIT_UNKNOWN`, after which any retry requires a new explicit invocation. |
 | Exact rows but incomplete sequence normalization | Preserve the target; resume only through exact row readback and the declared sequence path. |
 | Partial, surplus, or foreign target | Stop without delete, truncate, or repair. Preserve evidence and rebuild only the separately verified fresh target. |
-| Exact import receipt | Keep V2 dormant. Continue only into separately reviewed replay, reconciliation, shadow, and cut-over gates. |
+| Exact import receipt | Keep V2 dormant. Continue only into the separate read-only candidate review, then separately reviewed provenance, opening, replay, shadow, and cut-over gates. |
 
 This runbook intentionally contains no destructive cleanup command. The
 importer does not own the source clone mechanism, backup store, target
 lifecycle, or production deployment. An operator must resolve and verify an
 exact disposable target through a separate procedure before removing it.
 
+## Next read-only reconciliation review
+
+M9b.14c3c3b adds the separate
+[legacy snapshot reconciliation runbook](V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
+It canonically binds this import receipt, checks its combined relation hash for
+internal consistency, and rereads the target without mutation or a source
+connection. It compares the complete imported balance tuple with one
+deterministic `OPERATOR_EQUITY_HYPOTHESIS`, while keeping PnL, trade fees, and
+liquidation fees as separate hypothesis folds. That second candidate is not a
+reproduction of the compatibility runtime, and the receipt does not
+authenticate the declared source or prove one coherent database snapshot.
+
+That review returns only `DECISION_REQUIRED` or `BLOCKED`. Even equal candidate
+documents retain `RUNTIME_PROVENANCE_UNPROVEN`. It does not choose an opening
+amount, create opening provenance, provision a V2 paper account, or authorise
+activation.
+
 ## Remaining `ACTIVE` blockers
 
 - Raw legacy rows have no synthesized V2 order/fill, position, account, fee,
   or generation provenance.
-- Target replay and semantic reconciliation of imported balances and trades
-  remain pending.
+- The read-only c3c3b comparison does not authenticate source/runtime
+  provenance, select durable opening provenance, or provision an account;
+  target opening and replay remain pending.
 - Runtime DDL remains in the compatibility path.
 - Production bot and trainer identities, SCRAM secrets, restrictive HBA, and
   network policy are not composed.
