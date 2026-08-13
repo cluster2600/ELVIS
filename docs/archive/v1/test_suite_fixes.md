@@ -1,10 +1,10 @@
 # Test Suite Fixes and Documentation
 
-> **Historical snapshot (written 2025-06-23).** This document describes the test
-> suite as it stood at that time (107 tests, Python 3.11). It is kept as a record
-> of that fix effort and is not maintained as current documentation. For the
-> current state of the suite, see the "Current state" section below, the tests
-> themselves in `tests/`, and the CI workflow in `.github/workflows/ci.yml`.
+> **Historical V1 document (written 2025-06-23).** This snapshot is retained
+> for provenance and is not maintained as current test guidance. Its counts and
+> interpreter assumptions are obsolete. Use the tests, CI workflow, and
+> [V2 migration roadmap](../../architecture_migration/04-migration-roadmap.md)
+> for current evidence.
 
 ## Current state (as of 2026-07)
 

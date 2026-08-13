@@ -19,22 +19,41 @@ the repo root to keep the top level clean.
 | `run_training.sh` | Unified training entry point (see `../docs/UNIFIED_TRAINING_GUIDE.md`). |
 | `start_bot_with_vault.sh` | Start the bot with Vault/OpenBao auth (requires `VAULT_DEV_ROOT_TOKEN_ID`). |
 
-## Setup
-
-| Script | Purpose |
-|---|---|
-| `setup_secure_config.sh` | Set up encrypted/secure config loading. |
-
 ## Offline administration (Python)
 
 | Module | Purpose |
 |---|---|
 | `python -m scripts.postgres_bootstrap` | Reconcile the dormant V2 PostgreSQL roles/catalog from a strict non-secret JSON manifest and external libpq services. It is one-shot, operator-confirmed, and never runs at application startup. |
+| `python -m scripts.postgres_cutover_preflight` | Inspect one stopped V1 clone and one separately bootstrapped, empty V2 target. It is read-only, emits stale evidence, and never copies data or authorises cut-over. |
+| `python -m scripts.postgres_legacy_snapshot_import` | Bind a strict secret-free c3c2 `READY` receipt as stale expected evidence, revalidate both databases, then copy only the seven raw V1 relations with bounded batches, atomic row commit, and post-commit sequence recovery. It never synthesizes V2 history or authorises activation. |
+| `python -m scripts.postgres_legacy_snapshot_reconciliation` | Canonically bind a c3c3a import document, sequentially revalidate the target read-only, and compare the complete imported opening candidate with a deterministic but explicitly non-runtime operator hypothesis. It authenticates no source provenance, has no match outcome, and never opens, provisions, or activates an account. |
 
 See the [V2 PostgreSQL bootstrap runbook](../docs/V2_POSTGRES_BOOTSTRAP.md) for
 the exact flags, version-1 configuration schema, external `PGSERVICEFILE` and
 `PGPASSFILE` contract, receipts, exit codes, and commit-unknown recovery. A
 `COMPLETE` receipt does not deploy or activate V2.
+
+See the [fresh-target cut-over preflight](../docs/V2_FRESH_TARGET_CUTOVER.md)
+for its three mandatory confirmations, closed version-1 intent document,
+`READY_FOR_FRESH_TARGET`/`BLOCKED` receipts, and rollback boundary. Even a ready
+receipt is non-authoritative and does not permit import, deployment, or
+activation.
+
+See the [bounded legacy snapshot import
+runbook](../docs/V2_LEGACY_SNAPSHOT_IMPORT.md) for the six mandatory CLI
+options, strict version-1 configuration and receipt binding,
+`IMPORTED`/`REPLAYED` receipts, exact commit-unknown resume, sequence boundary,
+and rollback. External libpq files remain the only connection/secret input;
+`ACTIVE` remains a **NO-GO**.
+
+See the [legacy snapshot reconciliation
+runbook](../docs/V2_LEGACY_SNAPSHOT_RECONCILIATION.md) for the mandatory
+reviewed-window and disposable-target assertions, canonical document hashes,
+point-in-time and cross-snapshot limits, imported and operator-hypothesis
+candidates, separate hypothesis fee folds, `DECISION_REQUIRED`/`BLOCKED`
+outcomes, exits `10`/`21`, strict version-1 configuration, external
+admin/readiness libpq services, and explicit no-source-authentication,
+no-opening, no-provisioning, and no-activation boundary.
 
 ## Vault / secrets (Python)
 

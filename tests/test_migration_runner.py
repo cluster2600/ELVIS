@@ -586,4 +586,9 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
         if imports_persistence:
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == [Path("scripts/postgres_bootstrap.py")]
+    assert consumers == [
+        Path("scripts/postgres_bootstrap.py"),
+        Path("scripts/postgres_cutover_preflight.py"),
+        Path("scripts/postgres_legacy_snapshot_import.py"),
+        Path("scripts/postgres_legacy_snapshot_reconciliation.py"),
+    ]

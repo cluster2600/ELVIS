@@ -34,8 +34,8 @@ running bot.
 |---|---|---|
 | Typed domain, order service, feature contracts, and selected policy/risk boundaries | Implemented incrementally | Some boundaries serve the compatibility runtime |
 | Durable journals, replay, account ledger, atomic owners, readiness, fence, generations, activation, and role/catalog bootstrap | Implemented and tested | Dormant; no running consumer or authority |
-| Offline deployment orchestration, dedicated credentials, restrictive database/network policy, and fail-closed composition | Pending | Blocks V2 runtime authority |
-| Shadow comparison, reconciliation, rollback rehearsal, soak, and approval | Pending evidence | Blocks `ACTIVE` |
+| Offline bootstrap, stopped-clone/fresh-target preflight, bounded raw V1 import, and read-only imported-vs-operator-hypothesis review | Implemented locally; acceptance gates in progress | Dormant; review receipts are cross-snapshot, source-unauthenticated, stale, and non-authoritative; no match or account opening |
+| Source/runtime provenance authentication, coherent enforced review, dedicated production composition, opening-provenance selection, V2 replay of imported history, shadow comparison, rollback rehearsal, soak, and approval | Pending evidence | Blocks `ACTIVE` |
 
 ## Evidence snapshot
 

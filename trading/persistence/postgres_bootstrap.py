@@ -18,6 +18,7 @@ from trading.persistence.migration_runner import (
 )
 from trading.persistence.paper_account_readiness import (
     _activation_catalog_is_authoritative,
+    _migration_metadata_is_exact,
 )
 
 _ROLE_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}")
@@ -25,6 +26,8 @@ _BOOTSTRAP_ADVISORY_LOCK_ID = 4_544_865_376_849_464
 _ROLE_MARKER_PREFIX = "elvis-postgres-bootstrap:v1:"
 _SCHEMA_MARKER_PREFIX = "elvis-postgres-bootstrap-schema:v1:"
 _READ_COMMITTED_SQL = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+_REPEATABLE_READ_ONLY_SQL = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+_UTC_SQL = "SET LOCAL TIME ZONE 'UTC'"
 _SAFE_SEARCH_PATH_SQL = "SET LOCAL search_path = pg_catalog"
 
 _AUTHORITY_TABLES = (
@@ -47,6 +50,11 @@ _AUTHORITY_TABLES = (
     "schema_migrations",
     "trades",
     "trading_session_resets",
+)
+_TERMINAL_DATA_TABLES = tuple(
+    table
+    for table in _AUTHORITY_TABLES
+    if table not in ("paper_runtime_control", "schema_migrations")
 )
 _LEGACY_TABLES = (
     "account_balances",
@@ -842,6 +850,15 @@ _SELECT_DATABASE_OWNER_SQL = """
 SELECT pg_get_userbyid(database_row.datdba)
 FROM pg_database database_row
 WHERE database_row.datname = current_database()
+"""
+_SELECT_CLUSTER_SYSTEM_IDENTIFIER_SQL = """
+SELECT system_identifier
+FROM pg_control_system()
+"""
+_SELECT_TERMINAL_RUNTIME_CONTROL_SQL = """
+SELECT mode, runtime_generation
+FROM np.paper_runtime_control
+ORDER BY control_key
 """
 _SELECT_PUBLIC_SCHEMA_ACL_SQL = """
 SELECT
@@ -1993,6 +2010,18 @@ class PostgresBootstrapReceipt:
 
 
 @dataclass(frozen=True, slots=True)
+class PostgresBootstrapTerminalInspection:
+    """Read-only evidence from one exact terminal-catalog transaction."""
+
+    system_identifier: int
+    exact: bool
+    migration_versions: tuple[int, ...]
+    runtime_mode: str | None
+    runtime_generation: int | None
+    nonempty_relations: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _CredentialFactories:
     migrator: Callable[[], object] | None = field(repr=False, compare=False)
     legacy_runtime: Callable[[], object] | None = field(repr=False, compare=False)
@@ -2137,6 +2166,160 @@ class PostgresBootstrap:
             activation=activation_connection_factory,
             readiness=readiness_connection_factory,
             trainer=trainer_connection_factory,
+        )
+
+    def inspect_terminal(
+        self, context: PostgresBootstrapContext, /
+    ) -> PostgresBootstrapTerminalInspection:
+        """Inspect terminal catalog and emptiness in one read-only transaction."""
+        if type(context) is not PostgresBootstrapContext:
+            raise TypeError("context must be a PostgresBootstrapContext")
+        connection = _fresh_connection(
+            self._admin_connection_factory,
+            label="terminal catalog inspection",
+        )
+        exact = False
+        inspection_failed = False
+        system_identifier = None
+        migration_versions: tuple[int, ...] = ()
+        runtime_mode = None
+        runtime_generation = None
+        nonempty_relations: tuple[str, ...] = ()
+        try:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(_REPEATABLE_READ_ONLY_SQL)
+                    cursor.execute(_UTC_SQL)
+                    cursor.execute(_SAFE_SEARCH_PATH_SQL)
+                    cursor.execute(_SELECT_CLUSTER_SYSTEM_IDENTIFIER_SQL)
+                    system_identifier = _one_row(
+                        cursor.fetchone(), 1, "cluster system identifier"
+                    )[0]
+                    if type(system_identifier) is not int or system_identifier <= 0:
+                        raise PostgresBootstrapStorageError(
+                            "PostgreSQL returned invalid cluster evidence"
+                        )
+                    cursor.execute("SELECT to_regclass('np.schema_migrations')")
+                    migration_relation = _one_row(
+                        cursor.fetchone(), 1, "migration relation"
+                    )[0]
+                    cursor.execute("SELECT to_regclass('np.paper_runtime_control')")
+                    control_relation = _one_row(
+                        cursor.fetchone(), 1, "runtime control relation"
+                    )[0]
+                    ledger_layout_exact = (
+                        migration_relation is not None
+                        and _migration_metadata_is_exact(cursor)
+                    )
+                    if ledger_layout_exact:
+                        cursor.execute(
+                            "SELECT version FROM np.schema_migrations "
+                            "ORDER BY version"
+                        )
+                        migration_versions = tuple(row[0] for row in cursor.fetchall())
+                    control_layout_exact = False
+                    if control_relation is not None:
+                        cursor.execute(
+                            "SELECT column_name, udt_name FROM information_schema.columns "
+                            "WHERE table_schema = 'np' "
+                            "AND table_name = 'paper_runtime_control' "
+                            "ORDER BY ordinal_position"
+                        )
+                        control_layout_exact = tuple(
+                            tuple(row) for row in cursor.fetchall()
+                        ) == (
+                            ("control_key", "bool"),
+                            ("mode", "text"),
+                            ("runtime_generation", "int8"),
+                            ("updated_at", "timestamptz"),
+                        )
+                    if control_layout_exact:
+                        cursor.execute(_SELECT_TERMINAL_RUNTIME_CONTROL_SQL)
+                        control_rows = tuple(tuple(row) for row in cursor.fetchall())
+                        if len(control_rows) == 1 and len(control_rows[0]) == 2:
+                            runtime_mode, runtime_generation = control_rows[0]
+
+                    cursor.execute(
+                        "SELECT relname FROM pg_class table_row "
+                        "JOIN pg_namespace namespace_row "
+                        "ON namespace_row.oid = table_row.relnamespace "
+                        "WHERE namespace_row.nspname = 'np' "
+                        "AND table_row.relkind = 'r' "
+                        "AND table_row.relname = ANY(%s) ORDER BY relname",
+                        (list(_TERMINAL_DATA_TABLES),),
+                    )
+                    present = {row[0] for row in cursor.fetchall()}
+                    nonempty = []
+                    for table in _TERMINAL_DATA_TABLES:
+                        if table not in present:
+                            continue
+                        cursor.execute(
+                            sql.SQL("SELECT EXISTS (SELECT 1 FROM np.{})").format(
+                                sql.Identifier(table)
+                            )
+                        )
+                        if (
+                            _one_row(
+                                cursor.fetchone(), 1, "terminal relation emptiness"
+                            )[0]
+                            is True
+                        ):
+                            nonempty.append(f"np.{table}")
+                    nonempty_relations = tuple(sorted(nonempty))
+
+                    try:
+                        self._require_admin_identity(cursor, context)
+                        managed_roles_exact = self._managed_roles_are_exact(
+                            cursor,
+                            context,
+                            allow_absent=False,
+                        )
+                    except PostgresBootstrapDriftError:
+                        exact = False
+                    else:
+                        if (
+                            not managed_roles_exact
+                            or not ledger_layout_exact
+                            or not control_layout_exact
+                        ):
+                            exact = False
+                        elif not self._migration_history_is_exact(cursor):
+                            exact = False
+                        elif not self._catalog_shape_is_expected(
+                            cursor,
+                            context,
+                            allow_historical_owners=False,
+                        ):
+                            exact = False
+                        elif not _activation_catalog_is_authoritative(cursor):
+                            exact = False
+                        else:
+                            cursor.execute(
+                                _SELECT_DATABASE_AUTHORITY_SQL,
+                                (context.roles.schema_owner,),
+                            )
+                            database = _one_row(
+                                cursor.fetchone(), 3, "database authority"
+                            )
+                            exact = database == (context.admin_role, True, False)
+            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+                exact = False
+            except Exception:
+                inspection_failed = True
+        finally:
+            _rollback_quietly(connection)
+            _close_quietly(connection)
+        if inspection_failed:
+            raise PostgresBootstrapStorageError(
+                "terminal PostgreSQL catalog inspection failed"
+            )
+        return PostgresBootstrapTerminalInspection(
+            system_identifier=system_identifier,
+            exact=exact,
+            migration_versions=migration_versions,
+            runtime_mode=runtime_mode,
+            runtime_generation=runtime_generation,
+            nonempty_relations=nonempty_relations,
         )
 
     def reconcile(

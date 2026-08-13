@@ -1,0 +1,21 @@
+flowchart TD
+    OP["operator confirmations"] -->|"inspect + stopped clone + exclusive window"| CLI["C3C2 preflight CLI"]
+    SRC["stopped source clone"] -->|"read-only connection"| CLI
+    TGT["fresh COMPLETE target"] -->|"read-only connection"| CLI
+    CLI --> IDS{"cluster system IDs distinct?"}
+    IDS -->|"no"| BLOCK["BLOCKED"]
+    IDS -->|"yes"| STREAM["ordered typed-row stream"]
+    STREAM --> HASH["canonical SHA-256"]
+    HASH --> EXACT{"source and target admitted?"}
+    EXACT -->|"no"| BLOCK
+    EXACT -->|"yes"| READY["READY_FOR_<br/>FRESH_TARGET"]
+    READY --> STALE["stale on return<br/>operator must revalidate"]
+    IMPORT["data importer"] -. "not invoked" .-> CLI
+    ACTIVE["ACTIVE transition"] -. "not invoked" .-> CLI
+
+    classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+    classDef ready fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef boundary fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    class BLOCK stop;
+    class READY ready;
+    class CLI,STREAM,HASH boundary;

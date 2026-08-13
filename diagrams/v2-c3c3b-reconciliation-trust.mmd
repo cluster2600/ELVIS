@@ -1,0 +1,24 @@
+flowchart TD
+    OP["operator assertions<br/>reviewed window + disposable target"] --> REVIEW["C3C3B offline<br/>read-only review"]
+    CONFIG["canonical config document<br/>SHA-256 binding"] --> REVIEW
+    IMPORT["canonical import receipt<br/>SHA-256 + declared source fields"] --> REVIEW
+    TARGET["fresh V2 target<br/>imported raw rows"] -->|"sequential read-only observations"| ADMIT["identity, catalog, LEGACY / 0<br/>rows + sequences"]
+    REVIEW --> ADMIT
+    ADMIT --> RAW["complete imported<br/>opening candidate"]
+    ADMIT --> HYP["operator equity hypothesis<br/>not runtime evidence"]
+    RAW --> COMPARE["canonical balance documents<br/>and SHA-256 comparison"]
+    HYP --> COMPARE
+    COMPARE --> RESULT["DECISION_REQUIRED<br/>or BLOCKED"]
+    LIMIT["point-in-time session check<br/>cross-snapshot inspection"] -. "never a database fence" .-> RESULT
+    RESULT --> RECEIPT["stale non-authoritative receipt<br/>snapshot, source, target and window flags false"]
+    OPEN["account opening / provisioning"] -. "never performed" .-> RECEIPT
+    ACTIVE["runtime activation"] -. "never authorised" .-> RECEIPT
+
+    classDef source fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    classDef inspect fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+    class CONFIG,IMPORT,TARGET source;
+    class REVIEW,ADMIT,RAW,HYP,COMPARE,LIMIT inspect;
+    class RECEIPT safe;
+    class RESULT,OPEN,ACTIVE stop;

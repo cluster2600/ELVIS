@@ -1,0 +1,24 @@
+flowchart TD
+    OP["operator confirms clone,<br/>window, disposable target"] --> CLI["C3C3A one-shot<br/>import CLI"]
+    PRE["C3C2 READY receipt<br/>strict JSON file"] -->|"fingerprints + cluster IDs"| CLI
+    SRC["stopped V1 clone"] -->|"repeatable-read<br/>read-only"| ADMIT["exact source and target<br/>admission"]
+    TGT["fresh V2 target<br/>LEGACY / 0<br/>empty or exact replay"] -->|"single writer window"| ADMIT
+    CLI -->|"stale expected snapshot<br/>fully revalidated"| ADMIT
+    ADMIT -->|"exact"| STREAM["bounded canonical stream<br/>7 legacy tables"]
+    STREAM --> ZERO["open_positions<br/>must stay empty"]
+    ZERO --> TX["one atomic target<br/>copy transaction"]
+    TX -->|"explicit legacy IDs"| RAW["raw 7-table copy"]
+    RAW --> READBACK["post-commit exact<br/>row readback"]
+    READBACK --> SEQ["sequence normalization<br/>and verification"]
+    SEQ --> RECEIPT["secret-free receipt<br/>stale + non-authoritative"]
+    SYNTH["V2 journals and ledgers"] -. "never synthesized" .-> TX
+    ACTIVE["ACTIVE transition"] -. "never invoked" .-> RECEIPT
+
+    classDef source fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    classDef mutation fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+    class PRE,SRC,TGT,ADMIT,STREAM source;
+    class TX,RAW,READBACK,SEQ mutation;
+    class RECEIPT safe;
+    class SYNTH,ACTIVE stop;
