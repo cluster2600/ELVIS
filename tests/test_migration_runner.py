@@ -560,7 +560,7 @@ def test_apply_migrations_rejects_a_prepared_connection_without_rollback() -> No
 def test_migration_runner_is_not_wired_to_production_startup() -> None:
     root = Path(__file__).parents[1]
     consumers = []
-    for source_path in root.rglob("*.py"):
+    for source_path in sorted(root.rglob("*.py")):
         if (
             "tests" in source_path.parts
             or ".venv" in source_path.parts
@@ -586,4 +586,4 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
         if imports_persistence:
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == []
+    assert consumers == [Path("scripts/postgres_bootstrap.py")]

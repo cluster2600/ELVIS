@@ -1,0 +1,8 @@
+flowchart TD
+    SOURCE["stop writers on source"] --> CLONE["verified physical clone"]
+    CLONE --> INVENTORY["catalog and ownership inventory"]
+    INVENTORY --> OWNER{"shared owner owns PL/pgSQL or catalog?"}
+    OWNER -->|"yes"| DEFER["reject and design c3c2 remediation"]
+    OWNER -->|"no"| ADOPTION["separate adoption rehearsal"]
+    ADOPTION --> REVIEW["rollback and evidence review"]
+    DEFER --> REVIEW

@@ -115,6 +115,7 @@ tests/             # pytest suite (CI: python 3.10 + 3.14, heavy deps absent)
 | Topic | Where |
 |---|---|
 | V2 overview and status | [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md) · [migration ledger](docs/architecture_migration/04-migration-roadmap.md) |
+| V2 PostgreSQL operator path | [offline bootstrap](docs/V2_POSTGRES_BOOTSTRAP.md) · [isolated fresh-cluster rehearsal](docs/V2_POSTGRES_REHEARSAL.md) |
 | V2 detailed architecture | [target contracts and diagrams](docs/architecture_migration/03-target-architecture.md) |
 | Compatibility runtime | [verified topology](docs/architecture.md) · [components](docs/COMPONENTS.md) |
 | Architecture evidence | [audit and reference comparison](docs/architecture_migration/README.md) |

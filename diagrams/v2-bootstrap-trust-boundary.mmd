@@ -1,0 +1,12 @@
+flowchart LR
+    OP["operator"] --> CFG["non-secret bootstrap-v1 JSON"]
+    OP --> LPQ["external libpq files"]
+    CFG --> CLI["offline bootstrap CLI"]
+    LPQ --> CLI
+    CLI --> ADMIN["admin connection"]
+    CLI --> PROBES["six role probes"]
+    ADMIN --> BOOT["PostgresBootstrap"]
+    PROBES --> BOOT
+    BOOT --> DB["one PostgreSQL database"]
+    BOOT --> OUT["secret-free JSON receipt"]
+    RUNTIME["ELVIS runtime"] -. "not connected" .-> CLI

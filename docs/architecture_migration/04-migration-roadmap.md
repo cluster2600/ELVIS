@@ -38,7 +38,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c2 dormant role/catalog bootstrap implemented and verified; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c1 isolated fresh-cluster rehearsal verified locally; pull-request CI and runtime cut-over remain pending) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4222,6 +4222,103 @@ passed 463 tests. The full non-PostgreSQL run passed 2,561 tests, with 50
 skipped, 280 warnings, and 7 subtests. Black targeting Python 3.10, isort,
 flake8's fatal-error selectors, Python 3.10 compilation, relative Markdown-link
 validation, and `git diff --check` were green on the final c3a tree.
+
+### M9b.14c3b dormant offline PostgreSQL bootstrap CLI
+
+M9b.14c3b exposes the c2-c3a library as one explicit operator command:
+
+```text
+python -m scripts.postgres_bootstrap \
+  --config <bootstrap-v1.json> \
+  --apply \
+  --confirm-exclusive-ddl-role-window \
+  [--confirm-old-runtime-demotion]
+```
+
+The CLI accepts an exact version-1 JSON object containing only the expected
+database, independent admin role, exact seven-role manifest, service-name map,
+and optional adoption manifest. `services.admin` is required,
+`services.schema_owner` is always `null`, and each of the six login-role
+services is either a libpq service identifier or `null`. Connection data and
+secrets are forbidden from the JSON; libpq resolves the identifiers from the
+operator-controlled `PGSERVICEFILE` and `PGPASSFILE` outside Git.
+
+The two confirmation flags keep mutation behind explicit operator intent. The
+exclusive-window confirmation does not turn the advisory lock into a
+superuser fence. The old-runtime confirmation is required in addition to an
+adoption manifest with `demote_old_shared_runtime: true`; it cannot silently
+request demotion. The command has no plan mode and never retries itself.
+
+Stdout contains one compact, secret-free JSON object. Terminal and resumable
+receipts retain exactly `status`, `migration_versions`,
+`verified_role_probes`, `pending_role_credentials`, and
+`old_shared_runtime_demoted`. Their exits are `0` for `COMPLETE`, `10` for
+`CREDENTIALS_REQUIRED`, and `11` for `DEMOTION_REQUIRED`. Typed errors expose
+only `status: ERROR` plus `INPUT`, `STORAGE`, `DRIFT`, `MIGRATION`,
+`COMMIT_UNKNOWN`, or `INTERNAL`, mapped to exits `2`, `20`, `21`, `22`, `23`,
+and `70`. Only commit-unknown adds its `ROLES`, `MIGRATIONS`, `CATALOG`, or
+`DEMOTION` phase. Exception and connection text is not serialized.
+
+The [operator runbook](../V2_POSTGRES_BOOTSTRAP.md) records the fresh,
+adoption, and demotion prerequisites; external secret boundary; two Mermaid
+flows; status handling; and commit-unknown recovery. A repeated invocation is
+always a new operator decision after evidence review. `COMPLETE` is not a
+deployment receipt and cannot request activation.
+
+This slice adds no credential generation or rotation, Compose/Ansible wiring,
+HBA or network policy, session termination, startup hook, runtime credential
+composition, runtime-DDL removal, health gate, or activation call. The V2
+application target remains Python 3.14; Python 3.10 remains a temporary
+compatibility floor and the isolated TensorFlow/ML trainer runtime. The
+remaining deployment, replay, reconciliation, rollback, soak, and approval
+gates still block `ACTIVE`.
+
+The CLI contract suite passed 29 tests under Python 3.10 and 29 under Python
+3.14. The adjacent bootstrap-library plus CLI unit suites passed 116 tests on
+each interpreter. Two disposable PostgreSQL 15 CLI scenarios passed on each
+interpreter: staged roles and exit `10`, external credential provisioning,
+terminal exit `0`, repeat idempotence, and injected `CREATEDB` drift returning
+exit `21` without repair. Post-test inspection found no residual test roles or
+databases. Black under both interpreters, isort, fatal Flake8 selectors,
+Python compilation, relative-link validation, both Mermaid renders, and
+`git diff --check` were green. The broader Python 3.14 gates passed 465
+PostgreSQL tests in 149.73 seconds and 2,591 non-PostgreSQL tests with 50
+expected skips in 45.05 seconds. Pull-request CI remains the acceptance gate;
+these results do not prove deployment or cut-over.
+
+### M9b.14c3c1 isolated fresh PostgreSQL rehearsal
+
+M9b.14c3c1 adds `deploy/v2/compose.bootstrap.yml`, a standalone rehearsal
+project containing only pinned PostgreSQL 15 and the one-shot bootstrap image.
+PostgreSQL has no host-published port, uses an internal fixed subnet and an
+exact SCRAM-only HBA allowlist, and stores data only in a labelled rehearsal
+volume guarded by an exact marker. Operator secrets and populated libpq files
+remain outside Git and are mounted read-only.
+
+The [rehearsal runbook](../V2_POSTGRES_REHEARSAL.md) records the trust boundary,
+fresh state flow, existing-volume decision, rollback, and three Mermaid flows.
+The stage manifest contains no login services and must return exit `10`; after
+external parameterized credential provisioning, the complete manifest must
+return exit `0` twice. The composition contains no bot, trainer, activation,
+runtime startup hook, or active ELVIS volume.
+
+The current shared-owner volume is explicitly outside c3c1. It requires a
+stopped physical clone and a separate c3c2 ownership-remediation or fresh-target
+data-migration decision. The active root Compose, Ansible, Apple scripts,
+runtime DDL, startup health, and `ACTIVE` authority remain unchanged.
+
+The frozen c3c1 contract suite passed 6 tests under Python 3.10 and 6 under
+Python 3.14. The opt-in Docker/PostgreSQL 15 rehearsal passed 2 scenarios: the
+nominal `10 -> 0 -> 0` operator flow and the non-mutating refusal of a non-empty
+unmarked volume. It additionally proved six SCRAM verifiers, the configured
+SCRAM encryption mode, an error-free HBA rule catalog, each role's own
+credential, rejection of six crossed credentials and the non-allowlisted
+database, an exact mode-0600 marker across restart, bounded expected refusal
+logs, secret redaction, and zero residual Compose resources. Compose rendering,
+shell syntax, Black, isort, fatal Flake8 selectors, compilation, relative-link
+validation, the three Mermaid source/render sets, and `git diff --check` were
+green. The dedicated GitHub Actions rehearsal remains the pull-request
+acceptance gate; these results do not prove deployment or cut-over.
 
 ## Cut-over policy
 
