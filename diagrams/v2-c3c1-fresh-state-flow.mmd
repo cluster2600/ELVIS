@@ -1,0 +1,11 @@
+flowchart TD
+    EMPTY["empty labelled volume"] --> INIT["PostgreSQL 15<br/>SCRAM initialized"]
+    INIT --> STAGE["bootstrap<br/>stage pass"]
+    STAGE --> CREDS["credentials<br/>required"]
+    CREDS --> PROVISION["external credential<br/>provisioning"]
+    PROVISION --> COMPLETE["bootstrap<br/>complete"]
+    COMPLETE --> REPEAT["repeat<br/>complete"]
+    EMPTY -->|"pre-existing data"| REJECT["reject"]
+    INIT -->|"typed error"| STOP["stop and inspect"]
+    STAGE -->|"typed error"| STOP
+    PROVISION -->|"failed proof"| STOP

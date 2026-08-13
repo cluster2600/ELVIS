@@ -78,8 +78,10 @@ python -m scripts.postgres_bootstrap \
   demotion by itself.
 
 The CLI is one-shot and has no automatic retry. It is never invoked by
-`main.py`, Docker Compose, Ansible, a health probe, or an application startup
-path.
+`main.py`, Ansible, a health probe, or an application startup path. The isolated
+fresh-cluster rehearsal may invoke it only through an explicit one-shot
+operator `docker compose run`; no Compose startup or service dependency calls
+it automatically.
 
 ## Exact configuration schema
 
@@ -304,6 +306,10 @@ There is no automatic retry, startup retry, or activation fallback.
 Those remain separate V2 migration slices. The application target is Python
 3.14. Python 3.10 remains a temporary compatibility floor and the isolated
 TensorFlow/ML trainer runtime; retiring it requires a separate migration.
+
+The disposable fresh-cluster composition that exercises this CLI without
+touching the active runtime is documented in the
+[V2 PostgreSQL rehearsal runbook](V2_POSTGRES_REHEARSAL.md).
 
 ## Verification status
 

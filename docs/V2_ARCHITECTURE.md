@@ -111,7 +111,8 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Order, fill, position, and paper-account journal/replay contracts | Implemented and tested | Persistence path remains dormant |
 | Atomic paper submission/account owners | Implemented and tested | Not composed into the running bot |
 | Readiness assessment, legacy-writer fence, runtime generations, and locked activation | Implemented and tested | Database capabilities exist but no cut-over is authorised |
-| Least-authority PostgreSQL role/catalog bootstrap, pre-role admission, and offline CLI | Implemented as dormant operator capability | The CLI accepts only a strict non-secret manifest and external libpq service names; it rejects unsafe databases and adds no secret writer, startup hook, Compose wiring, or deployment activation |
+| Least-authority PostgreSQL role/catalog bootstrap, pre-role admission, and offline CLI | Implemented as dormant operator capability | The CLI accepts only a strict non-secret manifest and external libpq service names; it rejects unsafe databases and adds no secret writer, automatic startup hook, active Compose wiring, or deployment activation |
+| Isolated fresh PostgreSQL 15 rehearsal composition | Implemented as a disposable operator harness | Separate internal-only Compose project; never mounts the active volume or composes bot, trainer, or activation |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
 | Replay, reconciliation, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
 
@@ -193,6 +194,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Detailed V2 contracts | [Target architecture](architecture_migration/03-target-architecture.md) |
 | Current implementation status and verification | [Migration roadmap](architecture_migration/04-migration-roadmap.md) |
 | Offline PostgreSQL bootstrap contract and recovery | [Bootstrap runbook](V2_POSTGRES_BOOTSTRAP.md) |
+| Fresh PostgreSQL 15 SCRAM/HBA rehearsal | [Rehearsal runbook](V2_POSTGRES_REHEARSAL.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |

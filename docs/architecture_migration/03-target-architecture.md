@@ -258,6 +258,8 @@ contract, and M9b.14c1 moves that adapter behind two narrowly callable database
 capabilities. M9b.14c2 adds the dormant, operator-driven role and catalog
 bootstrap around those capabilities. M9b.14c3b exposes that library through a
 dormant, one-shot offline CLI; none of these slices is wired into production.
+M9b.14c3c1 adds a separate fresh PostgreSQL 15 rehearsal whose internal-only
+Compose project contains no bot, trainer, activation, or active volume.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1461,10 +1463,16 @@ make a new explicit invocation only after reviewing the evidence. The exact
 configuration, flow, receipts, and recovery procedure are in the
 [offline bootstrap runbook](../V2_POSTGRES_BOOTSTRAP.md).
 
+The c3c1 [fresh-cluster rehearsal](../V2_POSTGRES_REHEARSAL.md) supplies a
+separate pinned PostgreSQL 15 image, SCRAM-only HBA allowlist, external-file
+secret boundary, marked disposable volume, and one-shot bootstrap container.
+It intentionally does not override the root Compose topology or prove that the
+existing shared-owner volume is adoptable.
+
 This slice still has no credential writer, session terminator, activation call,
-startup hook, container wiring, or runtime consumer. The remaining c3
-deployment workflow must supply Compose/Ansible role and SCRAM-secret
-provisioning, restrictive HBA/network policy, credential rotation,
+startup hook, runtime container wiring, or runtime consumer. The remaining c3
+deployment workflow must supply production Compose/Ansible role and
+SCRAM-secret provisioning, production HBA/network policy, credential rotation,
 real-volume rehearsal, and removal of migration or other DDL authority from
 runtime processes. M9b.14d must then compose the dedicated runtime identities
 with fail-closed startup and health gates while keeping bootstrap and activation

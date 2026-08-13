@@ -38,7 +38,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3b dormant offline bootstrap CLI implemented and focused verification green; no runtime cut-over) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c1 isolated fresh-cluster rehearsal verified locally; pull-request CI and runtime cut-over remain pending) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4285,6 +4285,40 @@ Python compilation, relative-link validation, both Mermaid renders, and
 PostgreSQL tests in 149.73 seconds and 2,591 non-PostgreSQL tests with 50
 expected skips in 45.05 seconds. Pull-request CI remains the acceptance gate;
 these results do not prove deployment or cut-over.
+
+### M9b.14c3c1 isolated fresh PostgreSQL rehearsal
+
+M9b.14c3c1 adds `deploy/v2/compose.bootstrap.yml`, a standalone rehearsal
+project containing only pinned PostgreSQL 15 and the one-shot bootstrap image.
+PostgreSQL has no host-published port, uses an internal fixed subnet and an
+exact SCRAM-only HBA allowlist, and stores data only in a labelled rehearsal
+volume guarded by an exact marker. Operator secrets and populated libpq files
+remain outside Git and are mounted read-only.
+
+The [rehearsal runbook](../V2_POSTGRES_REHEARSAL.md) records the trust boundary,
+fresh state flow, existing-volume decision, rollback, and three Mermaid flows.
+The stage manifest contains no login services and must return exit `10`; after
+external parameterized credential provisioning, the complete manifest must
+return exit `0` twice. The composition contains no bot, trainer, activation,
+runtime startup hook, or active ELVIS volume.
+
+The current shared-owner volume is explicitly outside c3c1. It requires a
+stopped physical clone and a separate c3c2 ownership-remediation or fresh-target
+data-migration decision. The active root Compose, Ansible, Apple scripts,
+runtime DDL, startup health, and `ACTIVE` authority remain unchanged.
+
+The frozen c3c1 contract suite passed 6 tests under Python 3.10 and 6 under
+Python 3.14. The opt-in Docker/PostgreSQL 15 rehearsal passed 2 scenarios: the
+nominal `10 -> 0 -> 0` operator flow and the non-mutating refusal of a non-empty
+unmarked volume. It additionally proved six SCRAM verifiers, the configured
+SCRAM encryption mode, an error-free HBA rule catalog, each role's own
+credential, rejection of six crossed credentials and the non-allowlisted
+database, an exact mode-0600 marker across restart, bounded expected refusal
+logs, secret redaction, and zero residual Compose resources. Compose rendering,
+shell syntax, Black, isort, fatal Flake8 selectors, compilation, relative-link
+validation, the three Mermaid source/render sets, and `git diff --check` were
+green. The dedicated GitHub Actions rehearsal remains the pull-request
+acceptance gate; these results do not prove deployment or cut-over.
 
 ## Cut-over policy
 

@@ -12,7 +12,9 @@ owners and activation capabilities are not composed into deployment, and
    safety contract.
 2. [Architecture migration](architecture_migration/README.md) — evidence,
    detailed target contracts, and the authoritative execution ledger.
-3. [Compatibility-runtime architecture](architecture.md) — verified topology
+3. [V2 PostgreSQL rehearsal](V2_POSTGRES_REHEARSAL.md) — isolated fresh-cluster
+   SCRAM/HBA proof, volume guard, rollback boundary, and Mermaid flows.
+4. [Compatibility-runtime architecture](architecture.md) — verified topology
    of the runtime that remains active during migration.
 
 ## Documentation authority matrix
@@ -22,6 +24,7 @@ owners and activation capabilities are not composed into deployment, and
 | [V2 overview](V2_ARCHITECTURE.md) | V2 intent, boundaries, and reader map | Canonical overview |
 | [Target architecture](architecture_migration/03-target-architecture.md) | Detailed V2 component and data contracts | Canonical design |
 | [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Slice status, verification, rollback, and cut-over gates | Canonical status |
+| [PostgreSQL bootstrap](V2_POSTGRES_BOOTSTRAP.md) and [fresh rehearsal](V2_POSTGRES_REHEARSAL.md) | Dormant operator contract and disposable proof | V2 operator runbooks; not deployment authority |
 | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) | Immutable audited baseline | Historical evidence |
 | [Runtime architecture](architecture.md), [components](COMPONENTS.md), and [system topology](ELVIS_SYSTEM_ARCHITECTURE.md) | Current compatibility-runtime references | Legacy operational context |
 | [Deployment guide](DEPLOYMENT.md) | Existing Compose/Ansible workflow | Legacy deployment only; not V2 cut-over |

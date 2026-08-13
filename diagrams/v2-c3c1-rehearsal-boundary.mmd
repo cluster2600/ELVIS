@@ -1,0 +1,8 @@
+flowchart LR
+    OP["operator"] --> EXT["external 0600 secrets and libpq files"]
+    EXT --> BOOT["one-shot bootstrap container"]
+    BOOT --> PG["fresh isolated PostgreSQL 15"]
+    PG --> RECEIPT["secret-free receipt"]
+    OLD["existing ELVIS volume"] -. "never mounted" .-> PG
+    BOT["bot and trainer"] -. "not composed" .-> PG
+    ACTIVE["activation"] -. "not invoked" .-> PG
