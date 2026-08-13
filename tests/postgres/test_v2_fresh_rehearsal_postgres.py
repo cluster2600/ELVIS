@@ -571,18 +571,13 @@ def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
         )
         before = _volume_fingerprint(volume_name)
 
-        rehearsal.run_compose(
-            "start",
-            "--wait",
-            "--wait-timeout",
-            "15",
-            "postgres",
-            expected_exit_codes=(1,),
-        )
         container_id = rehearsal.run_compose(
             "ps", "--all", "--quiet", "postgres"
         ).stdout.strip()
         assert re.fullmatch(r"[0-9a-f]{12,64}", container_id)
+        rehearsal.run_compose("start", "postgres")
+        wait_result = _run(["docker", "wait", container_id])
+        assert wait_result.stdout.strip() == "1"
         state = _run(
             [
                 "docker",
