@@ -263,6 +263,11 @@ Compose project contains no bot, trainer, activation, or active volume.
 M9b.14c3c2 adds a separate read-only source-clone/fresh-target preflight; it
 binds canonical evidence for a later importer but copies no data and returns no
 lasting authority.
+M9b.14c3c3a adds that dormant bounded raw importer. It revalidates the c3c2
+pair, copies only the seven V1 relations with explicit IDs while keeping
+`open_positions` empty, commits all rows atomically, then normalizes the seven
+non-transactional serial sequences under a separate exact recovery boundary.
+It synthesizes no V2 journal, position stream, account ledger, or runtime epoch.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1530,9 +1535,46 @@ lock or reservation survives the inspection. The full command, evidence,
 rollback, and no-copy boundary are defined in the
 [fresh-target cut-over runbook](../V2_FRESH_TARGET_CUTOVER.md).
 
-The next bounded slice must design the importer, exact row mapping, source
+M9b.14c3c2 deliberately deferred the importer, exact row mapping, source
 fingerprint binding, target replay checksum, interruption recovery, and parity
-proof. M9b.14c3c2 copies no data and cannot call bootstrap or activation.
+proof. It copies no data and cannot call bootstrap or activation.
+
+M9b.14c3c3a implements the bounded identity-shaped raw copy described by that
+design boundary. It imports only `np.account_balances`, `np.liquidations`,
+`np.margin_history`, `np.model_predictions`, `np.open_positions`, `np.trades`,
+and `np.trading_session_resets`; both `np.open_positions` inventories must be
+empty. Original integer IDs and gaps are preserved. The application batch is
+bounded from 1 through 512. Compiled admission limits allow at most 100,000
+total rows, 65,536 canonical bytes for one row, and 512 MiB of canonical source
+bytes; they are not operator-tunable. Source rows remain inside one
+repeatable-read, read-only snapshot and no business row is spooled to disk.
+
+The c3c3a CLI accepts only an exact secret-free c3c2 `READY` receipt as a strict
+JSON document. Its source fingerprints, canonical hash, and distinct cluster
+system identifiers are bound as stale expected evidence,
+never trusted as lasting authority. The importer rechecks the complete source
+and terminal target before mutation, then locks and
+revalidates the target's exact `LEGACY/0` empty-or-exact import boundary. A
+partial, surplus, or foreign target is conflict, never an upsert, truncate, or
+repair. All explicit-ID inserts share one target transaction. A known failure
+rolls back; an unknown commit outcome triggers an independent exact target
+readback in the same invocation. Exact committed rows continue recovery, an
+empty target is commit-unknown, and a partial target is conflict.
+
+Sequence `setval` state is not transactional. C3c3a therefore commits and
+verifies raw rows before normalizing any of the seven legacy sequences. Exact
+prior rows resume at sequence normalization. A sequence-phase interruption
+returns no receipt; a later invocation must revalidate exact rows before
+normalizing and rereading all seven sequences again. The terminal receipt binds
+row counts, key bounds, typed SHA-256 digests, and exact sequence evidence, but
+every connection and lock has closed before return, so it remains stale and
+snapshot-non-authoritative.
+
+The importer does not populate `np.orders`, `np.order_events`, position streams,
+paper-account streams or ledgers, runtime generations, or migration history.
+V1 lacks the immutable order/fill/account/effect/generation provenance required
+to invent those durable facts. The exact operational contract and rollback are
+in the [legacy snapshot import runbook](../V2_LEGACY_SNAPSHOT_IMPORT.md).
 
 This slice still has no credential writer, session terminator, activation call,
 startup hook, runtime container wiring, or runtime consumer. The remaining c3

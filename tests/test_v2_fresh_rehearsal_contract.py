@@ -21,6 +21,9 @@ _STAGE_MANIFEST = _DEPLOYMENT / "bootstrap-stage-v1.example.json"
 _COMPLETE_MANIFEST = _DEPLOYMENT / "bootstrap-complete-v1.example.json"
 _SERVICE_FILE = _DEPLOYMENT / "pg_service.conf.example"
 _CUTOVER_PREFLIGHT_MANIFEST = _DEPLOYMENT / "cutover-preflight-v1.example.json"
+_LEGACY_SNAPSHOT_IMPORT_MANIFEST = (
+    _DEPLOYMENT / "legacy-snapshot-import-v1.example.json"
+)
 
 _DATABASE = "elvis_paper_v2_rehearsal"
 _ADMIN_ROLE = "elvis_bootstrap_admin"
@@ -53,6 +56,7 @@ _EXPECTED_FILES = {
     _COMPLETE_MANIFEST,
     _SERVICE_FILE,
     _CUTOVER_PREFLIGHT_MANIFEST,
+    _LEGACY_SNAPSHOT_IMPORT_MANIFEST,
 }
 
 

@@ -38,7 +38,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c2 stopped-clone/fresh-target read-only preflight implemented locally; pull-request CI, data import, and runtime cut-over remain pending) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c3a bounded raw legacy import implemented locally; V2 replay/reconciliation, pull-request CI, and runtime cut-over remain pending) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4387,6 +4387,114 @@ This evidence covers exact ready and blocked outcomes, stable hashing across
 fetch boundaries, read-only SQL, redaction, and zero source/target mutation.
 Pull-request CI remains the remote acceptance gate. This slice does not deploy
 or copy data, and `ACTIVE` remains a **NO-GO**.
+
+### M9b.14c3c3a bounded legacy snapshot import
+
+M9b.14c3c3a adds the dormant pure contract in
+`trading.application.legacy_snapshot_import`, the offline PostgreSQL adapter in
+`trading.persistence.postgres_legacy_snapshot_import`, and the one-shot
+`scripts.postgres_legacy_snapshot_import` CLI. The application boundary is
+exactly `LegacySnapshotImportContext(cutover_context, batch_size=512)`, the
+`IMPORTED | REPLAYED` disposition, per-relation and aggregate receipts, and the
+positional-only `import_snapshot(context, preflight_receipt)` port. Every
+receipt remains stale on return, snapshot-non-authoritative, target-exact, and
+incapable of authorizing runtime activation.
+
+The CLI accepts the exact secret-free c3c2 `READY_FOR_FRESH_TARGET` JSON only
+as a strict document with a 65,536-byte maximum. Operator hygiene keeps config
+and receipt files owner-controlled and non-world-writable, but ownership and
+exact-mode policy are not CLI guarantees; the CLI does reject symlinks and
+non-regular paths. It binds every source fingerprint, canonical hash, and pair
+system identifier as stale expected evidence, then revalidates source and
+target under its own transactions. This permits exact prior-copy classification
+as `REPLAYED`, which a fresh c3c2 empty-target preflight could not express. The
+strict version-1 intent contains only the source service and expected identity,
+the target admin and migrator services, and the same fresh-target bootstrap
+context used by c3c2. Top-level `batch_size` is the only configurable cap and
+must be 1 through 512. Connection details and credentials remain in external
+libpq files.
+
+The data allowlist is the exact seven V1 relations:
+`np.account_balances`, `np.liquidations`, `np.margin_history`,
+`np.model_predictions`, `np.open_positions`, `np.trades`, and
+`np.trading_session_resets`. `np.open_positions` must remain empty. The other
+rows are copied 1:1 with explicit primary keys and intentional gaps through
+bounded batches inside one target row transaction. The application batch size
+is 1 through 512. Compiled, non-configurable limits admit at most 100,000 rows,
+65,536 canonical bytes per row, and 512 MiB of canonical source bytes. The
+source uses a repeatable-read, read-only snapshot, rehashes the stable typed row
+stream before insertion, and never spools business rows to disk.
+
+The adapter uses three pairwise-distinct connection factories: stopped source,
+target admin, and target migrator. It reinspects the target database and
+migrator identity before `SET ROLE` to the schema owner, takes the fixed target
+locks, and revalidates the terminal catalog, `LEGACY/0` mode, and exact
+empty-or-prior-copy state before mutation. Partial, surplus, or foreign data is
+conflict. It never uses DDL, `GRANT`, `REVOKE`, `DELETE`, `TRUNCATE`, upsert,
+trigger disabling, role administration, migration-ledger mutation, or a V2
+journal/ledger synthesis path.
+
+All raw rows commit atomically. A known pre-commit failure rolls back. If commit
+acknowledgement is lost, exact target readback alone classifies the result:
+exact committed rows continue to post-commit recovery, an empty target remains
+`COMMIT_UNKNOWN`, and a partial or changed target is `CONFLICT`. An exact prior
+copy returns `REPLAYED` after completing the same recovery checks instead of
+inserting again.
+
+Serial-sequence normalization is deliberately after the row commit because
+PostgreSQL `setval` state is not transactional. Each target next value is the
+safe maximum of the observed source next value and one past the imported
+primary-key maximum, with one as the empty-table floor. Every normalized
+sequence and every row fingerprint is reread before `IMPORTED` or `REPLAYED`
+can be returned.
+
+The exact command is:
+
+```bash
+python -m scripts.postgres_legacy_snapshot_import \
+  --config <legacy-snapshot-import-v1.json> \
+  --preflight-receipt <cutover-preflight-ready.json> \
+  --import-snapshot \
+  --confirm-stopped-source-clone \
+  --confirm-exclusive-database-window \
+  --confirm-disposable-target
+```
+
+Exit `0` returns `IMPORTED` or `REPLAYED`. Exits `2`, `20`, `22`, `23`, `24`,
+and `70` return only `INPUT`, `STORAGE`, `BUSY`, `CONFLICT`, `COMMIT_UNKNOWN`,
+and `INTERNAL`, respectively. There is no automatic retry. The complete data,
+receipt, recovery, and rollback contract is in the
+[legacy snapshot import runbook](../V2_LEGACY_SNAPSHOT_IMPORT.md), with two
+Mermaid/SVG/PNG/editable-Excalidraw graph sets.
+
+This slice deliberately does not synthesize `np.orders`, `np.order_events`,
+position streams, paper-account streams or ledgers, runtime epochs, or opening
+provenance from V1 rows. The legacy schema lacks the immutable causal facts
+needed to do so safely. Replay and semantic reconciliation of imported history,
+runtime DDL removal, dedicated production composition, fail-closed health,
+side-effect-free shadow comparison, stale-writer removal, rollback rehearsal,
+soak, and explicit operator approval remain later gates. `ACTIVE` remains a
+**NO-GO**.
+
+The frozen c3c3a contract, adjacent cut-over, migration-runner, and deployment
+guard command passed 111 tests under both Python 3.10 and Python 3.14. The
+dedicated three-cluster-capable PostgreSQL 15 importer file passed 9 scenarios,
+including exact import and replay, cross-cluster miswiring, commit-unknown
+recovery, target drift before row copy and before sequence normalization,
+primary-key exhaustion, and a write committed exactly between target identity
+inspection and lock acquisition. The complete PostgreSQL suite, with the
+bootstrap, fresh-rehearsal, cut-over-preflight, and snapshot-import opt-ins,
+passed 479 tests. The final-byte non-PostgreSQL suite passed 2,667 tests with
+50 expected skips and 7 subtests. It emitted non-gating warnings whose count
+varied across identical-byte runs, so no false deterministic total is claimed.
+
+Black, isort, fatal-error Flake8, Python 3.10 and Python 3.14 compilation,
+JSON/YAML parsing, 100 relative Markdown links, exact Mermaid fence/source
+parity, both SVG/PNG/Excalidraw render triplets, visual PNG inspection, and
+`git diff --check` were green. The official PostgreSQL 15 disposable fixture
+and all nested V2 rehearsal, preflight, and importer resources left zero
+containers, volumes, or networks after the run. Byte-for-byte file hashes,
+worktree status, and `HEAD` were unchanged across both global suites.
 
 ## Cut-over policy
 

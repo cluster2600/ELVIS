@@ -1,0 +1,31 @@
+flowchart TD
+    START["new explicit invocation"] --> RECHECK["revalidate stale preflight<br/>and exclusive window"]
+    RECHECK --> CLASSIFY{"target classification"}
+    CLASSIFY -->|"empty"| COPY["bounded copy in<br/>one transaction"]
+    CLASSIFY -->|"exact prior copy / REPLAYED"| SEQ["normalize and verify<br/>7 sequences"]
+    CLASSIFY -->|"partial or foreign"| CONFLICT["CONFLICT<br/>preserve evidence"]
+    COPY --> COMMIT{"commit outcome"}
+    COMMIT -->|"known rollback"| RETRY["close connections<br/>new invocation required"]
+    COMMIT -->|"success"| READBACK["exact target readback"]
+    COMMIT -->|"unknown"| UNKNOWN{"independent<br/>target readback"}
+    UNKNOWN -->|"exact rows / REPLAYED"| SEQ
+    UNKNOWN -->|"empty"| CU["COMMIT_UNKNOWN<br/>new invocation required"]
+    UNKNOWN -->|"partial or foreign"| CONFLICT
+    READBACK -->|"exact"| SEQ
+    READBACK -->|"not exact"| CONFLICT
+    SEQ --> SEQPARITY{"7 sequence next<br/>values exact?"}
+    SEQPARITY -->|"no"| SEQERR["STORAGE<br/>new invocation required"]
+    SEQPARITY -->|"yes"| PARITY{"final row parity<br/>still exact?"}
+    PARITY -->|"yes"| COMPLETE["import receipt<br/>stale + non-authoritative"]
+    PARITY -->|"no"| CONFLICT
+    CONFLICT --> ROLLBACK["keep legacy authoritative<br/>rebuild only fresh target"]
+    COMPLETE --> NOGO["ACTIVE remains NO-GO"]
+
+    classDef inspect fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
+    classDef mutation fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
+    class START,RECHECK,CLASSIFY,UNKNOWN,READBACK inspect;
+    class COPY,COMMIT,SEQ,SEQPARITY,PARITY mutation;
+    class COMPLETE safe;
+    class CU,SEQERR,CONFLICT,ROLLBACK,NOGO stop;

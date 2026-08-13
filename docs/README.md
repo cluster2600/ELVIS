@@ -17,7 +17,10 @@ owners and activation capabilities are not composed into deployment, and
 4. [V2 fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) — read-only
    source-clone/target admission, canonical evidence, rollback phases, and the
    explicit no-copy boundary.
-5. [Compatibility-runtime architecture](architecture.md) — verified topology
+5. [V2 legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) — bounded raw
+   seven-table copy, exact resume and commit-unknown recovery, post-commit
+   sequence normalization, and the explicit no-ledger/no-activation boundary.
+6. [Compatibility-runtime architecture](architecture.md) — verified topology
    of the runtime that remains active during migration.
 
 ## Documentation authority matrix
@@ -27,7 +30,7 @@ owners and activation capabilities are not composed into deployment, and
 | [V2 overview](V2_ARCHITECTURE.md) | V2 intent, boundaries, and reader map | Canonical overview |
 | [Target architecture](architecture_migration/03-target-architecture.md) | Detailed V2 component and data contracts | Canonical design |
 | [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Slice status, verification, rollback, and cut-over gates | Canonical status |
-| [PostgreSQL bootstrap](V2_POSTGRES_BOOTSTRAP.md), [fresh rehearsal](V2_POSTGRES_REHEARSAL.md), and [fresh-target preflight](V2_FRESH_TARGET_CUTOVER.md) | Dormant operator contracts, disposable proof, and read-only migration admission | V2 operator runbooks; not deployment authority |
+| [PostgreSQL bootstrap](V2_POSTGRES_BOOTSTRAP.md), [fresh rehearsal](V2_POSTGRES_REHEARSAL.md), [fresh-target preflight](V2_FRESH_TARGET_CUTOVER.md), and [legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) | Dormant operator contracts, disposable proof, read-only admission, and bounded raw data preservation | V2 operator runbooks; not deployment authority |
 | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) | Immutable audited baseline | Historical evidence |
 | [Runtime architecture](architecture.md), [components](COMPONENTS.md), and [system topology](ELVIS_SYSTEM_ARCHITECTURE.md) | Current compatibility-runtime references | Legacy operational context |
 | [Deployment guide](DEPLOYMENT.md) | Existing Compose/Ansible workflow | Legacy deployment only; not V2 cut-over |

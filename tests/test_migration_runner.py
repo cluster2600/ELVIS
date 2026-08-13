@@ -589,4 +589,5 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
     assert consumers == [
         Path("scripts/postgres_bootstrap.py"),
         Path("scripts/postgres_cutover_preflight.py"),
+        Path("scripts/postgres_legacy_snapshot_import.py"),
     ]

@@ -411,7 +411,7 @@ Rollback depends on the latest phase:
 | Phase | Authority | Rollback boundary |
 |---|---|---|
 | c3c2 inspection | Legacy runtime | Close the read-only connections. Keep or discard only the fresh target under a separately verified operator procedure; the source clone and active source are untouched. |
-| Future import, before authority change | Legacy runtime | Stop the importer, preserve evidence, discard or rebuild only the fresh target, and rerun preflight from a new stopped clone. |
+| c3c3a raw import, before authority change | Legacy runtime | Stop the importer, preserve evidence, and use its exact empty/exact/conflicting readback procedure. Discard or rebuild only the fresh target under a separate verified procedure. |
 | Future validation or shadow | Legacy runtime | Reject cut-over, keep V2 non-authoritative, and rebuild the target if exact replay or reconciliation cannot be proved. |
 | Future `PAUSED` transition | No writer until reconciled | Preserve the fence, reconcile both sides, and explicitly select one writer before resuming. |
 | Future `ACTIVE` | V2 only | Return to `PAUSED`, drain and reconcile the V2 owner, then explicitly select legacy or V2. Never enable both writers. |
@@ -421,22 +421,24 @@ own the production source, clone mechanism, backup store, or target lifecycle.
 An operator must resolve and verify an exact disposable target before deleting
 anything.
 
-## Next bounded pull request
+## Next bounded importer
 
-The next slice may add an importer only after this preflight contract is
-reviewed. That importer must have its own exact row allowlist, repeatability and
-idempotency contract, bounded batches, typed source-to-target mapping, source
-fingerprint binding, target replay checksum, interruption recovery, and
-non-mutating failure tests. It must not activate V2 or silently expand the data
-set.
+M9b.14c3c3a adds the separately reviewed
+[bounded legacy snapshot importer](V2_LEGACY_SNAPSHOT_IMPORT.md). It binds this
+preflight's strict secret-free receipt from an operator-controlled file as stale
+expected evidence, revalidates both databases, and copies only the seven
+allowlisted V1 tables with `open_positions` held empty. Its row copy,
+post-commit sequence normalization, exact resume, commit-unknown readback, and
+rollback contract are independent of this preflight.
 
-This c3c2 pull request contains no importer implementation and makes no claim
-that historical ELVIS data has been copied.
+This c3c2 slice still contains no importer implementation and makes no claim
+that historical ELVIS data was copied by the inspection. A later c3c3a receipt
+is also stale, non-authoritative, and cannot activate V2.
 
 ## Remaining `ACTIVE` blockers
 
-- the bounded importer, target replay, row-count and checksum parity are not
-  implemented;
+- V2 replay and semantic reconciliation of the raw imported history are not
+  implemented; c3c3a deliberately synthesizes no journal or ledger;
 - runtime DDL remains in the compatibility path;
 - production bot and trainer identities, SCRAM secrets, HBA, and network policy
   are not composed;

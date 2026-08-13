@@ -114,8 +114,9 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Least-authority PostgreSQL role/catalog bootstrap, pre-role admission, and offline CLI | Implemented as dormant operator capability | The CLI accepts only a strict non-secret manifest and external libpq service names; it rejects unsafe databases and adds no secret writer, automatic startup hook, active Compose wiring, or deployment activation |
 | Isolated fresh PostgreSQL 15 rehearsal composition | Implemented as a disposable operator harness | Separate internal-only Compose project; never mounts the active volume or composes bot, trainer, or activation |
 | Fresh-target cut-over preflight | Implemented as a dormant read-only operator capability | Inspects a stopped source clone and a separate fresh target, requires distinct cluster system identifiers, streams canonical typed-row evidence, and returns only a stale-on-return sanitized receipt; it copies nothing |
+| Bounded legacy snapshot importer | Implemented as a dormant offline operator capability | Revalidates the c3c2 pair, copies only the seven raw V1 tables in one transaction, preserves explicit IDs, requires `open_positions` to remain empty, and normalizes sequences after row commit; it synthesizes no V2 journal or ledger |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
-| Replay, reconciliation, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
+| V2 replay/reconciliation of imported history, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
 
 “Implemented” means present on this branch with the checks recorded in the
 roadmap. “Dormant” means there is no production composition or authority.
@@ -128,8 +129,8 @@ Neither word means deployed.
 | Foundation | Audit, target design, typed domain and application boundaries | Implemented |
 | Progressive runtime extraction | Signal policy, risk, execution, and position ownership moved in small reversible slices | In progress |
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
-| Deployment composition | Offline bootstrap and read-only fresh-target preflight available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
-| Cut-over evidence | Bounded importer, replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, explicit operator approval | Pending |
+| Deployment composition | Offline bootstrap, read-only fresh-target preflight, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
+| Cut-over evidence | Raw V1 snapshot preservation implemented; V2 replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
 | Cleanup | Remove superseded legacy owners only after parity and cut-over proof | Pending |
 
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
@@ -184,6 +185,13 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
   source clone and a separate terminal V2 target, never the active volume. Its
   canonical SHA-256 and `READY_FOR_FRESH_TARGET` receipt are non-authoritative
   evidence, stale on return, and cannot trigger the importer or activation.
+- The [bounded legacy snapshot importer](V2_LEGACY_SNAPSHOT_IMPORT.md) accepts
+  that exact secret-free receipt only as a strict JSON document, binds it as
+  stale expected evidence, and then revalidates the pair. It copies only the
+  seven raw V1 relations, keeps `open_positions` empty, and never invents V2
+  order, fill, position, account, fee, or generation provenance.
+  Row commit and non-transactional sequence normalization are separate recovery
+  phases; every returned receipt remains stale and non-authoritative.
 - Startup and health must fail closed when the durable database authority,
   generation, credentials, or catalog cannot be proven exactly.
 - Shadow evaluation must be side-effect free. It cannot submit twice or mutate
@@ -202,6 +210,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Offline PostgreSQL bootstrap contract and recovery | [Bootstrap runbook](V2_POSTGRES_BOOTSTRAP.md) |
 | Fresh PostgreSQL 15 SCRAM/HBA rehearsal | [Rehearsal runbook](V2_POSTGRES_REHEARSAL.md) |
 | Stopped-clone/fresh-target admission and rollback phases | [Fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) |
+| Bounded raw V1 copy, resume, sequence recovery, and rollback | [Legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |

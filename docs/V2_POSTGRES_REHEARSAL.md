@@ -163,8 +163,10 @@ M9b.14c3c2 now chooses the fresh-target branch without copying data. Its
 [read-only cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) inspects a stopped
 source clone and a separately bootstrapped target, requires distinct cluster
 system identifiers, and emits only stale-on-return evidence for the next
-bounded importer design. The active source volume remains outside both c3c1
-and c3c2.
+bounded importer. M9b.14c3c3a now supplies that dormant, independently
+revalidated [raw snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) without mounting
+the active source volume, synthesizing V2 ledger history, or changing runtime
+authority. The active source volume remains outside c3c1, c3c2, and c3c3a.
 
 ## Rollback and cleanup
 
@@ -193,8 +195,8 @@ docker compose \
 - runtime startup and health are not fail-closed on the V2 catalog;
 - replay, reconciliation, rollback rehearsal, soak, and operator activation
   approval remain pending.
-- the bounded fresh-target importer and its parity proof remain a later slice;
-  c3c2 performs inspection only.
+- the raw fresh-target import is dormant and non-authoritative; V2 replay and
+  semantic reconciliation of that history remain later slices.
 
 ## Verification status
 

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "batch_size": 512,
+  "source": {
+    "expected_database": "elvis_trading",
+    "expected_role": "elvis_user",
+    "service": "elvis_source_clone"
+  },
+  "target": {
+    "admin_service": "elvis_fresh_target_admin",
+    "migrator_service": "elvis_fresh_target_migrator",
+    "bootstrap_context": {
+      "expected_database": "elvis_paper_v2",
+      "admin_role": "elvis_bootstrap_admin",
+      "roles": {
+        "schema_owner": "elvis_schema_owner",
+        "migrator": "elvis_migrator",
+        "legacy_runtime": "elvis_legacy_runtime",
+        "atomic_runtime": "elvis_atomic_runtime",
+        "activation": "elvis_activation",
+        "readiness": "elvis_readiness",
+        "trainer": "elvis_trainer"
+      },
+      "adoption": null
+    }
+  }
+}
