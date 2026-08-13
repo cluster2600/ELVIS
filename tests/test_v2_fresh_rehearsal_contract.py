@@ -91,6 +91,10 @@ def test_v2_deployment_surface_is_exact_and_dormant() -> None:
     assert bootstrap["profiles"] == ["v2-operator"]
     assert postgres["restart"] == "no"
     assert bootstrap["restart"] == "no"
+    assert bootstrap["user"] == (
+        "${ELVIS_V2_OPERATOR_UID:?set ELVIS_V2_OPERATOR_UID}:"
+        "${ELVIS_V2_OPERATOR_GID:?set ELVIS_V2_OPERATOR_GID}"
+    )
     assert "ports" not in postgres
     assert "ports" not in bootstrap
     assert "depends_on" not in bootstrap

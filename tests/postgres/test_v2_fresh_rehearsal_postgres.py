@@ -59,6 +59,8 @@ def _run(
         if environment is None
         else {
             "ELVIS_V2_OPERATOR_DIR": environment.get("ELVIS_V2_OPERATOR_DIR", ""),
+            "ELVIS_V2_OPERATOR_GID": environment.get("ELVIS_V2_OPERATOR_GID", ""),
+            "ELVIS_V2_OPERATOR_UID": environment.get("ELVIS_V2_OPERATOR_UID", ""),
             "PATH": environment.get("PATH", ""),
         }
     )
@@ -353,6 +355,8 @@ def fresh_rehearsal(tmp_path: Path) -> Rehearsal:
 
     environment = dict(os.environ)
     environment["ELVIS_V2_OPERATOR_DIR"] = str(operator_directory)
+    environment["ELVIS_V2_OPERATOR_UID"] = str(os.getuid())
+    environment["ELVIS_V2_OPERATOR_GID"] = str(os.getgid())
     compose = _compose_command(project)
     rehearsal = Rehearsal(
         compose=compose,
@@ -498,11 +502,14 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
     )
     assert "pg_hba.conf rejects connection" in rejected_other_database.stderr
 
-    postgres_logs = rehearsal.run_compose(
+    postgres_log_result = rehearsal.run_compose(
         "logs",
         "--no-color",
         "postgres",
-    ).stdout.splitlines()
+    )
+    postgres_logs = (
+        postgres_log_result.stdout + "\n" + postgres_log_result.stderr
+    ).splitlines()
     fatal_lines = [line for line in postgres_logs if "FATAL:" in line]
     expected_fatal_fragments = [
         *(
@@ -531,6 +538,8 @@ def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
 
     environment = dict(os.environ)
     environment["ELVIS_V2_OPERATOR_DIR"] = str(operator_directory)
+    environment["ELVIS_V2_OPERATOR_UID"] = str(os.getuid())
+    environment["ELVIS_V2_OPERATOR_GID"] = str(os.getgid())
     rehearsal = Rehearsal(
         compose=_compose_command(project),
         environment=environment,
@@ -570,7 +579,8 @@ def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
             "postgres",
             expected_exit_codes=(1,),
         )
-        logs = rehearsal.run_compose("logs", "--no-color", "postgres").stdout
+        log_result = rehearsal.run_compose("logs", "--no-color", "postgres")
+        logs = log_result.stdout + "\n" + log_result.stderr
         assert "rehearsal volume is not empty" in logs
         assert _volume_fingerprint(volume_name) == before
     finally:

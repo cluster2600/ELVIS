@@ -51,6 +51,8 @@ command:
 ```bash
 export ELVIS_V2_OPERATOR_DIR=/absolute/path/to/elvis-v2-rehearsal-operator
 export ELVIS_V2_REHEARSAL_PROJECT=elvis-v2-rehearsal-review
+export ELVIS_V2_OPERATOR_UID="$(id -u)"
+export ELVIS_V2_OPERATOR_GID="$(id -g)"
 
 docker compose \
   --project-name "$ELVIS_V2_REHEARSAL_PROJECT" \
@@ -61,7 +63,9 @@ docker compose \
 ```
 
 The operator directory path must be absolute and must not be a repository
-directory. Replace the example project name with a collision-free name. The
+directory. The explicit UID/GID makes the read-only operator container run as
+the owner of those mode-0600 files; never replace them with root or relax the
+file modes. Replace the example project name with a collision-free name. The
 fixed internal subnet deliberately permits only one rehearsal at a time; stop
 and clean the first project before starting another.
 

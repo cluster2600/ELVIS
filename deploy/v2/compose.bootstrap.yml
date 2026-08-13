@@ -38,6 +38,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/v2/operator.Dockerfile
+    user: ${ELVIS_V2_OPERATOR_UID:?set ELVIS_V2_OPERATOR_UID}:${ELVIS_V2_OPERATOR_GID:?set ELVIS_V2_OPERATOR_GID}
     restart: "no"
     read_only: true
     cap_drop: ["ALL"]
