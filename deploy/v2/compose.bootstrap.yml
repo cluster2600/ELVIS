@@ -1,0 +1,67 @@
+name: elvis-v2-postgres-rehearsal
+
+services:
+  postgres:
+    profiles: ["v2-rehearsal"]
+    image: postgres:15-alpine@sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f
+    restart: "no"
+    environment:
+      POSTGRES_DB: elvis_paper_v2_rehearsal
+      POSTGRES_USER: elvis_bootstrap_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    entrypoint: [/usr/local/bin/elvis-v2-rehearsal-entrypoint]
+    secrets:
+      - postgres_admin_password
+    volumes:
+      - rehearsal-data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/rehearsal-entrypoint.sh:/usr/local/bin/elvis-v2-rehearsal-entrypoint:ro
+      - ./postgres/write-rehearsal-marker.sh:/docker-entrypoint-initdb.d/999-write-rehearsal-marker.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elvis_bootstrap_admin -d elvis_paper_v2_rehearsal"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      rehearsal:
+        ipv4_address: 10.254.90.2
+
+  bootstrap:
+    profiles: ["v2-operator"]
+    build:
+      context: ../..
+      dockerfile: deploy/v2/operator.Dockerfile
+    restart: "no"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PGSERVICEFILE: /run/operator/pg_service.conf
+      PGPASSFILE: /run/operator/pgpass
+    volumes:
+      - ${ELVIS_V2_OPERATOR_DIR:?set ELVIS_V2_OPERATOR_DIR}:/run/operator:ro
+    networks: [rehearsal]
+
+networks:
+  rehearsal:
+    internal: true
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 10.254.90.0/28
+
+volumes:
+  rehearsal-data:
+    labels:
+      org.elvis.v2.scope: fresh-rehearsal-only
+
+secrets:
+  postgres_admin_password:
+    file: ${ELVIS_V2_OPERATOR_DIR:?set ELVIS_V2_OPERATOR_DIR}/postgres_admin_password

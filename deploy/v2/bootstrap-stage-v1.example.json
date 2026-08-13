@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "expected_database": "elvis_paper_v2_rehearsal",
+  "admin_role": "elvis_bootstrap_admin",
+  "roles": {
+    "schema_owner": "elvis_v2_schema_owner",
+    "migrator": "elvis_v2_migrator",
+    "legacy_runtime": "elvis_v2_legacy_runtime",
+    "atomic_runtime": "elvis_v2_atomic_runtime",
+    "activation": "elvis_v2_activation",
+    "readiness": "elvis_v2_readiness",
+    "trainer": "elvis_v2_trainer"
+  },
+  "services": {
+    "admin": "elvis_v2_admin",
+    "schema_owner": null,
+    "migrator": null,
+    "legacy_runtime": null,
+    "atomic_runtime": null,
+    "activation": null,
+    "readiness": null,
+    "trainer": null
+  },
+  "adoption": null
+}
