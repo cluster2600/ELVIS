@@ -25,6 +25,17 @@ the repo root to keep the top level clean.
 |---|---|
 | `setup_secure_config.sh` | Set up encrypted/secure config loading. |
 
+## Offline administration (Python)
+
+| Module | Purpose |
+|---|---|
+| `python -m scripts.postgres_bootstrap` | Reconcile the dormant V2 PostgreSQL roles/catalog from a strict non-secret JSON manifest and external libpq services. It is one-shot, operator-confirmed, and never runs at application startup. |
+
+See the [V2 PostgreSQL bootstrap runbook](../docs/V2_POSTGRES_BOOTSTRAP.md) for
+the exact flags, version-1 configuration schema, external `PGSERVICEFILE` and
+`PGPASSFILE` contract, receipts, exit codes, and commit-unknown recovery. A
+`COMPLETE` receipt does not deploy or activate V2.
+
 ## Vault / secrets (Python)
 
 | Script | Purpose |

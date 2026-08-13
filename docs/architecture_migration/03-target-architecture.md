@@ -256,7 +256,8 @@ it still exposes no owner, transition, or runtime path. M9b.14b2 makes the
 dormant atomic owner generation-aware, M9b.14b3 adds the dormant activation
 contract, and M9b.14c1 moves that adapter behind two narrowly callable database
 capabilities. M9b.14c2 adds the dormant, operator-driven role and catalog
-bootstrap around those capabilities; neither slice is wired into production.
+bootstrap around those capabilities. M9b.14c3b exposes that library through a
+dormant, one-shot offline CLI; none of these slices is wired into production.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1438,13 +1439,34 @@ failed commit through an independent phase-specific readback. Any non-exact or
 unreadable result is a typed commit-unknown or drift failure, never an inferred
 success.
 
-This bootstrap has no CLI, environment lookup, startup hook, container wiring,
-credential writer, session terminator, activation call, or runtime consumer.
-M9b.14c3 must supply the offline deployment workflow: Compose/Ansible role and
-SCRAM-secret provisioning, restrictive HBA/network policy, credential rotation,
-real-volume rehearsal, an exclusive DDL/role-administration window, and removal
-of migration or other DDL authority from runtime processes. M9b.14d must then
-compose the dedicated runtime identities
+M9b.14c3b adds only the offline invocation boundary. The command is
+`python -m scripts.postgres_bootstrap --config <bootstrap-v1.json> --apply
+--confirm-exclusive-ddl-role-window`, with the separate
+`--confirm-old-runtime-demotion` flag required for an adoption manifest that
+requests old-role demotion. The version-1 JSON schema is exact: database and
+admin identity, the seven-role manifest, an optional exact adoption manifest,
+and a service map. That map contains one required admin libpq service name,
+`null` for the `NOLOGIN` schema owner, and a service name or `null` for each of
+the six login roles. It cannot contain a DSN, host, user, password, or other
+connection value. `PGSERVICEFILE` and `PGPASSFILE` remain external,
+operator-controlled inputs.
+
+The CLI serializes only the five secret-free receipt fields. `COMPLETE`,
+`CREDENTIALS_REQUIRED`, and `DEMOTION_REQUIRED` use exits `0`, `10`, and `11`;
+input, storage, drift, migration, commit-unknown, and unexpected internal
+failures use `2`, `20`, `21`, `22`, `23`, and `70`. A commit-unknown error
+reports only its durable phase. There is no automatic retry: an operator must
+preserve the exclusive window, restore readback, inspect the named phase, and
+make a new explicit invocation only after reviewing the evidence. The exact
+configuration, flow, receipts, and recovery procedure are in the
+[offline bootstrap runbook](../V2_POSTGRES_BOOTSTRAP.md).
+
+This slice still has no credential writer, session terminator, activation call,
+startup hook, container wiring, or runtime consumer. The remaining c3
+deployment workflow must supply Compose/Ansible role and SCRAM-secret
+provisioning, restrictive HBA/network policy, credential rotation,
+real-volume rehearsal, and removal of migration or other DDL authority from
+runtime processes. M9b.14d must then compose the dedicated runtime identities
 with fail-closed startup and health gates while keeping bootstrap and activation
 offline. Reconciliation, bounded replay, side-effect-free shadow comparison,
 stale-writer removal, tested pause/rollback, soak evidence, and explicit
