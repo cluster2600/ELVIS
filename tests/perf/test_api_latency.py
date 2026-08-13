@@ -1,4 +1,4 @@
-"""API latency benchmark (documented in docs/comprehensive_improvements.md).
+"""API latency benchmark for the compatibility monitoring API.
 
 A lightweight regression tripwire — not a load generator and not flaky: it
 measures p50/p95 wall-clock over N calls to the trade-history API's read

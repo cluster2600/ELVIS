@@ -11,13 +11,11 @@ the repo root to keep the top level clean.
 
 | Script | Purpose |
 |---|---|
-| `run_elvis.sh` | Create/activate `venv314` and start the bot (paper mode). |
-| `run_api.sh` | Start the trading REST API. |
-| `run_console_dashboard.sh` | Launch the curses console dashboard. |
+| `run_elvis.sh` | Thin Python 3.14 launcher for the retained paper bot. |
+| `run_api.sh` | Thin Python 3.14 launcher for the compatibility REST API. |
 | `run_research_strategy.sh` | Run the bot with the research-based strategy (`STRATEGY_MODE=research`). |
 | `run_tests.sh` | Run the test suite via `venv314`'s pytest. |
-| `run_training.sh` | Unified training entry point (see `../docs/UNIFIED_TRAINING_GUIDE.md`). |
-| `start_bot_with_vault.sh` | Start the bot with Vault/OpenBao auth (requires `VAULT_DEV_ROOT_TOKEN_ID`). |
+| `run_training.sh` | Thin Python 3.14 paper-training entry point (see `../docs/UNIFIED_TRAINING_GUIDE.md`). |
 
 ## Offline administration (Python)
 
@@ -62,7 +60,7 @@ no-opening, no-provisioning, and no-activation boundary.
 | `setup_vault.py` | Vault/OpenBao setup + `.env` migration. |
 | `vault_admin.py` | Manage secrets (`--list`/`--add`/`--update`/`--delete`/`--backup`/`--test`). |
 
-## ML / models (Python — need the older-Python ML stack)
+## ML / models
 
 | Script | Purpose |
 |---|---|
@@ -71,20 +69,6 @@ no-opening, no-provisioning, and no-activation boundary.
 The former random-data CoreML generator was removed. New model producers must
 train on causal data and emit the validated feature manifest used at inference.
 
-## Apple-container workflow (macOS)
-
-A self-contained group for running ELVIS in Apple's native `container` CLI. Start
-with `apple_container_native.sh` (native CLI) or `apple_container_elvis.sh`
-(compose-style); they generate helper scripts (`start_elvis_apple.sh`,
-`stop_elvis.sh`, `docker-compose.apple.yml`) into the repo root at setup time.
-
-| Script | Purpose |
-|---|---|
-| `apple_container_native.sh` | Native Apple `container` CLI runner (`setup`/`start`/`stop`/`status`/`logs`). |
-| `apple_container_elvis.sh` | Compose-style Apple-container runner. |
-| `setup_apple_containers.sh` | One-time setup (generates the compose + start/stop helpers). |
-| `fix_apple_container_build.sh` | Quick fix for Apple-container build issues. |
-| `test_apple_container.sh` | Smoke-test the native Apple-container integration. |
-| `test_container_setup.sh` | Verify container setup prerequisites. |
-
-See `../APPLE_NATIVE_CONTAINER_GUIDE.md` and `../README_APPLE_CONTAINERS.md`.
+Python 3.14 is the only supported interpreter. Optional dependencies that do
+not provide a compatible wheel are skipped; an older interpreter is not a
+supported workaround.

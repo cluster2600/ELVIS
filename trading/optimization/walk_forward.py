@@ -103,7 +103,7 @@ def sma_crossover_backtest(
     try:
         short_window = int(short_window)
         long_window = int(long_window)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.warning(
             "sma_crossover_backtest: non-integer SMA windows (%r, %r); "
             "returning neutral result",
@@ -240,7 +240,7 @@ class WalkForwardOptimizer:
             return float("-inf")
         try:
             value = float(result[self.metric])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.warning(
                 "backtest_fn metric %r is not numeric (%r) for params %s; scoring -inf",
                 self.metric,

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 LLM-Powered Market Analysis and Reasoning for ELVIS Trading System
 Advanced AI integration with Large Language Models for intelligent trading decisions

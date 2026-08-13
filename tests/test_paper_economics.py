@@ -854,7 +854,7 @@ def _uses_paper_economics(source: str) -> bool:
                         resolved = importlib.util.resolve_name(target, package)
                         if resolved in {module, "trading.domain", "trading"}:
                             return True
-                    except (ImportError, ValueError):
+                    except ImportError, ValueError:
                         pass
     return False
 

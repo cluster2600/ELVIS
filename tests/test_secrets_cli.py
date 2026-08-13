@@ -1,7 +1,7 @@
 """Tests for the utils/secrets_manager.py command-line entry point.
 
-The docs (docs/implementation_summary.md) promise ``python utils/secrets_manager.py``
-runs an interactive secrets setup. These tests cover the argparse-driven
+The command ``python utils/secrets_manager.py`` runs an interactive secrets
+setup. These tests cover the argparse-driven
 ``main()`` with a mocked EnhancedSecretsManager, plus a real subprocess smoke
 test, and assert that:
 

@@ -84,7 +84,7 @@ class LegacyPaperExecutionAdapter:
         try:
             quantity = float(intent.quantity)
             reference_price = float(intent.reference_price)
-        except (OverflowError, ValueError):
+        except OverflowError, ValueError:
             return self._not_sent(intent, "order values cannot be represented as float")
         if (
             not math.isfinite(quantity)

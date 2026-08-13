@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Training script that works with existing PostgreSQL setup
 No Vault required - uses your existing databases
@@ -25,29 +25,19 @@ def check_postgres_connection():
     """Check PostgreSQL connection and find the right database"""
     print("🗄️  Checking PostgreSQL connection...")
 
-    # Try different database configurations
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password:
+        print("❌ POSTGRES_PASSWORD must be supplied externally")
+        return None, None, 0
+
     configs = [
         {
-            "host": "localhost",
-            "port": 5432,
-            "user": "maxime",
-            "password": "",  # Try without password first
-            "dbname": "elvis_trading",
-        },
-        {
-            "host": "localhost",
-            "port": 5432,
-            "user": "postgres",
-            "password": "elvis_password",
-            "dbname": "elvis_trading",
-        },
-        {
-            "host": "localhost",
-            "port": 5432,
-            "user": "postgres",
-            "password": "",
-            "dbname": "trading_bot",
-        },
+            "host": os.getenv("POSTGRES_HOST", "localhost"),
+            "port": int(os.getenv("POSTGRES_PORT", "5432")),
+            "user": os.getenv("POSTGRES_USER", "postgres"),
+            "password": password,
+            "dbname": os.getenv("POSTGRES_DBNAME", "elvis_trading"),
+        }
     ]
 
     for config in configs:

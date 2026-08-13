@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Training script that completely bypasses Vault authentication
 Uses environment variables only for training purposes
@@ -22,15 +22,12 @@ def setup_training_environment():
     os.environ["USE_VAULT"] = "false"
     os.environ["VAULT_AVAILABLE"] = "false"
 
-    # Set training credentials (these are safe for paper trading)
-    os.environ["BINANCE_API_KEY"] = "training_mode_key"
-    os.environ["BINANCE_API_SECRET"] = "training_mode_secret"
-
-    # Database settings for training
+    # Connection identity and secrets must already be supplied by the caller.
+    if not os.getenv("POSTGRES_PASSWORD"):
+        raise RuntimeError("POSTGRES_PASSWORD must be supplied externally")
     os.environ.setdefault("POSTGRES_HOST", "localhost")
     os.environ.setdefault("POSTGRES_PORT", "5432")
     os.environ.setdefault("POSTGRES_USER", "postgres")
-    os.environ.setdefault("POSTGRES_PASSWORD", "training_password")
     os.environ.setdefault("POSTGRES_DBNAME", "trading_db")
 
     # Redis settings
@@ -40,28 +37,6 @@ def setup_training_environment():
     print("✅ Training environment configured")
 
 
-def patch_imports():
-    """Patch Python path to avoid Vault imports"""
-    # Add current directory to path
-    current_dir = Path(__file__).resolve().parent.parent
-    if str(current_dir) not in sys.path:
-        sys.path.insert(0, str(current_dir))
-
-    # Create a mock vault client if needed
-    mock_vault = """
-class VaultClient:
-    def __init__(self, *args, **kwargs):
-        pass
-    def authenticate(self):
-        return False
-    def get_secret(self, *args, **kwargs):
-        return None
-"""
-
-    with open("vault_mock.py", "w") as f:
-        f.write(mock_vault)
-
-
 def run_training(args):
     """Run training with vault-free environment"""
     print("🚀 Starting Vault-free training...")
@@ -69,7 +44,6 @@ def run_training(args):
 
     # Setup environment
     setup_training_environment()
-    patch_imports()
 
     # Build training command
     cmd_parts = [

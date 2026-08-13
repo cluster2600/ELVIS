@@ -330,7 +330,7 @@ class LLMEnhancedStrategy(BaseStrategy):
                 try:
                     pd.to_numeric(df[col], errors="raise")
                     feature_columns.append(col)
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     continue
 
         return feature_columns

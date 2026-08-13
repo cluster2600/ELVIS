@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Enhanced Binance executor with BNB trading support and BNB fee payment optimization
 """

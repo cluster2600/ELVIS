@@ -13,7 +13,11 @@ import yaml
 _REPOSITORY = Path(__file__).resolve().parents[1]
 _DEPLOYMENT = _REPOSITORY / "deploy" / "v2"
 _COMPOSE = _DEPLOYMENT / "compose.bootstrap.yml"
+_PREVIEW_COMPOSE = _DEPLOYMENT / "compose.preview.yml"
 _OPERATOR_DOCKERFILE = _DEPLOYMENT / "operator.Dockerfile"
+_OPERATOR_REQUIREMENTS = _DEPLOYMENT / "requirements.operator.txt"
+_PREVIEW_ENV = _DEPLOYMENT / "v2-preview.env.example"
+_PREVIEW_SERVICE_FILE = _DEPLOYMENT / "pg_service.preview.conf.example"
 _HBA = _DEPLOYMENT / "postgres" / "pg_hba.conf"
 _REHEARSAL_ENTRYPOINT = _DEPLOYMENT / "postgres" / "rehearsal-entrypoint.sh"
 _MARKER_WRITER = _DEPLOYMENT / "postgres" / "write-rehearsal-marker.sh"
@@ -51,7 +55,11 @@ _LOGIN_ROLES = (
 )
 _EXPECTED_FILES = {
     _COMPOSE,
+    _PREVIEW_COMPOSE,
     _OPERATOR_DOCKERFILE,
+    _OPERATOR_REQUIREMENTS,
+    _PREVIEW_ENV,
+    _PREVIEW_SERVICE_FILE,
     _HBA,
     _REHEARSAL_ENTRYPOINT,
     _MARKER_WRITER,
@@ -111,6 +119,12 @@ def test_v2_deployment_surface_is_exact_and_dormant() -> None:
     assert bootstrap["read_only"] is True
     assert bootstrap["cap_drop"] == ["ALL"]
     assert bootstrap["security_opt"] == ["no-new-privileges:true"]
+    assert bootstrap["entrypoint"] == [
+        "python",
+        "-m",
+        "scripts.v2_operator",
+        "bootstrap",
+    ]
     assert postgres["entrypoint"] == ["/usr/local/bin/elvis-v2-rehearsal-entrypoint"]
     assert compose["volumes"] == {
         "rehearsal-data": {"labels": {"org.elvis.v2.scope": "fresh-rehearsal-only"}}
@@ -123,9 +137,10 @@ def test_v2_deployment_surface_is_exact_and_dormant() -> None:
         "FROM python:3.14-slim@sha256:"
         "b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1"
     )
-    assert 'RUN pip install --no-cache-dir "psycopg2-binary==2.9.12"' in dockerfile
-    assert 'ENTRYPOINT ["python", "-m", "scripts.postgres_bootstrap"]' in dockerfile
-    assert not re.search(r"(?im)^\s*CMD\b", dockerfile)
+    assert "--require-hashes" in dockerfile
+    assert "requirements.operator.txt" in dockerfile
+    assert 'ENTRYPOINT ["python", "-m", "scripts.v2_operator"]' in dockerfile
+    assert 'CMD ["--help"]' in dockerfile
     assert "main.py" not in dockerfile
 
     entrypoint = _REHEARSAL_ENTRYPOINT.read_text(encoding="utf-8")

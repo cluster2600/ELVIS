@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Comprehensive Binance fee calculator for futures trading with leverage
 """

@@ -7,10 +7,13 @@ pandas
 scipy
 scikit-learn
 matplotlib
+seaborn
 tqdm
+rich
 pyyaml
 ccxt
 ta
+TA-Lib==0.7.1
 requests
 
 # Web server and API
@@ -33,7 +36,6 @@ redis
 prometheus-client
 SQLAlchemy
 websocket-client
-ta
 psycopg2-binary
 
 # Other important libraries
@@ -45,6 +47,3 @@ keyring
 # HashiCorp Vault integration
 hvac
 cryptography
-
-# Protobuf compatibility fix for TensorFlow
-protobuf>=3.20.3,<6.0.0

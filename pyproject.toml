@@ -4,11 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elvis-trading-bot"
-version = "0.3.0"
+version = "2.0.0a1"
 description = "ELVIS algorithmic trading bot"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14,<3.15"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
+  "tenacity",
   "numpy",
   "pandas",
   "scipy",
@@ -20,6 +25,7 @@ dependencies = [
   "pyyaml",
   "ccxt",
   "ta",
+  "TA-Lib==0.7.1",
   "requests",
   "Flask",
   "Flask-CORS",
@@ -43,20 +49,16 @@ dependencies = [
   "keyring",
   "hvac",
   "cryptography",
-  "protobuf>=3.20.3,<6.0.0",
 ]
 
 [project.optional-dependencies]
-# ML add-ons used by the ensemble/DRL paths (all import-guarded in code).
-# TensorFlow is intentionally absent: no Python 3.14 wheel yet (checked
-# 2026-07), so its training path remains isolated in Python 3.10.
+# Python 3.14 ML add-ons used by the supported PyTorch, ensemble, and DRL paths.
 ml = [
-  "torch",
-  "gymnasium",
-  "openai",
-  "TA-Lib",
-  "xgboost",
-  "lightgbm",
+  "torch==2.13.0",
+  "gymnasium==1.3.0",
+  "openai==3.0.0",
+  "xgboost==3.4.0",
+  "lightgbm==4.7.0",
 ]
 test = [
   "pytest",
@@ -76,10 +78,13 @@ markers = [
     "perf: API latency/load benchmarks (run explicitly with -m perf)",
     "postgres: isolated PostgreSQL integration tests (requires an explicit admin DSN)",
 ]
+filterwarnings = [
+    "error::pytest.PytestReturnNotNoneWarning",
+]
 
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py314"]
 
 [tool.isort]
 profile = "black"

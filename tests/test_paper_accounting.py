@@ -971,7 +971,7 @@ def _uses_paper_accounting(source: str) -> bool:
                         "trading",
                     }:
                         return True
-                except (ImportError, ValueError):
+                except ImportError, ValueError:
                     pass
     return False
 

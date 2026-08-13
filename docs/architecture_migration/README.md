@@ -6,9 +6,9 @@ approach built around pure typed decisions, immutable journal facts, atomic
 state owners, a generation-bound activation fence, and least-authority
 PostgreSQL identities.
 
-> **Programme status:** in progress on
-> `codex/elvis-architecture-migration`; not released, deployed, or activated.
-> The compatibility paper runtime remains authoritative and `ACTIVE` remains a
+> **Programme status:** the Python 3.14 operator preview is installable, but it
+> is not a deployed or activated V2 runtime. The compatibility paper process
+> remains authoritative and `ACTIVE` remains a
 > **NO-GO**. See the concise [V2 overview](../V2_ARCHITECTURE.md) before using
 > the detailed records below.
 
@@ -34,7 +34,7 @@ running bot.
 |---|---|---|
 | Typed domain, order service, feature contracts, and selected policy/risk boundaries | Implemented incrementally | Some boundaries serve the compatibility runtime |
 | Durable journals, replay, account ledger, atomic owners, readiness, fence, generations, activation, and role/catalog bootstrap | Implemented and tested | Dormant; no running consumer or authority |
-| Offline bootstrap, stopped-clone/fresh-target preflight, bounded raw V1 import, and read-only imported-vs-operator-hypothesis review | Implemented locally; acceptance gates in progress | Dormant; review receipts are cross-snapshot, source-unauthenticated, stale, and non-authoritative; no match or account opening |
+| Offline bootstrap, stopped-clone/fresh-target preflight, bounded raw V1 import, and read-only imported-vs-operator-hypothesis review | Implemented and packaged in the preview | Dormant; review receipts are cross-snapshot, source-unauthenticated, stale, and non-authoritative; no match or account opening |
 | Source/runtime provenance authentication, coherent enforced review, dedicated production composition, opening-provenance selection, V2 replay of imported history, shadow comparison, rollback rehearsal, soak, and approval | Pending evidence | Blocks `ACTIVE` |
 
 ## Evidence snapshot

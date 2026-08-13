@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 LLM-Enhanced Training for ELVIS Trading System
 Integrates local LLM analysis directly into the training process
@@ -363,7 +363,7 @@ sentiment:0.X confidence:0.X bullish:0.X risk:0.X volatility:0.X trend:0.X"""
                     value = float(matches[0])
                     # Clamp to [0, 1] range
                     features[feature_name] = max(0.0, min(1.0, value))
-                except (ValueError, IndexError):
+                except ValueError, IndexError:
                     pass
 
         return features

@@ -75,7 +75,7 @@ class CheckpointManager:
         """
         try:
             metadata = self._load_metadata()
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             # Corrupt/unreadable metadata: start clean rather than crash.
             self._init_metadata()
             return

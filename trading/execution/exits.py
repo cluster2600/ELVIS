@@ -295,7 +295,7 @@ def dynamic_take_profit(
         )
         try:
             return float(entry_price)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0.0
 
     pct_map = dict(DEFAULT_REGIME_TP_PCT)

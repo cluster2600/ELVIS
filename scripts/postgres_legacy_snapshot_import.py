@@ -111,7 +111,7 @@ def _read_json(path: Path) -> dict[str, Any]:
         )
     except _CliInputError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError):
+    except OSError, UnicodeError, ValueError, RecursionError:
         raise _CliInputError("invalid input file") from None
     if type(document) is not dict:
         raise _CliInputError("input file must contain an object")

@@ -125,6 +125,26 @@ class TestSharedResolver:
 
         assert api.resolve_dashboard_api_key is resolve_dashboard_api_key
 
+    def test_trade_history_market_polling_start_is_explicit_and_idempotent(
+        self, monkeypatch
+    ):
+        import trading.utils.trade_history_api as api
+
+        thread = MagicMock()
+        thread_type = MagicMock(return_value=thread)
+        monkeypatch.setattr(api.threading, "Thread", thread_type)
+        monkeypatch.setattr(api, "_price_fetcher_started", False)
+
+        api._start_price_fetcher_once()
+        api._start_price_fetcher_once()
+
+        thread_type.assert_called_once_with(
+            target=api.initialize_price_fetcher,
+            name="elvis-price-fetcher",
+            daemon=True,
+        )
+        thread.start.assert_called_once_with()
+
 
 class TestNetCache:
     def test_second_call_within_ttl_hits_cache(self, dash):

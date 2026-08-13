@@ -608,7 +608,7 @@ class PostgresLegacySnapshotReconciliation:
                     hypothesis_balances,
                 ),
             )
-        except (TypeError, ValueError, ArithmeticError):
+        except TypeError, ValueError, ArithmeticError:
             return _blocked_receipt(
                 context,
                 import_receipt,
@@ -624,7 +624,7 @@ class PostgresLegacySnapshotReconciliation:
                 context,
                 candidates,
             )
-        except (TypeError, ValueError, ArithmeticError):
+        except TypeError, ValueError, ArithmeticError:
             return _blocked_receipt(
                 context,
                 import_receipt,

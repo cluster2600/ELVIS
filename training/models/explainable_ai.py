@@ -15,8 +15,8 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
-# Optional dependencies. These have no Python 3.14 wheels (or are heavy extras)
-# and are absent in CI / minimal environments. Guard them so this module always
+# Optional dependencies are absent from CI and minimal environments. Guard them
+# so this module always
 # imports; the explainer classes and generate_explanations() degrade gracefully
 # when the corresponding library is missing.
 try:

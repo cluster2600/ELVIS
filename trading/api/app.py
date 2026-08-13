@@ -6,7 +6,7 @@ Provides endpoints for monitoring, control, and data access
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Dict, Optional
 
@@ -16,6 +16,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+from trading import __version__ as ELVIS_VERSION
 from utils.logger_config import get_logger
 from utils.paper_trade_db import PaperTradeDB
 
@@ -132,7 +133,7 @@ def health_check():
         {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
+            "version": ELVIS_VERSION,
         }
     )
 
@@ -161,7 +162,7 @@ def login():
         payload = {
             "user": username,
             "role": role,
-            "exp": datetime.utcnow() + timedelta(hours=24),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
         }
         token = jwt.encode(payload, app.config["SECRET_KEY"], algorithm="HS256")
 
@@ -205,6 +206,9 @@ def start_bot():
     data = request.get_json() or {}
     mode = data.get("mode", "paper")
     strategy = data.get("strategy", "ensemble")
+
+    if mode != "paper":
+        return jsonify({"error": "Only paper mode is supported"}), 400
 
     # In a real implementation, this would start the actual bot process
     bot_state["running"] = True

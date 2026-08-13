@@ -1,213 +1,66 @@
-# Paper Trading Setup Documentation
+# Compatibility paper runtime
 
-> **Compatibility-runtime guide.** This setup starts the current paper runtime;
-> it does not compose or activate the dormant V2 durable owner. See the
-> [V2 architecture](V2_ARCHITECTURE.md) and its
-> [cut-over gates](architecture_migration/04-migration-roadmap.md). Paper remains
-> the only executable mode and `ACTIVE` remains a **NO-GO**.
+> This guide describes the source-only compatibility process retained for
+> rollback. It is not the V2 installer, a production deployment guide, or live
+> trading. `ACTIVE` remains a **NO-GO**.
 
-## Overview
+## Prerequisites
 
-The ELVIS trading bot supports paper trading mode with multi-asset balances. In paper trading mode, the bot starts with **$1000 USDT** and **$1000 BNB** for a total portfolio value of **$2000**.
+- Python 3.14;
+- PostgreSQL reachable through the variables used by `config/config.py`;
+- a local Vault/OpenBao instance or another reviewed secret source; and
+- Binance testnet credentials if a testnet market-data path is required.
 
-## Initial Balances
+Use [INSTALL_V2.md](../INSTALL_V2.md) for the packaged V2 operator preview.
 
-- **USDT**: $1,000.00 (for general cryptocurrency trading)
-- **BNB**: $1,000.00 (for Binance ecosystem trading and fee optimization)
-- **Total Portfolio**: $2,000.00
+## Source setup
 
-## Configuration
-
-### Environment Variables
 ```bash
-TRADING_MODE=paper  # paper -> Binance testnet endpoint; anything else -> live api.binance.com
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+
+export TRADING_MODE=paper
+python main.py --mode paper
 ```
 
-`TRADING_MODE` (read in `trading/config/api_config.py`) only selects which
-Binance REST endpoint the bot talks to: `paper` points `API_CONFIG` at
-`https://testnet.binance.vision` (using `TESTNET_API_SPOT_KEY` /
-`TESTNET_API_SPOT_SECRET`), any other value points it at
-`https://api.binance.com`.
+`TRADING_MODE=paper` selects the configured Binance testnet endpoint.
+`main.py --mode paper` selects the only executable bot mode. The retained
+`live` CLI value fails before bootstrap because this checkout has no validated
+live-submission capability.
 
-The bot's execution behaviour is selected separately by the `--mode` argument
-of `main.py`. `paper` is the only executable mode. The legacy `live` CLI value
-is rejected before bootstrap because the current executor exposes no validated
-live-submission capability. For a normal paper-trading session leave both
-settings at their paper defaults.
+## Balances and resets
 
-### Database Configuration
-The paper trading system uses PostgreSQL to track:
-- Account balances for multiple assets
-- Trade history
-- Open positions
-- Performance metrics
+The compatibility code contains two different historical balance conventions:
+`config/config.py` defaults to 100 USDT and no BNB seed, while
+`utils/paper_trade_db.py` and the reset utilities retain an older 1,000 USDT +
+1,000 BNB database convention. Until that ownership is reconciled, do not
+present either as the V2 opening balance and do not infer performance from a
+dashboard fallback.
 
-## Scripts
+The reset command is destructive to compatibility paper data:
 
-### Reset Paper Trading
 ```bash
-python scripts/reset_paper_trading.py
-```
-This script:
-- Clears all trade history
-- Clears all open positions
-- Resets USDT balance to $1000
-- Resets BNB balance to $1000
-- Initializes database structure
-
-### Check Current Balances
-```bash
-python scripts/check_paper_balances.py
-```
-This script displays:
-- Current balance for each asset
-- Total portfolio value
-- Trading status
-
-## Features
-
-### Multi-Asset Support
-- Trades the primary pairs concurrently (BTCUSDT + BNBUSDT), capped at
-  `MAX_CONCURRENT_PAIRS = 2` (`config/config.py`, `SYMBOLS_CONFIG`)
-- Tracks individual asset balances in `np.account_balances`
-- Support for USDT and BNB trading pairs
-
-### BNB Fee Optimization
-Controlled by the BNB flags in `config/config.py` and implemented in
-`trading/execution/enhanced_binance_executor.py`:
-- `ENABLE_BNB_FEES` — pay trading fees in BNB for a discount
-  (10% on futures, 25% on spot)
-- `AUTO_BUY_BNB` / `MIN_BNB_BALANCE` — automatically top up BNB
-  (`buy_bnb_for_fees()`) when the balance drops below the minimum
-- `MAX_BNB_BUY_PERCENT`, `BNB_REBALANCE_THRESHOLD` — cap and threshold for the
-  auto-buy / rebalance behaviour
-
-### Performance Tracking
-- Real-time P&L calculation
-- Trade history and statistics
-- Portfolio performance metrics
-
-## Trading Pairs
-
-Configured in `config/config.py` under `SYMBOLS_CONFIG`.
-
-### Primary Pairs (`PRIMARY_SYMBOLS`)
-- BTCUSDT (Bitcoin trading)
-- BNBUSDT (BNB trading)
-
-### Secondary Pairs (`SECONDARY_SYMBOLS`, optional)
-- ETHUSDT (Ethereum trading)
-- ADAUSDT (Cardano trading)
-
-## Benefits of Starting with BNB
-
-1. **Fee Discounts**: BNB provides trading fee discounts on Binance
-2. **Diversification**: Start with exposure to both USDT and BNB
-3. **Ecosystem Benefits**: Access to Binance ecosystem features
-4. **Fee Optimization**: Automatic use of BNB for fee payments
-
-## Usage
-
-1. **Initialize Paper Trading**:
-   ```bash
-   python scripts/reset_paper_trading.py
-   ```
-
-2. **Check Status**:
-   ```bash
-   python scripts/check_paper_balances.py
-   ```
-
-3. **Start Trading**:
-   ```bash
-   # main.py already defaults to --mode paper; TRADING_MODE=paper keeps
-   # REST calls on the Binance testnet endpoint.
-   export TRADING_MODE=paper
-
-   # Start the bot (equivalent to: python main.py --mode paper)
-   python main.py
-   ```
-
-## Database Schema
-
-### Account Balances Table
-```sql
-CREATE TABLE np.account_balances (
-    id SERIAL PRIMARY KEY,
-    asset TEXT UNIQUE NOT NULL,
-    balance REAL NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP DEFAULT NOW()
-);
+python -m scripts.reset_paper_trading
 ```
 
-### Initial Data
-```sql
-INSERT INTO np.account_balances (asset, balance) VALUES 
-('USDT', 1000.0),
-('BNB', 1000.0);
-```
+Run it only against an explicitly selected disposable paper database after
+stopping the bot. A process restart is not a reset. The V2 importer and
+reconciliation tools never use this reset path and never invent an opening
+balance.
 
-### Session resets table
+## Safety limits
 
-```sql
-CREATE TABLE np.trading_session_resets (
-    id SERIAL PRIMARY KEY,
-    reset_timestamp TIMESTAMP DEFAULT NOW(),
-    reason TEXT
-);
-```
+- Paper fills are simulations; they do not prove venue behaviour, slippage, or
+  a live order path.
+- Compatibility and V2 accounting are not interchangeable.
+- Root Compose contains shared development credentials and is not approved for
+  production or V2 cut-over.
+- No win rate, Sharpe ratio, profit, or equivalence-to-live claim is made.
+- Secrets must stay outside Git, command arguments, logs, and receipts. See
+  [SECURITY.md](../SECURITY.md).
 
-**How it works.** When the bot is stopped, `reset_trading_session()`
-(in `utils/paper_trade_db.py`) inserts a row into
-`np.trading_session_resets` with the current timestamp. The dashboards
-and trade-history APIs (`native_console_dashboard.py`,
-`utils/console_dashboard.py`, `trading/utils/trade_history_api.py`,
-`trading/execution/binance_executor.py`) then read the most recent
-`reset_timestamp` and only count trades *after* it, so realized P&L
-starts fresh for the next session while all historical trades stay in
-`np.trades`.
-
-**How to use.** The table is created automatically by `init_db()` and
-`init_db_with_balances()` (`CREATE TABLE IF NOT EXISTS`), so it exists on
-fresh databases before the first reset — no manual migration is needed.
-On a database created before this table existed, simply run either init
-function (or `python scripts/reset_paper_trading.py`, which calls
-`init_db_with_balances()`) once to create it. To start a fresh P&L
-session programmatically:
-
-```python
-from utils.paper_trade_db import reset_trading_session
-reset_trading_session()  # inserts a new reset marker; historical trades kept
-```
-
-Within an existing `np` schema, database initialization is non-destructive:
-calling `init_db()` again creates missing tables but preserves
-`np.open_positions`. Schema creation and versioned migrations are introduced by
-the later persistence migration. Use the explicit reset script below when
-positions and balances really must be cleared; restarting the bot is not a
-reset operation.
-
-## Monitoring
-
-The paper trading system provides real-time monitoring of:
-- Current balances
-- Open positions
-- Trade performance
-- Fee costs
-- Portfolio growth
-
-## Reset Instructions
-
-To start fresh paper trading:
-
-1. Stop the trading bot if running
-2. Run the reset script: `python scripts/reset_paper_trading.py`
-3. Verify balances: `python scripts/check_paper_balances.py`
-4. Restart the trading bot in paper mode
-
-## Notes
-
-- Paper trading uses simulated trades, no real money is involved
-- All trading logic is identical to live trading
-- Performance metrics accurately reflect trading strategy effectiveness
-- Database persistence ensures trade history and open positions survive restarts
+The [migration roadmap](architecture_migration/04-migration-roadmap.md) lists
+the provenance, replay, composition, rollback, soak, and approval gates that
+still prevent V2 activation.

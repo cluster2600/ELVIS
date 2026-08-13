@@ -1,10 +1,9 @@
 """Tests that training modules import when optional ML deps are absent.
 
-The training stack references several heavy / platform-specific libraries that
-have no Python 3.14 wheels and are not installed in CI:
+The training stack references several optional libraries that are not included
+in the canonical ELVIS dependency sets:
 
     - optuna       (AutoML hyperparameter search)
-    - tensorflow   (+ keras callbacks)
     - shap         (SHAP explanations)
     - lime         (LIME explanations)
 
@@ -25,12 +24,11 @@ import types
 
 import pytest
 
-# torch is a REQUIRED (not optional) training dependency and has no Python 3.14
-# wheel, so it is absent in CI. These tests exercise the OPTIONAL-dep guards
-# (tf/optuna/shap/lime) on modules that still need torch to import, so skip the
-# whole file when torch is unavailable rather than erroring at collection.
+# Torch belongs to the ``ml`` extra and is absent from the base CI environment.
+# Skip this module there rather than failing collection; the Python 3.14
+# contract and CI separately prove that the complete extra resolves on 3.14.
 pytest.importorskip(
-    "torch", reason="training modules require torch (core dep, absent in CI)"
+    "torch", reason="training modules require the ML extra, absent in base CI"
 )
 
 
@@ -102,17 +100,16 @@ def test_hyperparameter_optimizer_imports_without_optuna():
     if _absent("optuna"):
         assert mod.OPTUNA_AVAILABLE is False
         assert mod.optuna is None
-    if _absent("tensorflow"):
-        assert mod.TF_AVAILABLE is False
+    assert not hasattr(mod, "TF_AVAILABLE")
 
 
 def test_model_trainer_optional_import_guards():
-    """training.models.model_trainer no longer hard-imports optuna/tf/keras.
+    """training.models.model_trainer guards its optional Optuna dependency.
 
     ``model_trainer`` also pulls in sibling modules that depend on lightgbm /
     xgboost (out of scope for this task and not part of the optional-deps
     contract under test). We stub those siblings so the import exercises only
-    the optuna/tensorflow/keras guards this task added.
+    the Optuna guard under test.
     """
     # Only stub siblings if their real heavy deps are unavailable; otherwise
     # let the real modules load.
@@ -143,10 +140,7 @@ def test_model_trainer_optional_import_guards():
             sys.modules.pop(name, None)
 
     assert hasattr(mod, "OPTUNA_AVAILABLE")
-    assert hasattr(mod, "TENSORFLOW_AVAILABLE")
+    assert not hasattr(mod, "TENSORFLOW_AVAILABLE")
     if _absent("optuna"):
         assert mod.OPTUNA_AVAILABLE is False
         assert mod.optuna is None
-    if _absent("tensorflow"):
-        assert mod.TENSORFLOW_AVAILABLE is False
-        assert mod.EarlyStopping is None

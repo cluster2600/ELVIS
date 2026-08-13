@@ -5,6 +5,8 @@ Swagger/OpenAPI documentation for ELVIS Trading Bot API
 from flask import Flask, jsonify
 from flask_swagger_ui import get_swaggerui_blueprint
 
+from trading import __version__ as ELVIS_VERSION
+
 # Swagger UI configuration
 SWAGGER_URL = "/api/docs"
 API_URL = "/api/swagger.json"
@@ -36,17 +38,19 @@ def get_swagger_spec():
         "openapi": "3.0.0",
         "info": {
             "title": "ELVIS Trading Bot API",
-            "version": "1.0.0",
-            "description": "REST API for controlling and monitoring the ELVIS algorithmic trading bot",
+            "version": ELVIS_VERSION,
+            "description": (
+                "Paper-only compatibility API for monitoring ELVIS. "
+                "V2 runtime activation remains NO-GO."
+            ),
             "contact": {"name": "ELVIS Support", "email": "support@elvis-trading.com"},
             "license": {"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
         },
         "servers": [
-            {"url": "http://localhost:5000", "description": "Development server"},
             {
-                "url": "https://api.elvis-trading.com",
-                "description": "Production server",
-            },
+                "url": "http://localhost:5000",
+                "description": "Local paper-compatibility server",
+            }
         ],
         "tags": [
             {"name": "Authentication", "description": "Authentication endpoints"},
@@ -387,7 +391,7 @@ def get_swagger_spec():
                     "properties": {
                         "status": {"type": "string", "example": "healthy"},
                         "timestamp": {"type": "string", "format": "date-time"},
-                        "version": {"type": "string", "example": "1.0.0"},
+                        "version": {"type": "string", "example": ELVIS_VERSION},
                     },
                 },
                 "LoginRequest": {
@@ -412,7 +416,7 @@ def get_swagger_spec():
                     "type": "object",
                     "properties": {
                         "running": {"type": "boolean"},
-                        "mode": {"type": "string", "enum": ["paper", "live"]},
+                        "mode": {"type": "string", "enum": ["paper"]},
                         "start_time": {"type": "string", "format": "date-time"},
                         "strategy": {"type": "string"},
                         "uptime": {"type": "string"},
@@ -423,7 +427,7 @@ def get_swagger_spec():
                     "properties": {
                         "mode": {
                             "type": "string",
-                            "enum": ["paper", "live"],
+                            "enum": ["paper"],
                             "default": "paper",
                         },
                         "strategy": {"type": "string", "default": "ensemble"},

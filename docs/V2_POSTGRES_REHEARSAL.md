@@ -191,21 +191,18 @@ docker compose \
 
 - the current bot still performs runtime DDL;
 - bot and trainer still share a privileged credential in legacy manifests;
-- active Compose, Ansible, and Apple launch paths are not migrated;
+- the root compatibility composition is not a V2 deployment path;
 - runtime startup and health are not fail-closed on the V2 catalog;
 - replay, reconciliation, rollback rehearsal, soak, and operator activation
   approval remain pending.
 - the raw fresh-target import is dormant and non-authoritative; V2 replay and
   semantic reconciliation of that history remain later slices.
 
-## Verification status
+## Verification requirement
 
-The frozen local evidence passed 6 contract tests under both Python 3.10 and
-3.14 and 2 opt-in Docker/PostgreSQL 15 scenarios under Python 3.14. The
-rehearsal proved the full `10 -> 0 -> 0` flow, six separate SCRAM identities,
-the HBA catalog, marker-preserving restart, non-mutating rejection of an
-unmarked non-empty volume, secret redaction, and complete Compose cleanup.
-Static formatting, compilation, Compose rendering, relative links, and all
-three Mermaid source/render sets were green. Pull-request CI and the broader
-regression suites remain the acceptance record; none of this authorises
-deployment or `ACTIVE`.
+Acceptance requires the Python 3.14 contract, opt-in PostgreSQL 15 scenarios,
+the `10 -> 0 -> 0` flow, six separate SCRAM identities, HBA catalog,
+marker-preserving restart, non-mutating rejection, redaction, cleanup, static
+checks, Compose rendering, links, and diagrams to pass on one frozen commit.
+The pull request and release are the immutable acceptance record; none of this
+authorises deployment or `ACTIVE`.

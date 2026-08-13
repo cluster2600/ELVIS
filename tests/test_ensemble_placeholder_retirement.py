@@ -188,7 +188,11 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
     assert not (REPOSITORY_ROOT / "requirements/requirements_ydf.txt").exists()
     assert not (REPOSITORY_ROOT / "requirements/requirements_coreml.txt").exists()
     assert not (REPOSITORY_ROOT / "requirements/requirements_tensorflow.txt").exists()
-    training_requirements = REPOSITORY_ROOT / "requirements/requirements_ml310.txt"
+    old_ml_suffix = "ml" + "3" + "10"
+    assert not (
+        REPOSITORY_ROOT / f"requirements/requirements_{old_ml_suffix}.txt"
+    ).exists()
+    training_requirements = REPOSITORY_ROOT / "requirements/requirements_ml314.txt"
     assert training_requirements.is_file()
     requirement_lines = {
         line.strip()
@@ -202,7 +206,8 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
 
     pyproject = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     config = (REPOSITORY_ROOT / "config/__init__.py").read_text(encoding="utf-8")
-    trainer = (REPOSITORY_ROOT / "docker/Dockerfile.ml310").read_text(encoding="utf-8")
+    assert not (REPOSITORY_ROOT / f"docker/Dockerfile.{old_ml_suffix}").exists()
+    trainer = (REPOSITORY_ROOT / "docker/Dockerfile.ml314").read_text(encoding="utf-8")
     dockerignore_lines = {
         line.strip()
         for line in (REPOSITORY_ROOT / ".dockerignore")
@@ -216,11 +221,12 @@ def test_synthetic_assets_and_dependencies_are_not_shipped() -> None:
     assert '"COREML_MODEL"' not in config
     assert "ydf" not in trainer.lower()
     assert "coreml" not in trainer.lower()
-    assert "requirements_ml310.txt" in trainer
+    assert "requirements_ml314.txt" in trainer
     assert "*.pkl" in dockerignore_lines
     assert {"ydf", "coremltools"}.isdisjoint(requirement_names)
-    assert "torch==2.10.0+cpu" in requirement_lines
-    assert "seaborn==0.13.2" in requirement_lines
-    assert "tensorflow==2.16.2" in requirement_lines
+    assert ".[ml]" in requirement_lines
+    assert '"torch==2.13.0"' in pyproject
+    assert "tensorflow" not in pyproject.lower()
+    assert "tensorflow" not in requirement_names
     assert not hasattr(feature_schemas, "ENSEMBLE_YDF_20_V1")
     assert not hasattr(feature_schemas, "ENSEMBLE_COREML_20_V1")

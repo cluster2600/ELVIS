@@ -1,7 +1,7 @@
 """Export helpers documented in docs/random_forest.md: CSV, Prometheus, SHAP.
 
-CSV and Prometheus are always available; SHAP is optional (no wheels on some
-Python versions) and degrades to feature-importance export when absent.
+CSV and Prometheus are always available; SHAP is an optional dependency and
+degrades to feature-importance export when absent.
 """
 
 import csv

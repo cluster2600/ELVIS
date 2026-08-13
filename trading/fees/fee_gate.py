@@ -76,7 +76,7 @@ def _as_finite_float(value: object) -> float | None:
         return None
     try:
         converted = float(value)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     return converted if math.isfinite(converted) else None
 

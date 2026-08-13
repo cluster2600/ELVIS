@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 LLM-Enhanced Training Script for ELVIS Trading System
 Integrates local LLM analysis directly into the training pipeline
@@ -375,7 +375,7 @@ async def run_llm_enhanced_training(
                     # Test if column is numeric
                     pd.to_numeric(df[col], errors="raise")
                     feature_columns.append(col)
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     logger.debug(f"Skipping non-numeric column: {col}")
 
         logger.info(f"   Selected {len(feature_columns)} numeric feature columns")

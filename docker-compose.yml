@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: elvis_trading
       POSTGRES_USER: elvis_user
-      POSTGRES_PASSWORD: elvis_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD externally}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
@@ -20,7 +20,7 @@ services:
     networks:
       - elvis-network
 
-  # ELVIS Trading Bot - Enhanced for Apple Container System
+  # Retained compatibility paper runtime; not the V2 installer.
   elvis-bot:
     build:
       context: .
@@ -37,16 +37,12 @@ services:
       # Trading Configuration
       - TRADING_MODE=paper
       - STRATEGY_MODE=ensemble
-      - HIGH_FREQUENCY_TRADING=true
-      - LEVERAGE=100
-      - PROFIT_MODE=aggressive
-      - COOLDOWN_DISABLED=true
       
       # Database Configuration (Required for paper trading)
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=elvis_user
-      - POSTGRES_PASSWORD=elvis_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD externally}
       - POSTGRES_DBNAME=elvis_trading
       
       # Redis Configuration
@@ -55,8 +51,8 @@ services:
       - REDIS_DB=0
       
       # Paper Trading Initial Balances
-      - INITIAL_USDT_BALANCE=1000.0
-      - INITIAL_BNB_BALANCE=1000.0
+      - INITIAL_USDT_BALANCE=100.0
+      - INITIAL_BNB_BALANCE=0.0
       
       # API Keys (from environment or .env file)
       - BINANCE_FUTURES_TESTNET_API_KEY=${BINANCE_FUTURES_TESTNET_API_KEY:-}
@@ -117,7 +113,7 @@ services:
     image: grafana/grafana:latest
     container_name: elvis-grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD externally}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
@@ -160,15 +156,14 @@ services:
     networks:
       - elvis-network
 
-  # Unified ML trainer — Python 3.10. It requires PyTorch and keeps optional
-  # TensorFlow isolated from the 3.14 bot. Shares ONLY the models/ volume; coupling is
-  # saved model files, never imports. Run on demand:
+  # Unified ML trainer on Python 3.14. It shares only saved artifacts through
+  # the models/ volume. Run on demand:
   #   docker compose --profile ml run --rm elvis-ml-trainer
   elvis-ml-trainer:
     profiles: ["ml"]
     build:
       context: .
-      dockerfile: docker/Dockerfile.ml310
+      dockerfile: docker/Dockerfile.ml314
     container_name: elvis-ml-trainer
     depends_on:
       postgres:
@@ -177,7 +172,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=elvis_user
-      - POSTGRES_PASSWORD=elvis_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD externally}
       - POSTGRES_DBNAME=elvis_trading
     volumes:
       - ./models:/app/models

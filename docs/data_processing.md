@@ -1,5 +1,9 @@
 # ELVIS Trading System - Data Processing Documentation
 
+> **Compatibility paper-runtime reference.** This source-oriented page is
+> retained for rollback context; it is not a V2 deployment guide. Python 3.14
+> is required and `ACTIVE` remains a **NO-GO**.
+
 ## Overview
 
 This document describes how the ELVIS trading system acquires and processes
@@ -350,7 +354,7 @@ it does not touch Binance directly.
 
 There is no repository-wide data-processing YAML contract. The retired
 `trading/config/data_config.yaml` was never loaded by production, training,
-tests, Compose, or Ansible and mixed implemented fields with aspirational
+tests or runtime composition and mixed implemented fields with aspirational
 settings.
 
 `DataProcessor` receives `exchange`, `feature_config`, `quality_config`, and a
@@ -382,9 +386,8 @@ Missing/placeholder keys degrade gracefully to public/keyless clients (and, for
 - **`ccxt`** backs `BinanceProcessor`; **`python-binance`** (`binance.*`) backs
   `PriceFetcher` and `data_downloader.py`; **`websocket-client`** backs the live
   stream.
-- TensorFlow has no Python 3.14 wheel and remains isolated in the optional
-  Python 3.10 training image. It is not part of data processing or Ensemble
-  inference.
+- TensorFlow is not part of the supported Python 3.14 distribution, data
+  processing, or Ensemble inference. Its legacy import remains guarded.
 
 ---
 
@@ -393,9 +396,8 @@ Missing/placeholder keys degrade gracefully to public/keyless clients (and, for
 Real tests that exercise this path:
 
 - `tests/test_binance_processor.py` — unit tests for `BinanceProcessor`.
-- `tests/test_integration.py` — imports `BinanceProcessor` as part of an
-  integration flow.
-- `tests/test_dashboard_market_depth.py` — instantiates `PriceFetcher`.
+- `tests/test_integration.py` — hermetic model and monitoring integration.
+- `tests/test_price_fetcher.py` — mocked `PriceFetcher` behaviour.
 
 Run them with `pytest` (per-module, matching the project's test conventions).
 

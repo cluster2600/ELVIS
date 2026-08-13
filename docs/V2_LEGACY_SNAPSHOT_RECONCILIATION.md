@@ -68,7 +68,7 @@ Graph artefacts:
 [editable Excalidraw](../diagrams/v2-c3c3b-reconciliation-trust.excalidraw).
 
 The reviewer is an offline operator boundary. It is not called by `main.py`,
-the root Compose project, Ansible, the Apple launch path, application startup,
+the root compatibility project, retired deployment experiments, application startup,
 health, readiness, the trainer, account provisioning, or activation.
 
 ## Application contract
@@ -438,19 +438,18 @@ repair, provision, activation, or deployment command.
 - Runtime DDL remains in the compatibility path.
 - Production bot and trainer identities, SCRAM secrets, restrictive HBA, and
   network policy are not composed.
-- Root Compose, Ansible, and Apple deployment paths are not migrated.
+- The root compatibility composition is not a V2 deployment path.
 - Runtime startup and health do not yet fail closed on V2 catalog, identity,
   generation, opening, and authority evidence.
 - Side-effect-free shadow comparison, stale-writer removal, pause/rollback
   rehearsal, soak, and explicit operator approval remain pending.
 
-Python 3.14 is the V2 application runtime target. Python 3.10 remains only a
-temporary package-compatibility and isolated trainer requirement; it is not the
-V2 production runtime target.
+Python 3.14 is the only supported interpreter for the package and operator
+tools.
 
 ## Verification status
 
-Acceptance requires focused contract checks under Python 3.10 and 3.14, a
+Acceptance requires focused contract checks under Python 3.14, a
 dedicated PostgreSQL 15 read-only suite, the complete PostgreSQL and
 non-PostgreSQL regressions, static checks, strict JSON/YAML validation, relative
 link validation, exact Mermaid fence/source parity, both four-artifact diagram

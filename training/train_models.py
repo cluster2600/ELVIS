@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Script to run the model training pipeline for the ELVIS trading system.
 Optimized version: Modularized code, removed redundancies, and fixed syntax errors.

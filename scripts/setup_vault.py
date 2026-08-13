@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Vault Setup and Migration Script for ELVIS Trading Bot
 Sets up HashiCorp Vault and migrates secrets from .env file

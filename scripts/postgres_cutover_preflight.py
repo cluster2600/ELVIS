@@ -96,7 +96,7 @@ def _read_config(path: Path) -> dict[str, Any]:
         )
     except _CliInputError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError):
+    except OSError, UnicodeError, ValueError, RecursionError:
         document = None
     if type(document) is not dict:
         raise _CliInputError("invalid configuration")
@@ -254,7 +254,7 @@ def _run(
         )
     except _CliInputError:
         raise
-    except (PostgresBootstrapInputError, TypeError, ValueError):
+    except PostgresBootstrapInputError, TypeError, ValueError:
         context = None
     if context is None:
         raise _CliInputError("invalid configuration")

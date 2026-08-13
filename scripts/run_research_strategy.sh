@@ -8,8 +8,8 @@
 cd "$(dirname "$0")/.." || exit 1
 echo "🔬 ELVIS Research-Based Trading Strategy"
 echo "========================================"
-echo "📊 Targeting 14.9% annual returns with binary classification"
-echo "🎯 Following academic research methodology"
+echo "📊 Paper-only research strategy with binary classification"
+echo "🎯 Historical results are not forward-looking performance claims"
 echo ""
 
 # Default settings
@@ -32,11 +32,6 @@ while [[ $# -gt 0 ]]; do
             echo "🔄 Rolling training disabled"
             shift
             ;;
-        --live)
-            MODE="live"
-            echo "⚠️  LIVE TRADING MODE ENABLED"
-            shift
-            ;;
         --debug)
             LOG_LEVEL="DEBUG"
             echo "🐛 Debug logging enabled"
@@ -47,14 +42,12 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --no-social     Disable social features (Twitter + Google Trends)"
             echo "  --no-rolling    Disable rolling training (use static model)"
-            echo "  --live          Enable live trading (default: paper trading)"
             echo "  --debug         Enable debug logging"
             echo "  -h, --help      Show this help"
             echo ""
             echo "Examples:"
             echo "  $0                    # Full research strategy with all features"
             echo "  $0 --no-social       # Research strategy without social data"
-            echo "  $0 --live            # Live trading with research strategy"
             echo "  $0 --debug           # Debug mode for troubleshooting"
             exit 0
             ;;
@@ -74,17 +67,8 @@ echo "   Trading Mode: $MODE"
 echo "   Log Level: $LOG_LEVEL"
 echo ""
 
-# Warning for live trading
-if [[ "$MODE" == "live" ]]; then
-    echo "⚠️  WARNING: LIVE TRADING MODE"
-    echo "   This will trade with real money on Binance!"
-    echo "   Make sure your API keys are configured correctly."
-    echo "   Press Ctrl+C to cancel, or wait 5 seconds to continue..."
-    sleep 5
-fi
-
 echo "🎯 Starting ELVIS with Research-Based Strategy..."
-echo "   Target: 14.9% annual return, 2.02 Sharpe ratio"
+echo "   Mode: paper only"
 echo "   Method: Binary classification (BUY/SELL only)"
 echo "   Basis: Bonenkamp (2021) academic research"
 echo ""
@@ -95,4 +79,4 @@ export SOCIAL_DATA_ENABLED="$SOCIAL_DATA_ENABLED"
 export ROLLING_TRAINING_ENABLED="$ROLLING_TRAINING_ENABLED"
 
 # Run the bot
-python main.py --mode "$MODE" --log-level "$LOG_LEVEL"
+python3.14 main.py --mode "$MODE" --log-level "$LOG_LEVEL"

@@ -61,13 +61,19 @@ endpoints require any valid token. Tokens **without** a role claim (issued
 before RBAC) are treated as read-only `viewer`, so old tokens keep working for
 reads but can no longer mutate.
 
-**How to use:** set `API_ROLE=viewer` before issuing tokens for dashboards or
-monitors that must not control the bot; leave unset (admin) for operator
-tokens. Coverage: `tests/test_api_rbac.py`.
+**How to use:** `scripts/run_api.sh` requires an externally supplied
+`API_SECRET_KEY` plus `API_USERNAME` and `API_PASSWORD` for login. Set
+`API_ROLE=viewer` before issuing tokens for dashboards or monitors that must
+not control the bot; leave it unset (`admin`) for operator tokens. These JWT
+credentials are separate from the trade-history API's `API_KEY`. Coverage:
+`tests/test_api_rbac.py`.
 
-**Network binding:** both Flask apps bind `127.0.0.1` by default; set
-`API_HOST=0.0.0.0` / `TRADE_API_HOST=0.0.0.0` (docker-compose does) to expose
-them, and `API_DEBUG=true` explicitly for debug mode.
+**Network binding:** both Flask apps bind `127.0.0.1` by default. Set
+`API_HOST=0.0.0.0` for the control API or
+`TRADE_HISTORY_API_HOST=0.0.0.0` for the trade-history API only when an
+authenticated external listener is intentional. The compatibility Compose
+file does not opt in to either exposure. Set `API_DEBUG=true` explicitly for
+debug mode.
 
 ## 🔐 HashiCorp Vault Integration
 
@@ -301,10 +307,9 @@ Run it with:
 pytest tests/test_api_connection_tester_vault_token.py
 ```
 
-`tests/test_vault_connection.py` and `tests/test_vault_integration.py` are
-manual diagnostics, not pytest tests. They can contact a local Vault and the
-former can write test secrets, so run them only against an explicitly prepared
-disposable Vault.
+The former ambient Vault diagnostics were removed from the pytest tree. Vault
+tests must mock the client or use an explicitly isolated, opt-in harness; the
+default release suite never contacts a developer Vault.
 
 ## 📚 Additional Resources
 

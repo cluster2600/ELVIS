@@ -78,7 +78,8 @@ python -m scripts.postgres_bootstrap \
   demotion by itself.
 
 The CLI is one-shot and has no automatic retry. It is never invoked by
-`main.py`, Ansible, a health probe, or an application startup path. The isolated
+`main.py`, retired deployment experiments, a health probe, or an application
+startup path. The isolated
 fresh-cluster rehearsal may invoke it only through an explicit one-shot
 operator `docker compose run`; no Compose startup or service dependency calls
 it automatically.
@@ -296,30 +297,24 @@ There is no automatic retry, startup retry, or activation fallback.
 
 `COMPLETE` does not prove that:
 
-- Compose, Ansible, HBA, network policy, or secret rotation is deployed;
+- runtime composition, HBA, network policy, or secret rotation is deployed;
 - application services use the dedicated runtime identities;
 - runtime DDL has been removed;
 - startup or health checks fail closed;
 - replay, reconciliation, rollback, shadow, or soak gates passed; or
 - an operator approved `ACTIVE`.
 
-Those remain separate V2 migration slices. The application target is Python
-3.14. Python 3.10 remains a temporary compatibility floor and the isolated
-TensorFlow/ML trainer runtime; retiring it requires a separate migration.
+Those remain separate V2 migration slices. Python 3.14 is the only supported
+application and operator interpreter.
 
 The disposable fresh-cluster composition that exercises this CLI without
 touching the active runtime is documented in the
 [V2 PostgreSQL rehearsal runbook](V2_POSTGRES_REHEARSAL.md).
 
-## Verification status
+## Verification requirement
 
-The pull-request snapshot passed the CLI contract suite under Python 3.10 and
-3.14 (29 tests on each interpreter), plus the two disposable PostgreSQL 15 CLI
-scenarios on each interpreter. The adjacent bootstrap-library and CLI unit
-suites passed 116 tests on each interpreter. Black, isort, fatal Flake8 rules,
-Python compilation, relative-link validation, and `git diff --check` were
-green. The broader Python 3.14 gates passed 465 PostgreSQL tests and 2,591
-non-PostgreSQL tests, with 50 expected skips. The
-[migration roadmap](architecture_migration/04-migration-roadmap.md) records the
-evidence. These are implementation checks, not deployment, secret-rotation,
-HBA, runtime-readiness, or cut-over proof.
+Acceptance requires the focused Python 3.14 contracts, disposable PostgreSQL
+15 scenarios, full regression gates, formatting, compilation, link checks, and
+cleanup to pass on one frozen commit. The pull request and release record the
+immutable evidence. Passing checks are not deployment, secret-rotation, HBA,
+runtime-readiness, or cut-over proof.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Train LLM-enhanced models using ALL individual paper trades from PostgreSQL.
 This approach maximizes training samples by using trade-level features instead of OHLCV aggregation.

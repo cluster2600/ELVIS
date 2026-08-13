@@ -1,0 +1,4 @@
+# CPython 3.14 Linux wheels for the two published operator architectures.
+psycopg2-binary==2.9.12 \
+    --hash=sha256:863f5d12241ebe1c76a72a04c2113b6dc905f90b9cef0e9be0efd994affd9354 \
+    --hash=sha256:a99eaab34a9010f1a086b126de467466620a750634d114d20455f3a824aae033

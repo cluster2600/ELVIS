@@ -313,7 +313,7 @@ def main(
             service_connection_factory or _connection_factory_for_service,
         )
         exit_code = _STATUS_EXIT_CODES[receipt.status]
-    except (PostgresBootstrapInputError, _CliInputError):
+    except PostgresBootstrapInputError, _CliInputError:
         _write_error("INPUT")
         return _EXIT_INPUT
     except PostgresBootstrapStorageError:

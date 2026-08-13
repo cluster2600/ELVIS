@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 AutoML Hyperparameter Optimization for ELVIS Trading Models
 Integrates Optuna for intelligent hyperparameter tuning with advanced features
@@ -24,9 +24,9 @@ from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 
-# Optuna is optional: it has no Python 3.14 wheel and is absent in CI. Guard the
-# import so this module stays importable; the optimizer methods that call into
-# optuna only run when it is installed.
+# Optuna is optional and is not part of the canonical ELVIS dependency sets.
+# Guard the import so this module stays importable; optimizer methods that call
+# into Optuna run only when an operator installs it separately.
 try:
     import optuna
 
@@ -35,16 +35,13 @@ except ImportError:
     optuna = None
     OPTUNA_AVAILABLE = False
 
-# Deep learning imports (optional)
+# PyTorch is an optional dependency of this module and part of the ``ml`` extra.
 try:
-    import tensorflow as tf
     import torch
-    import torch.nn as nn
 
-    TF_AVAILABLE = True
     TORCH_AVAILABLE = True
 except ImportError:
-    TF_AVAILABLE = False
+    torch = None
     TORCH_AVAILABLE = False
 
 # Configure logging
@@ -203,33 +200,11 @@ class HyperparameterOptimizer:
             ),
         }
 
-        # Add deep learning configs if available
-        if TF_AVAILABLE:
-            configs["tensorflow_nn"] = self._get_tensorflow_config()
-
+        # Add the supported deep-learning config when PyTorch is available.
         if TORCH_AVAILABLE:
             configs["pytorch_nn"] = self._get_pytorch_config()
 
         return configs
-
-    def _get_tensorflow_config(self) -> ModelConfig:
-        """TensorFlow neural network configuration"""
-        return ModelConfig(
-            name="tensorflow_nn",
-            param_space={
-                "layers": ("int", 2, 5),
-                "units_layer_1": ("int", 32, 512),
-                "units_layer_2": ("int", 16, 256),
-                "units_layer_3": ("int", 8, 128),
-                "dropout_rate": ("float", 0.0, 0.5),
-                "learning_rate": ("float", 1e-5, 1e-2, True),
-                "batch_size": ("categorical", [16, 32, 64, 128]),
-                "activation": ("categorical", ["relu", "tanh", "elu"]),
-                "optimizer": ("categorical", ["adam", "rmsprop", "sgd"]),
-            },
-            scorer="accuracy",
-            cv_folds=3,
-        )
 
     def _get_pytorch_config(self) -> ModelConfig:
         """PyTorch neural network configuration"""
@@ -417,20 +392,11 @@ class HyperparameterOptimizer:
         elif model_type == "svm":
             return SVC(**params, random_state=42)
 
-        elif model_type == "tensorflow_nn" and TF_AVAILABLE:
-            return self._create_tensorflow_model(params)
-
         elif model_type == "pytorch_nn" and TORCH_AVAILABLE:
             return self._create_pytorch_model(params)
 
         else:
             raise ValueError(f"Unknown model type: {model_type}")
-
-    def _create_tensorflow_model(self, params: Dict[str, Any]):
-        """Create TensorFlow model with parameters"""
-        # This would be implemented based on specific TF architecture needs
-        # Placeholder for now
-        pass
 
     def _create_pytorch_model(self, params: Dict[str, Any]):
         """Create PyTorch model with parameters"""

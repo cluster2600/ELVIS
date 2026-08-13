@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Native ELVIS Console Dashboard - Exact Replica
 Mimics the exact layout and appearance of the native console dashboard
@@ -130,7 +130,7 @@ class NativeConsoleDashboard:
         )
         try:
             return float(data["price"]) if data else default
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return default
 
     def _system_statuses(self, ttl=10.0):
@@ -292,7 +292,10 @@ class NativeConsoleDashboard:
             curses.color_pair(6),
         )
         self.safe_addstr(
-            y + 2, start_x, "Status: LIVE TRADING", curses.color_pair(1) | curses.A_BOLD
+            y + 2,
+            start_x,
+            "Status: PAPER COMPATIBILITY",
+            curses.color_pair(1) | curses.A_BOLD,
         )
 
         # Portfolio section
