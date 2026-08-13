@@ -1,10 +1,10 @@
 # ELVIS v0.2.0
 
-> These are historical v0.2.0 release notes. The
-> [ELVIS V2 architecture programme](../CHANGELOG.md#elvis-v2-architecture-programme-in-progress)
-> is in progress on a branch and has not been released, deployed, or activated.
-> `ACTIVE` remains a **NO-GO**; see the
-> [V2 overview](V2_ARCHITECTURE.md) for current context.
+> **Historical V1 document.** These v0.2.0 notes are retained for provenance,
+> not as current release or operational guidance. The
+> [ELVIS V2 architecture programme](../../../CHANGELOG.md#elvis-v2-architecture-programme-in-progress)
+> is not deployed or activated. `ACTIVE` remains a **NO-GO**; see the
+> [V2 overview](../../V2_ARCHITECTURE.md) for current context.
 
 Documentation-audit release: verified 864 documented claims against the code,
 fixed real bugs the audit surfaced, and **built the code to match the docs**

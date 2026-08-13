@@ -39,11 +39,15 @@ owners and activation capabilities are not composed into deployment, and
 | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) | Immutable audited baseline | Historical evidence |
 | [Runtime architecture](architecture.md), [components](COMPONENTS.md), and [system topology](ELVIS_SYSTEM_ARCHITECTURE.md) | Current compatibility-runtime references | Legacy operational context |
 | [Deployment guide](DEPLOYMENT.md) | Existing Compose/Ansible workflow | Legacy deployment only; not V2 cut-over |
-| `docs/archive/` | Superseded reports and completion claims | Historical only |
+| [V1 archive](archive/v1/README.md) and `docs/archive/` | Superseded reports, release snapshots, and completion claims | Historical only |
 
 Source code and the roadmap's latest committed record win if a legacy guide
 disagrees. A successful test, generated artefact, or healthy compatibility
 container is not proof of a V2 deployment or activation.
+
+The [V1 archive](archive/v1/README.md) contains only documents proven
+historical or superseded. Operational compatibility-runtime guides stay in
+place until cut-over because that runtime is still authoritative.
 
 ## Compatibility-runtime documentation
 

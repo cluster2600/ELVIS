@@ -4594,6 +4594,39 @@ Python 3.14 remains the V2 application runtime target; Python 3.10 remains a
 temporary compatibility and isolated trainer requirement. `ACTIVE` remains a
 **NO-GO**.
 
+### V1 retirement hygiene, slice 1
+
+The first V1 cleanup slice is repository hygiene, not runtime retirement. It
+moves three proven-historical documents into `docs/archive/v1/`: the v0.2.0
+release notes, the 2025 test-repair snapshot, and the simplified bot topology
+superseded by the verified compatibility architecture. It also removes
+`scripts/setup_secure_config.sh`, a dead host-specific helper that read
+plaintext credential files, rewrote `.env`, and attempted to patch a
+nonexistent entry point.
+
+The slice intentionally preserves `main.py`, the legacy paper adapter and
+executor, `utils/paper_trade_db.py`, the seven migration-0001 relations, root
+Compose, Dockerfiles, Ansible, Apple-container scripts, and their operational
+guides. Those remain part of the authoritative compatibility path until V2
+opening provenance, runtime composition, replay, rollback, soak, and operator
+approval are complete. Versioned V2 files named `*-v1.example.json` are also
+explicitly outside the cleanup scope.
+
+The archive policy, old-to-new path manifest, and Mermaid retirement boundary
+are in the [V1 archive index](../archive/v1/README.md). Any later deletion must
+be a separate reviewed change after link, provenance, retention, and rollback
+checks. This hygiene slice changes no database, deployment, runtime authority,
+or activation state. `ACTIVE` remains a **NO-GO**.
+
+The focused archive contract passed 5 tests under both Python 3.10 and Python
+3.14. The complete non-PostgreSQL suite passed 2,711 tests, skipped 50, and
+passed 7 subtests. Offline link validation checked 370 Markdown targets with
+zero errors. Black, isort, fatal-error Flake8, Python 3.10/3.14 compilation,
+Mermaid source/fence parity, rendered SVG/PNG/editable-Excalidraw validation,
+visual PNG inspection, and `git diff --check` were green. PostgreSQL was not
+run locally because the slice changes no Python production or database code;
+the pull request still runs the repository's complete GitHub matrix.
+
 ## Cut-over policy
 
 The paper-runtime control has four modes:

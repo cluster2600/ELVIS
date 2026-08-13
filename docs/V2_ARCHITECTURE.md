@@ -132,7 +132,7 @@ Neither word means deployed.
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
 | Deployment composition | Offline bootstrap, read-only fresh-target preflight and reconciliation review, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
 | Cut-over evidence | Raw V1 snapshot preservation and a non-authoritative two-candidate opening review implemented; source/runtime provenance, a coherent enforced review window, provenance selection, account opening, V2 replay, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
-| Cleanup | Remove superseded legacy owners only after parity and cut-over proof | Pending |
+| Cleanup | Historical V1 documents and one proven-dead credential copier are archived/removed; runtime owners retire only after parity and cut-over proof | Started; no authority change |
 
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
 authoritative slice-by-slice status ledger. This summary intentionally does not
@@ -228,7 +228,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |
-| Historical or superseded claims | `docs/archive/` and explicitly labelled legacy guides |
+| Historical or superseded claims | [V1 archive](archive/v1/README.md), `docs/archive/`, and explicitly labelled legacy guides |
 
 When documents disagree, source code and the roadmap's latest committed
 implementation record win. A generated artefact, successful test, or dormant

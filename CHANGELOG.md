@@ -14,6 +14,18 @@ soak, and explicit operator approval still block cut-over; `ACTIVE` is a
 See the [V2 architecture overview](docs/V2_ARCHITECTURE.md) and authoritative
 [migration roadmap](docs/architecture_migration/04-migration-roadmap.md).
 
+### V1 retirement hygiene
+
+- Historical v0.2 release notes, the 2025 test-repair snapshot, and the
+  superseded simplified bot diagram moved to
+  [`docs/archive/v1/`](docs/archive/v1/README.md).
+- Removed `scripts/setup_secure_config.sh`, a dead machine-specific helper that
+  read plaintext credential files and rewrote `.env` for a nonexistent entry
+  point.
+- No compatibility-runtime code, active deployment file, database baseline, or
+  operational runbook was retired. The archive boundary is documentation and
+  repository hygiene only; it grants no V2 deployment or activation authority.
+
 ## [v0.3.0] - 2026-07-12 - Root reorganization, profitability roadmap, py3.10/3.14 container split
 
 ### Repository layout
