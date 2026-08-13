@@ -155,11 +155,9 @@ def risk_management_loop(risk_manager, logger):
 
 def _log_strategy_mode(strategy_mode: str, logger: logging.Logger):
     if strategy_mode == "research":
-        logger.info(
-            "🔬 Research-based strategy active - targeting 14.9% annual returns"
-        )
+        logger.info("🔬 Research-based strategy active in paper mode")
         logger.info("📊 Binary classification: BUY/SELL only (no HOLD signals)")
-        logger.info("🎯 Following Bonenkamp (2021) research methodology")
+        logger.info("🎯 Historical research metrics are not performance promises")
     elif strategy_mode == "balanced":
         logger.info("🎯 Balanced strategy active - EMERGENCY MODE")
         logger.info("⚠️ Reduced trading frequency: 2 trades/hour max")
@@ -207,7 +205,7 @@ def _strategy_loop_sleep_seconds(
     try:
         if freq_minutes is not None and float(freq_minutes) > 0:
             return float(freq_minutes) * 60.0
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
     return default_seconds
 
@@ -3193,8 +3191,8 @@ if __name__ == "__main__":
         "--mode",
         type=str,
         default="paper",
-        choices=["paper", "live"],
-        help="Trading mode: paper or live",
+        choices=["paper"],
+        help="Trading mode (paper only)",
     )
     parser.add_argument(
         "--log-level",

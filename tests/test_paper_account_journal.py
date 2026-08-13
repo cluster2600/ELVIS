@@ -815,7 +815,7 @@ def _uses_paper_account_journal(source):
                         == _REPOSITORY_MODULE
                     ):
                         return True
-                except (ImportError, ValueError):
+                except ImportError, ValueError:
                     pass
 
     for node in ast.walk(tree):

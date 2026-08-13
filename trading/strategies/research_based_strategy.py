@@ -43,9 +43,9 @@ def _validate_research_components(model: object, scaler: object) -> None:
         raise FeatureContractError("research scaler must be a StandardScaler")
 
 
-# Optional social-data dependencies. These libraries have no Python 3.14 wheels
-# and are not installed in CI, so their imports are guarded: the collectors below
-# fall back to neutral constants (with a debug log) whenever a library or its API
+# Optional social-data dependencies are not part of the canonical ELVIS
+# dependency sets, so their imports are guarded: the collectors below fall back
+# to neutral constants (with a debug log) whenever a library or its API
 # credentials are absent. See docs/research_strategy_guide.md.
 try:  # pragma: no cover - exercised only when tweepy is installed
     import tweepy  # type: ignore
@@ -71,7 +71,7 @@ class ResearchBasedStrategy(BaseStrategy):
     - 5-minute trading frequency
     - Binary classification (BUY/SELL only, no HOLD)
     - Rolling 1-week training windows
-    - Target: 14.9% annualized return, 2.02 Sharpe ratio
+    - Paper-only evaluation; historical paper metrics are not a target
     """
 
     def __init__(
@@ -141,9 +141,7 @@ class ResearchBasedStrategy(BaseStrategy):
         self.logger.info(
             f"📊 Settings: Social={social_data_enabled}, Rolling={enable_rolling_training}"
         )
-        self.logger.info(
-            f"🎯 Target: 14.9% annual return, 2.02 Sharpe ratio (from research)"
-        )
+        self.logger.info("🎯 Paper evaluation only; no return target is promised")
 
     def calculate_financial_indicators(self, data: pd.DataFrame) -> dict:
         """

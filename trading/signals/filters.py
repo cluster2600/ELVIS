@@ -345,7 +345,7 @@ def apply_signal_filters(
 
     try:
         confidence = float(confidence)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         confidence = 0.0
 
     normalized = _normalize_signal(signal)

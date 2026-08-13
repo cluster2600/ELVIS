@@ -1,5 +1,9 @@
 # ELVIS Trading System - Trading Components Documentation
 
+> **Compatibility paper-runtime reference.** This page describes retained V1
+> source for rollback context, not the V2 installer or an authorised live path.
+> `main.py` rejects non-paper mode and `ACTIVE` remains a **NO-GO**.
+
 ## Overview
 
 This document describes the core trading components in the ELVIS trading system:
@@ -12,9 +16,9 @@ The three concrete pieces most callers touch are:
 - **`EnsembleStrategy`** (`trading/strategies/ensemble_strategy.py`) — the default
   strategy. It blends technical analysis with any ML models that happen to be
   available and returns a `(signal, confidence)` decision.
-- **`BinanceExecutor`** (`trading/execution/binance_executor.py`) — the executor.
-  It runs in paper mode (mock spot fills backed by a Postgres trade DB) or
-  against Binance spot/futures.
+- **`BinanceExecutor`** (`trading/execution/binance_executor.py`) — the retained
+  executor used by the paper path. Its exchange branches remain source-visible
+  but are not exposed by the supported launcher.
 - **`AdvancedRiskManager`** / **`DollarBasedRiskManager`** (`trading/risk/`) — two
   independent risk models (a margin/liquidation model and a dollar-cap model).
 

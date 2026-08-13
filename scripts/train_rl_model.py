@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Training script for the Reinforcement Learning trading model
 This script trains a DQN agent on historical trading data to learn optimal trading patterns

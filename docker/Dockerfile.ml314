@@ -1,0 +1,42 @@
+# ML training container — Python 3.14
+#
+# The supported trainer uses the project's PyTorch, scikit-learn, ensemble, and
+# DRL paths. Trained artifacts are exchanged with the bot through the models/
+# volume; the containers do not import from one another.
+#
+# Build:  docker build -f docker/Dockerfile.ml314 -t elvis-ml-trainer .
+# Run:    docker compose --profile ml run --rm elvis-ml-trainer
+FROM python:3.14-slim
+
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    wget \
+    gcc \
+    g++ \
+    libffi-dev \
+    pkg-config \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# TA-Lib C library, same per-arch package as the main Dockerfile.
+RUN wget -q "https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && dpkg -i "ta-lib_0.6.4_${TARGETARCH}.deb" \
+    && rm "ta-lib_0.6.4_${TARGETARCH}.deb"
+
+WORKDIR /app
+
+COPY . /app
+
+# Install the compatibility requirements first, then the canonical Python 3.14
+# ML extra. The PyTorch CPU index avoids pulling a GPU runtime into this generic
+# trainer image.
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    && pip install --no-cache-dir -r /app/requirements/requirements_ml314.txt
+
+# Trained artifacts land in /app/models — mount it as a shared volume so the
+# bot container picks up new model files without a rebuild.
+VOLUME ["/app/models"]
+
+CMD ["bash", "scripts/run_training.sh"]

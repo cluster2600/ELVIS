@@ -119,7 +119,7 @@ def _read_json(path: Path) -> dict[str, Any]:
         )
     except _CliInputError:
         raise
-    except (OSError, UnicodeError, ValueError, RecursionError):
+    except OSError, UnicodeError, ValueError, RecursionError:
         raise _CliInputError("invalid input file") from None
     finally:
         if descriptor is not None:
@@ -141,7 +141,7 @@ def _canonical_document_sha256(document: dict[str, Any]) -> str:
             sort_keys=True,
             allow_nan=False,
         ).encode("utf-8")
-    except (RecursionError, TypeError, ValueError):
+    except RecursionError, TypeError, ValueError:
         raise _CliInputError("input document cannot be canonicalized") from None
     return hashlib.sha256(encoded).hexdigest()
 
@@ -350,7 +350,7 @@ def _parse_import_receipt(
     )
     try:
         disposition = LegacySnapshotImportDisposition(document["status"])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise _CliInputError("invalid import disposition") from None
     if (
         document["target_exact"] is not True

@@ -98,7 +98,7 @@ class RandomForestModel(BaseModel):
             getattr(X, "columns", range(getattr(X, "shape", [0, 0])[1]))
         )
         try:
-            import shap  # optional; no wheels on some Python versions
+            import shap  # optional; not part of the canonical dependency sets
 
             explainer = shap.TreeExplainer(self.model)
             vals = np.abs(np.asarray(explainer.shap_values(X)))
@@ -119,7 +119,7 @@ class RandomForestModel(BaseModel):
         small sklearn GridSearchCV fallback. Applies and returns the best params.
         """
         try:
-            import optuna  # optional; no wheels on some Python versions
+            import optuna  # optional; not part of the canonical dependency sets
 
             def objective(trial):
                 params = {

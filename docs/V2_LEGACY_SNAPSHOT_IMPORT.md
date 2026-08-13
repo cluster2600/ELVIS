@@ -90,7 +90,7 @@ factories. Its typed failure boundary is
 of CLI JSON.
 
 The importer is an offline operator boundary. It is not called by `main.py`,
-the root Compose project, Ansible, the Apple launch path, application startup,
+the root compatibility project, retired deployment experiments, application startup,
 health, readiness, the trainer, or activation.
 
 ## Exact data boundary
@@ -456,7 +456,7 @@ activation.
 - Runtime DDL remains in the compatibility path.
 - Production bot and trainer identities, SCRAM secrets, restrictive HBA, and
   network policy are not composed.
-- Root Compose, Ansible, and Apple deployment paths are not migrated.
+- The root compatibility composition is not a V2 deployment path.
 - Runtime startup and health do not fail closed on V2 catalog, identity,
   generation, import, and authority evidence.
 - Side-effect-free shadow comparison, stale-writer removal, pause/rollback
@@ -464,7 +464,7 @@ activation.
 
 ## Verification status
 
-Acceptance requires focused contract checks under Python 3.10 and 3.14, a
+Acceptance requires focused contract checks under Python 3.14, a
 dedicated two-cluster PostgreSQL 15 suite, the complete PostgreSQL and
 non-PostgreSQL regressions, static checks, link validation, exact Mermaid
 source/render parity, visual inspection of both PNGs, and disposable-resource

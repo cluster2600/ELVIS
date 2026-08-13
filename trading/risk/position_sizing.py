@@ -167,7 +167,7 @@ def kelly_fraction(
         p = float(win_rate)
         win = float(avg_win)
         loss = float(avg_loss)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.debug("kelly_fraction: non-numeric inputs -> floor %.4f", floor)
         return floor
 
@@ -225,7 +225,7 @@ def kelly_from_trades(
     for trade in trades or ():
         try:
             pnl = float(trade["pnl"])
-        except (TypeError, KeyError, ValueError):
+        except TypeError, KeyError, ValueError:
             continue
         if math.isfinite(pnl):
             pnls.append(pnl)

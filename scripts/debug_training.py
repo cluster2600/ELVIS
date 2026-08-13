@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Debug helper script for ELVIS training system
 Diagnoses common issues and provides troubleshooting information
@@ -39,7 +39,6 @@ def check_required_packages():
         "pandas",
         "numpy",
         "torch",
-        "tensorflow",
         "sklearn",
         "hvac",
         "redis",
@@ -62,7 +61,7 @@ def check_required_packages():
 
     if missing_packages:
         print(f"\n⚠️  Missing packages: {', '.join(missing_packages)}")
-        print("💡 Install with: pip install " + " ".join(missing_packages))
+        print("💡 Install with: python3.14 -m pip install -e '.[ml]'")
     else:
         print("\n✅ All required packages are available")
 
@@ -245,15 +244,15 @@ def provide_recommendations():
     print()
 
     print("2. 📦 For missing dependencies:")
-    print("   - Install requirements: pip install -r requirements.txt")
+    print("   - Install requirements: python3.14 -m pip install -e '.[ml]'")
     print(
-        "   - Use virtual environment: python -m venv venv && source venv/bin/activate"
+        "   - Use virtual environment: python3.14 -m venv venv && source venv/bin/activate"
     )
     print()
 
     print("3. 🗄️  For database issues:")
     print("   - Check PostgreSQL is running: pg_ctl status")
-    print("   - Reset paper trading: python scripts/reset_paper_trading.py")
+    print("   - Reset paper trading: python3.14 scripts/reset_paper_trading.py")
     print()
 
     print("4. 🚀 For training issues:")
@@ -265,6 +264,10 @@ def provide_recommendations():
 
 def main():
     """Main diagnostic function"""
+    if sys.version_info[:2] != (3, 14):
+        print("❌ ELVIS V2 training requires Python 3.14")
+        raise SystemExit(1)
+
     print("🔧 ELVIS Training System Diagnostic Tool")
     print("=" * 50)
     print()

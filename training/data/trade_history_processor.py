@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Trade History Data Processor for Training Pipeline
 Extracts and processes trade history from the database for model training.

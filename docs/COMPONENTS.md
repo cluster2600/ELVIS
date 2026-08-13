@@ -1,7 +1,5 @@
 # ELVIS Components Reference
 
-> Extracted from the original README during the 2026-07 root cleanup; content preserved verbatim.
->
 > **Legacy component catalogue:** this material describes the compatibility
 > runtime and may include historical detail. It is not the canonical V2
 > component model. See the [V2 architecture](V2_ARCHITECTURE.md), then the
@@ -20,7 +18,7 @@ graph TB
     subgraph "Core Models"
         BaseModel[BaseModel Interface]
         RF[RandomForestModel]
-        NN[NeuralNetworkModel]
+        NN[Legacy NeuralNetworkModel wrapper]
         Trans[TransformerModel]
         Ensemble[EnsembleModel]
         RL[RL Agents]
@@ -135,13 +133,10 @@ classDiagram
     }
     
     class NeuralNetworkModel {
-        -model: tf.keras.Model
+        -model: unavailable by default
         -sequence_length: int
-        +create_sequences(data) Tuple
-        +train(X, y)
-        +predict(X) ndarray
-        +evaluate(X, y) Dict
-        +get_feature_importance() Dict
+        +load legacy artifact when backend supplied
+        +fail closed without backend
     }
     
     class TransformerModel {
@@ -189,9 +184,7 @@ classDiagram
     }
     
     class EnsembleStrategy {
-        -ydf_model: RandomForestModel
-        -coreml_model: NeuralNetworkModel
-        -mlx_model: Optional[LLMModel]
+        -validated_models: List[model]
         -executor: BaseExecutor
         -risk_manager: RiskManager
         +generate_signals(data) Tuple[bool, bool]
@@ -235,7 +228,7 @@ classDiagram
     EnsembleStrategy --> BaseExecutor
     EnsembleStrategy --> AdvancedRiskManager
     EnsembleStrategy --> RandomForestModel
-    EnsembleStrategy --> NeuralNetworkModel
+    EnsembleStrategy -.-> NeuralNetworkModel : legacy optional
 ```
 
 ### Data Processing
@@ -386,7 +379,10 @@ Implements a Random Forest classifier using scikit-learn (`RandomForestClassifie
 
 ### NeuralNetworkModel
 
-A TensorFlow/Keras-based LSTM neural network model for time series forecasting. Supports sequence creation, training with early stopping, prediction, evaluation, and model persistence. Feature importance is approximated via sensitivity analysis.
+A compatibility wrapper for old Keras artefacts. The supported Python 3.14
+distribution supplies no backend and does not train this model. Loading can be
+attempted only when a backend is separately supplied; otherwise it fails closed
+and the ensemble must continue without it.
 
 ### TransformerModel
 
@@ -428,7 +424,8 @@ Abstract base class defining methods for signal generation, position sizing, sto
 
 ### EnsembleStrategy
 
-Combines predictions from multiple models including YDF Random Forest, CoreML Neural Network, and optionally MLX LLM. Generates consensus trading signals and calculates position sizes based on risk.
+Combines technical, research, RL, Bonenkamp, and validated optional model votes.
+Retired YDF/CoreML placeholders are not active ensemble members.
 
 ---
 
@@ -496,16 +493,14 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 ### Documentation Files
 
 - [Verified Architecture (mermaid)](architecture.md)
-- [Historical Bot Architecture Mermaid](archive/v1/bot_architecture_mermaid.md)
 - [Documentation Index](README.md)
 - [Security Posture](../SECURITY.md)
-- [Vault Setup](VAULT_SETUP.md)
+- [Security guide](SECURITY_GUIDE.md)
 - [Trading System](trading_system.md)
 - [Paper Trading Setup](PAPER_TRADING_SETUP.md)
-- [Future Improvements](future_improvements.md)
 - [Random Forest Model Documentation](random_forest.md)
 - [Training Pipeline Documentation](training.md)
-- [Historical v0.2 Release Notes](archive/v1/RELEASE_NOTES.md)
+- [V1 restore manifest](archive/v1/README.md)
 
 ---
 

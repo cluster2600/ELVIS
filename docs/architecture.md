@@ -72,17 +72,13 @@ flowchart TD
 
 ## Notes on optional dependencies
 
-- `shap` and `optuna` have no Python 3.14 wheels yet; `explain_predictions` and
+- `shap` and `optuna` are omitted from the minimal install; `explain_predictions` and
   `tune_hyperparameters` **degrade gracefully** (feature-importance export and
   `GridSearchCV` respectively) so the documented interface works everywhere.
 - The synthetic YDF and CoreML ensemble members were retired: neither had a
   deployable, provenance-backed model. The tracked YDF placeholder scored 37.1%
   OOB accuracy, below its 39.3% majority-class baseline. The `[ml]` extra now
   contains only supported 3.14-compatible add-ons.
-- The unified PyTorch trainer and its optional TensorFlow path run in a
-  dedicated **Python 3.10 container**
-  (`docker/Dockerfile.ml310`, compose profile `ml`:
-  `docker compose --profile ml run --rm elvis-ml-trainer`). The two runtimes
-  share only the `models/` volume — never imports — so trained artifacts flow
-  to the 3.14 bot without dependency coupling. See
-  [UNIFIED_TRAINING_GUIDE.md](UNIFIED_TRAINING_GUIDE.md).
+- Python 3.14 is the only supported runtime. Optional model integrations without
+  compatible wheels remain import-guarded and are omitted rather than moved to
+  an older interpreter.

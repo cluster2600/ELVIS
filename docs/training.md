@@ -1,5 +1,8 @@
 # ELVIS Trading System - Model Training Documentation
 
+> **Compatibility paper-training reference.** Training does not deploy or
+> activate a model. Python 3.14 is required and `ACTIVE` remains a **NO-GO**.
+
 ## Overview
 
 This document describes the model training pipeline for the ELVIS trading
@@ -12,11 +15,12 @@ agents, evaluates, and writes explanation artifacts. Ensemble training,
 hyperparameter optimization, and explainability live in sibling modules that are
 imported on demand.
 
-> Reality check: several heavy libraries used here have **no Python 3.14
-> wheels** and are absent in CI / minimal environments — `optuna`, `shap`,
-> `lime`, `plotly`, `tensorflow`/`keras`. Every import of these is wrapped in a
-> `try/except ImportError` guard, and the code degrades gracefully when they are
-> missing. Do not assume they are installed. `xgboost` and `lightgbm` are
+> Reality check: several optional libraries may be absent from CI or minimal
+> environments — `optuna`, `shap`, `lime`, and `plotly`. Their imports are
+> guarded and their features remain inert when missing. The supported Python
+> 3.14 distribution has no Keras training backend; the legacy neural wrapper
+> can only attempt to read an old artefact when a backend is separately
+> supplied. `xgboost` and `lightgbm` are
 > likewise import-guarded: when present they are added as ensemble base models,
 > and when absent the ensembles simply drop those members. Install the full set
 > with the `ml` extra (`pip install -e '.[ml]'`).
@@ -546,7 +550,7 @@ import time. RL-agent explanations are intentionally skipped by the pipeline
 
 `HyperparameterOptimizer` wraps **Optuna** (TPE/random/CMA-ES samplers,
 median/percentile/hyperband/nop pruners, SQLite study storage by default). Optuna
-is an optional dependency (no Python 3.14 wheel, absent in CI), so its import is
+is an optional dependency omitted from the minimal install, so its import is
 guarded; this module is not invoked by the default `train_models.py` flow.
 
 ---
@@ -576,9 +580,9 @@ loop trains the small MLP in `ModelTrainer.train_epoch`).
 - **RL agents are largely scaffolding** — several `train`/`evaluate` methods are
   stubs, and the pipeline constructs the system without explicit `agent_types`,
   yielding placeholder agents.
-- **Optional heavy deps** (`optuna`, `shap`, `lime`, `plotly`, `tensorflow`) have
-  no Python 3.14 wheels and are guarded; features depending on them are inert
-  when the libraries are missing.
+- **Optional heavy deps** (`optuna`, `shap`, `lime`, and `plotly`) are guarded;
+  features depending on them are inert when the libraries are missing. Legacy
+  Keras training is not part of the supported distribution.
 - **RL-agent explanations are unsupported** and skipped.
 
 ---
@@ -642,5 +646,5 @@ python training/train_models.py \
 ### Related documentation
 - [Random Forest Model Documentation](random_forest.md)
 - [Enhanced Random Forest Guide](enhanced_random_forest_guide.md)
-- [Future Improvements](future_improvements.md)
+- [V2 migration roadmap](architecture_migration/04-migration-roadmap.md)
 - [Architecture Overview](../README.md)

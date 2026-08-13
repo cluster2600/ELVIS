@@ -75,7 +75,7 @@ target_bootstrap_intent)`, where the intent contains a pure
 `FreshTargetBootstrapIntent` and `FreshTargetRoleManifest`. The public port
 exposes only
 `inspect(context, /)`. None is called by `main.py`, a Compose dependency,
-Ansible, an Apple launch path, or a health probe.
+the retired deployment experiments, or a health probe.
 
 ## Preconditions
 
@@ -457,23 +457,17 @@ and never opens or provisions a V2 account.
 - runtime DDL remains in the compatibility path;
 - production bot and trainer identities, SCRAM secrets, HBA, and network policy
   are not composed;
-- root Compose, Ansible, and Apple deployment paths are not migrated;
+- the root compatibility composition is not a V2 deployment path;
 - runtime startup and health do not yet fail closed on V2 catalog, identity,
   generation, and authority evidence;
 - side-effect-free shadow comparison, reconciliation, stale-writer removal,
   rollback rehearsal, soak, and explicit operator approval remain pending.
 
-## Verification status
+## Verification requirement
 
-The frozen local snapshot passed 29 focused contract/startup-guard tests under
-both Python 3.10 and 3.14. The dedicated two-cluster PostgreSQL 15 suite passed
-3 scenarios, the complete PostgreSQL suite passed 470 tests, and the complete
-non-PostgreSQL suite passed 2,641 tests with 57 expected skips and 7 subtests.
-Black, isort, fatal Flake8, compilation, relative-link, diagram-artifact, and
-diff checks were green; disposable Docker resources were absent after cleanup.
-
-These scenarios prove `READY_FOR_FRESH_TARGET`, the adversarial `BLOCKED`
-branches, stable canonical hashing across fetch boundaries, read-only SQL,
-redacted output, and zero mutation of both databases. They do not prove
-deployment or cut-over. The dedicated pull-request CI job remains the remote
-acceptance gate.
+Acceptance requires the focused Python 3.14 contracts, two-cluster PostgreSQL
+15 scenarios, full regression gates, formatting, compilation, link/diagram
+checks, and zero disposable residue to pass on one frozen commit. Scenarios
+must cover `READY_FOR_FRESH_TARGET`, adversarial `BLOCKED` branches, stable
+hashing, read-only SQL, redaction, and zero mutation. The pull request and
+release record exact evidence; none of it proves deployment or cut-over.

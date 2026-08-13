@@ -58,7 +58,6 @@ models/
 .DS_Store
 
 # Development artifacts
-ansible/
 drl_agents/
 observability/grafana/
 images/

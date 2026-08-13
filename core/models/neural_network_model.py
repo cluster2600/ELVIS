@@ -10,19 +10,45 @@ from typing import Any, Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow.keras.layers import LSTM, BatchNormalization, Dense, Dropout
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.optimizers import Adam
+
+# The TensorFlow backend is not part of the supported Python 3.14 distribution.
+# Keep this legacy model importable so ensembles can load and fall back cleanly
+# when an old Keras artifact is configured.
+try:  # pragma: no cover - TensorFlow is intentionally absent from supported installs
+    from tensorflow.keras.callbacks import (
+        EarlyStopping,
+        ModelCheckpoint,
+        ReduceLROnPlateau,
+    )
+    from tensorflow.keras.layers import LSTM, BatchNormalization, Dense, Dropout
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.models import load_model as keras_load_model
+    from tensorflow.keras.optimizers import Adam
+
+    TENSORFLOW_AVAILABLE = True
+except ImportError:
+    Adam = None
+    BatchNormalization = None
+    Dense = None
+    Dropout = None
+    EarlyStopping = None
+    LSTM = None
+    ModelCheckpoint = None
+    ReduceLROnPlateau = None
+    Sequential = None
+    keras_load_model = None
+    TENSORFLOW_AVAILABLE = False
 
 from core.models.base_model import BaseModel
 
 
 class NeuralNetworkModel(BaseModel):
     """
-    Neural Network model for trading.
-    Uses TensorFlow/Keras for implementation.
+    Compatibility wrapper for legacy Keras neural-network artifacts.
+
+    The backend is intentionally unavailable in the supported Python 3.14
+    installation. Calls degrade through the class's existing logging and
+    neutral-prediction behavior when no separately supplied backend exists.
     """
 
     def __init__(self, logger: logging.Logger, **kwargs):
@@ -53,6 +79,14 @@ class NeuralNetworkModel(BaseModel):
         self.model = None
         self.scaler = None
 
+    @staticmethod
+    def _require_backend() -> None:
+        if not TENSORFLOW_AVAILABLE:
+            raise RuntimeError(
+                "The legacy Keras backend is not included in the supported "
+                "Python 3.14 installation"
+            )
+
     def load_model(self) -> None:
         """
         Load the model from disk.
@@ -66,7 +100,8 @@ class NeuralNetworkModel(BaseModel):
                 return
 
             # Load model
-            self.model = load_model(self.model_path)
+            self._require_backend()
+            self.model = keras_load_model(self.model_path)
 
             # Load scaler if available
             scaler_path = os.path.join(
@@ -136,13 +171,14 @@ class NeuralNetworkModel(BaseModel):
 
         return np.array(X_sequences), np.array(y_sequences)
 
-    def _build_model(self) -> tf.keras.Model:
+    def _build_model(self) -> Any:
         """
         Build the neural network model.
 
         Returns:
-            tf.keras.Model: The built model.
+            The built legacy Keras model.
         """
+        self._require_backend()
         model = Sequential()
 
         # LSTM layers
@@ -391,7 +427,8 @@ class NeuralNetworkModel(BaseModel):
             model_instance.model_path = path
 
             # Load model
-            model_instance.model = load_model(path)
+            model_instance._require_backend()
+            model_instance.model = keras_load_model(path)
 
             # Load scaler if available
             scaler_path = os.path.join(os.path.dirname(path), "nn_scaler.pkl")

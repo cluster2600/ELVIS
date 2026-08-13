@@ -1526,7 +1526,7 @@ def _uses_account_codec(source: str) -> bool:
                 try:
                     if importlib.util.resolve_name(target, package) == module:
                         return True
-                except (ImportError, ValueError):
+                except ImportError, ValueError:
                     pass
 
     for node in ast.walk(tree):

@@ -24,7 +24,7 @@ def classify_take_profit_regime(regime: object, volatility: object) -> Optional[
         return None
     try:
         volatility_value = float(volatility)
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return None
     if not np.isfinite(volatility_value) or volatility_value < 0.0:
         return None

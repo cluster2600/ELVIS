@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Enhanced Training Script with PostgreSQL Trade History Integration
 Trains ELVIS models using both market data and actual trade history from the database.
@@ -23,10 +23,6 @@ def setup_vault_environment():
     if not os.getenv("VAULT_ADDR"):
         os.environ["VAULT_ADDR"] = "http://127.0.0.1:8200"
         print("🔐 Set VAULT_ADDR to default: http://127.0.0.1:8200")
-
-    if not os.getenv("VAULT_TOKEN"):
-        os.environ["VAULT_TOKEN"] = "trading-bot-token"
-        print("🔐 Set VAULT_TOKEN to default: trading-bot-token")
 
     print(f"🔐 Using Vault URL: {os.getenv('VAULT_ADDR')}")
 

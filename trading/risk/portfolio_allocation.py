@@ -1,7 +1,6 @@
 """Multi-asset allocation, risk parity, and rebalancing helpers.
 
-Documented in docs/comprehensive_improvements.md (Portfolio Management). Pure
-numpy — no scipy — so it works on Python 3.14.
+Pure numpy — no scipy — so it works on Python 3.14.
 
 - inverse_volatility_weights: weights proportional to 1/sigma (normalized).
 - risk_parity_weights: iterative equal-risk-contribution (ERC) allocation.

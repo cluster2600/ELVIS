@@ -12,7 +12,7 @@ The helpers are pure (they only need ``logging``), so we load just their
 definitions out of ``main.py`` rather than importing the whole module. That
 keeps the test free of ``main``'s import-time side effects (Vault/Binance/DI
 bootstrap) and free of any heavy, CI-absent dependencies (torch, talib,
-optuna, shap, tensorflow, pytrends, tweepy).
+optuna, shap, pytrends, tweepy).
 """
 
 import ast

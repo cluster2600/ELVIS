@@ -252,7 +252,7 @@ class ConsoleDashboard:
         """Draws the left pane with general info, PnL, and system status."""
         y = start_y
 
-        # Time and Status - always live
+        # Time and paper-compatibility status
         try:
             current_time = datetime.now()
         except NameError:
@@ -270,7 +270,7 @@ class ConsoleDashboard:
             self.safe_addstr(
                 y + 2,
                 start_x,
-                f"Status: LIVE TRADING",
+                "Status: PAPER COMPATIBILITY",
                 curses.color_pair(1) | curses.A_BOLD,
             )
             y += 3
@@ -295,7 +295,7 @@ class ConsoleDashboard:
         self.safe_addstr(
             y + 2,
             start_x,
-            f"Status: LIVE TRADING",
+            "Status: PAPER COMPATIBILITY",
             curses.color_pair(1) | curses.A_BOLD,
         )
 
@@ -307,9 +307,9 @@ class ConsoleDashboard:
 
         risk_manager = self.config.get("risk_manager")
 
-        # Calculate live P&L directly from database
+        # Calculate paper P&L directly from the compatibility database
         try:
-            # Get live data from paper trading database
+            # Get current data from the paper trading database
             # Calculate realized P&L from RECENT trades only (after reset)
             from utils.paper_trade_db import (
                 get_all_trades,
@@ -1271,7 +1271,7 @@ class ConsoleDashboard:
                             ):
                                 try:
                                     response_time = f"{status.response_time*1000:.0f}ms"
-                                except (TypeError, ValueError):
+                                except TypeError, ValueError:
                                     response_time = ""
 
                         self.safe_addstr(
@@ -1870,7 +1870,7 @@ class ConsoleDashboard:
                     ):
                         continue  # Skip this candle if invalid data
 
-                except (ValueError, TypeError, KeyError):
+                except ValueError, TypeError, KeyError:
                     continue  # Skip this candle if conversion fails
 
                 # Calculate Y positions (inverted because screen coordinates)
@@ -1885,7 +1885,7 @@ class ConsoleDashboard:
                             - 1
                             - (normalized * (chart_height - 1))
                         )
-                    except (ValueError, TypeError, ZeroDivisionError):
+                    except ValueError, TypeError, ZeroDivisionError:
                         return start_y + 2  # Safe fallback position
 
                 open_y = price_to_y(open_price)
@@ -1972,9 +1972,9 @@ class ConsoleDashboard:
                                         " ",
                                         curses.color_pair(4),
                                     )
-                            except (ValueError, TypeError):
+                            except ValueError, TypeError:
                                 continue
-                except (ValueError, TypeError):
+                except ValueError, TypeError:
                     pass  # Skip volume rendering if data is invalid
 
         # Draw technical indicators at the bottom
@@ -2023,7 +2023,7 @@ class ConsoleDashboard:
             price_color = (
                 curses.color_pair(1) if price_change >= 0 else curses.color_pair(2)
             )
-        except (ValueError, TypeError, ZeroDivisionError):
+        except ValueError, TypeError, ZeroDivisionError:
             rsi_color = curses.color_pair(6)
             macd_color = curses.color_pair(6)
             price_color = curses.color_pair(6)
@@ -2185,7 +2185,7 @@ class ConsoleDashboard:
                         y, start_x, f"{price:7.1f} | {qty:7.4f} | {bar_str}", ask_color
                     )
                     y += 1
-                except (ValueError, TypeError, IndexError):
+                except ValueError, TypeError, IndexError:
                     continue
 
             if bids_data and asks_data:
@@ -2224,7 +2224,7 @@ class ConsoleDashboard:
                         y, start_x, f"{price:7.1f} | {qty:7.4f} | {bar_str}", bid_color
                     )
                     y += 1
-                except (ValueError, TypeError, IndexError):
+                except ValueError, TypeError, IndexError:
                     continue
 
             self.logger.debug("Market depth display completed successfully")

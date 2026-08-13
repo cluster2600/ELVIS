@@ -1160,7 +1160,7 @@ def _literal_dynamic_import(
         return None
     try:
         return importlib.util.resolve_name(target, package)
-    except (ImportError, ValueError):
+    except ImportError, ValueError:
         return None
 
 

@@ -716,7 +716,7 @@ def _uses_paper_settlement(source: str) -> bool:
                         "trading",
                     }:
                         return True
-                except (ImportError, ValueError):
+                except ImportError, ValueError:
                     pass
     return False
 

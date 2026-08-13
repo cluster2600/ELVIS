@@ -1,75 +1,37 @@
-# ELVIS V1 documentation archive
+# ELVIS V1 restore manifest
 
-This directory contains historical ELVIS V1 documents that no longer guide
-development or operations. They remain in Git for provenance and recovery.
+Historical V1 prose and unverified deployment helpers are intentionally absent
+from the active tree. Git tags preserve them more accurately than a second,
+stale documentation copy.
 
-The compatibility paper runtime is still authoritative. Its source code,
-deployment files, database baseline and operational runbooks remain outside
-this archive until the V2 cut-over, rollback rehearsal and explicit operator
-approval are complete. Moving a document here does not disable a runtime.
+## Forensic source
 
-## Archived in this slice
+Tag `v0.3.0` is the restore point for the retired surface:
 
-| Previous path | Archived path | Reason | Current reference |
-|---|---|---|---|
-| `docs/RELEASE_NOTES.md` | [RELEASE_NOTES.md](RELEASE_NOTES.md) | Historical v0.2.0 release snapshot | [Changelog](../../../CHANGELOG.md) |
-| `docs/test_suite_fixes.md` | [test_suite_fixes.md](test_suite_fixes.md) | Historical 2025 test repair report with obsolete counts | [V2 migration roadmap](../../architecture_migration/04-migration-roadmap.md) |
-| `docs/bot_architecture_mermaid.md` | [bot_architecture_mermaid.md](bot_architecture_mermaid.md) | Simplified topology superseded by verified architecture | [Compatibility architecture](../../architecture.md) |
+- `ansible/` playbooks, inventory, templates, and setup wrapper;
+- Apple-container guides and shell helpers;
+- superseded completion reports under `docs/archive/`;
+- the old 4,700-line migration execution log;
+- historical release notes and diagrams; and
+- removed unused configuration and vendored Galaxy roles.
+- manual network/database diagnostics formerly collected as release tests.
 
-One dead credential-copying helper was removed rather than archived:
-`scripts/setup_secure_config.sh` contained machine-specific absolute paths,
-read plaintext credential files, rewrote `.env`, and patched a nonexistent
-`your_bot_script.py`. Git history remains the recovery source.
-
-## Removed in slice 2
-
-- `ansible/roles/` contained 202 generated Ansible Galaxy role files that no
-  playbook consumed. Their unused declarations and `roles_path` were removed;
-  `ansible/requirements.yml` now installs only the collections the playbooks
-  may use.
-- `trading/config/data_config.yaml`, `model_config.yaml`, and
-  `risk_config.yaml` were never loaded by code, tests, Compose, Ansible, or CI.
-  Active `training/config/model_config.yaml` and
-  `trading/config/validation_config.yaml` remain tracked.
-
-For forensic inspection only, tag `v0.3.0` retains these exact files. Restore
-them temporarily with:
+Inspect a path without changing the worktree:
 
 ```bash
-git restore --source=v0.3.0 -- ansible/roles \
-  ansible/requirements.yml ansible/ansible.cfg ansible/run_setup.sh \
-  trading/config/data_config.yaml \
-  trading/config/model_config.yaml \
-  trading/config/risk_config.yaml
+git show v0.3.0:docs/APPLE_CONTAINER_SETUP.md
+git show v0.3.0:ansible/playbook.yml
+git ls-tree -r --name-only v0.3.0 docs/archive
 ```
 
-## Retirement boundary
+Restore only into a disposable review branch, never into an operating checkout:
 
-```mermaid
-flowchart LR
-    CURRENT["V1 compatibility runtime<br/>still authoritative"] --> GATE{"V2 cut-over evidence<br/>and operator approval"}
-    GATE -->|"not complete"| KEEP["Keep operational V1 code<br/>and runbooks"]
-    GATE -->|"complete"| ARCHIVE["Archive superseded docs<br/>and generated artefacts"]
-    ARCHIVE --> REVIEW["Retention review<br/>links, provenance, rollback"]
-    REVIEW --> DELETE["Delete only in a separate<br/>reviewed PR"]
+```bash
+git switch --detach v0.3.0
 ```
 
-Graph artefacts: [Mermaid source](../../../diagrams/v1-retirement-boundary.mmd),
-[editable Excalidraw](../../../diagrams/v1-retirement-boundary.excalidraw),
-[SVG](../../../diagrams/v1-retirement-boundary.svg), and
-[PNG](../../../diagrams/v1-retirement-boundary.png).
-
-## Archive policy
-
-1. Archive only an explicit, reviewed allowlist. A search for `V1` or `legacy`
-   is unsafe because those names also identify active migration contracts,
-   database relations, roles and API versions.
-2. Repair every incoming link and every relative link inside a moved document.
-3. Keep operational compatibility-runtime material in its current location
-   until the V2 authority transition is proven and approved.
-4. Treat `deploy/v2/*-v1.example.json` as versioned V2 manifests, not V1 debris.
-5. Delete archived material only in a separate reviewed change after retention,
-   provenance and rollback needs have been checked.
-
-Git preserves every move. To inspect the history of an archived document, run
-`git log --follow -- docs/archive/v1/<name>.md`.
+Those files contain obsolete credentials, leverage, interpreter, and
+deployment assumptions. The tag is provenance, not an install or rollback
+procedure. Runtime rollback remains a separately rehearsed database and
+authority operation described by the
+[V2 roadmap](../../architecture_migration/04-migration-roadmap.md).

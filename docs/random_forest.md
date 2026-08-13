@@ -44,9 +44,9 @@ it into the ensemble. The `EnhancedRandomForestModel` is trained via
 `scripts/train_enhanced_rf.py` and integrated through
 `core/models/integration/enhanced_rf_integration.py`.
 
-> **Optional dependencies.** SHAP and Optuna have no wheels on some Python
-> versions (including the 3.14 target). Their use is guarded, so these models
-> keep their documented scikit-learn fallbacks when either is unavailable.
+> **Optional dependencies.** SHAP and Optuna are not included in the minimal
+> ELVIS installation. Their use is guarded, so these models keep their
+> documented scikit-learn fallbacks when either is unavailable.
 
 ---
 

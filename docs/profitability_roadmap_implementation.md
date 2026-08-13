@@ -1,18 +1,14 @@
 # Profitability Roadmap — Implementation Status
 
-Implementation of the 15 ideas in [`profitability_roadmap.md`](./profitability_roadmap.md).
-Every mechanism below exists in code, is unit-tested, and (where it belongs in
-the live loop) is wired into `main.py` behind an environment flag.
-
-> **Honesty note:** the roadmap's win-rate and revenue projections
-> (35% → 75%+, $1k → $25k/month) are the roadmap author's estimates, **not
-> verified results**. What this implementation delivers is the *mechanisms*,
-> each individually tested. Measure impact in paper trading before believing
-> any number.
+Implementation status for the experimental mechanisms in
+[`profitability_roadmap.md`](./profitability_roadmap.md). Every item below is a
+code or wiring claim, not a performance claim. Measure it on held-out paper
+data; no return, win-rate, Sharpe, revenue, or live-equivalence result is
+asserted.
 
 ## Status by item
 
-### 🟢 Wired into the live loop, on by default
+### 🟢 Wired into the compatibility paper loop, on by default
 
 - **#1 Market regime detector** — `trading/analysis/market_regime_detector.py`
   Runs in the signal loop with the winrate filter (pre-existing wiring); its

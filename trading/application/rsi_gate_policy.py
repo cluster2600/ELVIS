@@ -28,7 +28,7 @@ class RsiGatePolicy:
 
         try:
             rsi = require_finite_real("rsi", self.rsi)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return
         object.__setattr__(self, "rsi", rsi)
 
@@ -36,7 +36,7 @@ class RsiGatePolicy:
         """Apply strict legacy boundaries and fail closed on invalid readings."""
         try:
             rsi = require_finite_real("rsi", self.rsi)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return SignalPolicyResult(veto=True, reasons=("unavailable",))
 
         if not 0.0 <= rsi <= 100.0:

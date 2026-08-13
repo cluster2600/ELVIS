@@ -307,7 +307,7 @@ ephemeral PostgreSQL instance.
 - a strong and growing pytest suite around individual filters, sizing, exits,
   exchange behaviour, and model feedback;
 - explicit paper mode and a visible warning that live mode is not unattended;
-- model fallback support across Python 3.14 and a separate Python 3.10 ML image;
+- import-guarded model fallbacks and the now-retired split ML experiment image;
 - existing fee, cooldown, order-flow, multi-timeframe, and exit modules;
 - central logging, metrics, dashboard, and OpenBao/Vault integration; and
 - recent discipline around targeted fixes and source-backed documentation.

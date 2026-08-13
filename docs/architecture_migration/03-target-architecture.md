@@ -1634,7 +1634,7 @@ runbook](../V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
 
 This slice still has no credential writer, session terminator, activation call,
 startup hook, runtime container wiring, or runtime consumer. The remaining c3
-deployment workflow must supply production Compose/Ansible role and
+deployment workflow must supply production runtime composition and
 SCRAM-secret provisioning, production HBA/network policy, credential rotation,
 real-volume rehearsal, and removal of migration or other DDL authority from
 runtime processes. M9b.14d must then compose the dedicated runtime identities

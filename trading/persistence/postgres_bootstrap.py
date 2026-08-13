@@ -2302,7 +2302,7 @@ class PostgresBootstrap:
                                 cursor.fetchone(), 3, "database authority"
                             )
                             exact = database == (context.admin_role, True, False)
-            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+            except PostgresBootstrapDriftError, PostgresBootstrapMigrationError:
                 exact = False
             except Exception:
                 inspection_failed = True
@@ -2549,7 +2549,7 @@ class PostgresBootstrap:
                             "PostgreSQL catalog is not eligible for demotion"
                         )
                 connection.rollback()
-            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+            except PostgresBootstrapDriftError, PostgresBootstrapMigrationError:
                 _rollback_quietly(connection)
                 raise
             except Exception:
@@ -2891,7 +2891,7 @@ class PostgresBootstrap:
         inspection_failed = False
         try:
             cls._inspect_pre_role_catalog(cursor, context)
-        except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+        except PostgresBootstrapDriftError, PostgresBootstrapMigrationError:
             raise
         except Exception:
             inspection_failed = True
@@ -3072,7 +3072,7 @@ class PostgresBootstrap:
                             allow_staged_no_login=True,
                         )
                         mutated = True
-            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+            except PostgresBootstrapDriftError, PostgresBootstrapMigrationError:
                 _rollback_quietly(connection)
                 raise
             except Exception:
@@ -4405,7 +4405,7 @@ class PostgresBootstrap:
                         raise PostgresBootstrapDriftError(
                             "PostgreSQL catalog cutover did not become authoritative"
                         )
-            except (PostgresBootstrapDriftError, PostgresBootstrapMigrationError):
+            except PostgresBootstrapDriftError, PostgresBootstrapMigrationError:
                 _rollback_quietly(connection)
                 raise
             except Exception:

@@ -120,7 +120,7 @@ class AdaptiveEnsembleWeights:
         """
         try:
             observed = float(accuracy)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.warning("Ignoring non-numeric accuracy %r for %s", accuracy, model)
             return
         if not math.isfinite(observed):
@@ -163,7 +163,7 @@ class AdaptiveEnsembleWeights:
                 continue
             try:
                 pred = float(value)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 logger.warning(
                     "Skipping non-numeric prediction %r for %s", value, model
                 )
@@ -271,7 +271,7 @@ class AdaptiveEnsembleWeights:
         """Clamp an accuracy to ``[0, 1]``; non-finite values become 0.0."""
         try:
             value = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             logger.warning("Non-numeric accuracy %r for %s; using 0.0", value, model)
             return 0.0
         if not math.isfinite(value):

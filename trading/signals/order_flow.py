@@ -63,7 +63,7 @@ def _side_liquidity(levels: Any, depth: int) -> float:
     for level in list(levels)[:depth]:
         try:
             qty = float(level[1])
-        except (TypeError, ValueError, IndexError, KeyError):
+        except TypeError, ValueError, IndexError, KeyError:
             logger.debug("Skipping malformed order-book level: %r", level)
             continue
         if not math.isfinite(qty) or qty < 0.0:
@@ -125,7 +125,7 @@ def order_flow_signal(imbalance: float, threshold: float = DEFAULT_THRESHOLD) ->
     """
     try:
         value = float(imbalance)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.debug("Non-numeric imbalance %r; returning NEUTRAL", imbalance)
         return NEUTRAL
     if math.isnan(value):

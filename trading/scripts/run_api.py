@@ -12,27 +12,48 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from trading.api.app import app
 from utils.logger_config import setup_logging
 
-# Setup logging
-logger = setup_logging(app_name="API", log_level="INFO", enable_file_logging=True)
 
-
-def main():
-    parser = argparse.ArgumentParser(description="Run ELVIS Trading Bot REST API")
-    parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run the ELVIS paper-compatibility control API"
     )
     parser.add_argument(
-        "--port", type=int, default=5000, help="Port to bind to (default: 5000)"
+        "--host",
+        type=str,
+        default=os.getenv("API_HOST", "127.0.0.1"),
+        help="Host to bind to (default: API_HOST or 127.0.0.1)",
     )
-    parser.add_argument("--debug", action="store_true", help="Run in debug mode")
     parser.add_argument(
-        "--workers", type=int, default=1, help="Number of worker processes (default: 1)"
+        "--port",
+        type=int,
+        default=int(os.getenv("API_PORT", "5000")),
+        help="Port to bind to (default: API_PORT or 5000)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=os.getenv("API_DEBUG", "").lower() == "true",
+        help="Run in debug mode (default: API_DEBUG or false)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.getenv("API_WORKERS", "1")),
+        help="Number of worker processes (default: API_WORKERS or 1)",
+    )
+    return parser
 
-    args = parser.parse_args()
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parser().parse_args(argv)
+
+    # Import only after argument parsing so --help remains dependency-free. The
+    # control API itself still fails closed when API_SECRET_KEY is absent.
+    from trading.api.app import app
+
+    logger = setup_logging(app_name="API", log_level="INFO", enable_file_logging=True)
 
     logger.info(f"Starting ELVIS Trading Bot API on {args.host}:{args.port}")
     logger.info(

@@ -1,8 +1,7 @@
 """Model registry with version control + approval workflow.
 
-Documented in docs/comprehensive_improvements.md (MLOps). Persists a JSON
-manifest at models/registry.json mapping model name -> list of versions. Each
-version records a content hash (sha256 of the model file), the source path,
+Persists a JSON manifest at models/registry.json mapping each model name to its
+versions. Each version records a content hash (sha256 of the model file), the source path,
 optional metrics, an approval status, and a timestamp. Promotion to
 "production" requires explicit approval, giving a minimal deploy-approval gate.
 

@@ -893,7 +893,7 @@ def _migration_metadata_is_exact(cursor: object) -> bool:
             and tuple(constraint[1]) == (1,)
             and constraint[2:] == (False, False, True)
         )
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return False
 
 
@@ -925,7 +925,7 @@ def _read_migration_evidence(
             identity = MigrationIdentity(row[0], row[1], row[2])
             if identity.version != len(decoded) + 1:
                 raise ValueError("migration versions are not contiguous")
-        except (PaperAccountReadinessStorageError, TypeError, ValueError):
+        except PaperAccountReadinessStorageError, TypeError, ValueError:
             return tuple(decoded), (_raw_migration_drift(),)
         decoded.append(identity)
     return tuple(decoded), ()
@@ -1075,7 +1075,7 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
             )
         )
         return trigger_rows == expected_triggers
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return False
 
 
@@ -1310,7 +1310,7 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
                 "s",
             ),
         )
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return False
 
 
@@ -1395,7 +1395,7 @@ def _runtime_activation_capabilities_catalog_is_exact(cursor: object) -> bool:
             and mutation_function[13] == fence_function[13]
             and mutation_function[14:] == (True, True, True)
         )
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return False
 
 
@@ -1415,7 +1415,7 @@ def _read_runtime_control(
         if type(row[2]) is not int or not 0 <= row[2] <= (1 << 63) - 1:
             return None
         return row[1], row[2]
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return None
 
 
@@ -1499,7 +1499,7 @@ def _runtime_generation_evidence_is_exact(
             ):
                 return False
         return True
-    except (PaperAccountReadinessStorageError, TypeError, ValueError):
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
         return False
 
 

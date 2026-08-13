@@ -2,6 +2,7 @@
 Tests for Ensemble Model
 """
 
+import logging
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -9,13 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytest.importorskip(
-    "tensorflow",
-    reason="NeuralNetworkModel/EnsembleModel require tensorflow, unavailable on this Python",
-)
-
-import logging
-
+from core.models import neural_network_model as legacy_neural_backend
 from core.models.ensemble_model import EnsembleModel
 from core.models.neural_network_model import NeuralNetworkModel
 from core.models.random_forest_model import RandomForestModel
@@ -36,6 +31,17 @@ def sample_price_data():
             "low": np.random.uniform(48000, 49000, 100),
         }
     )
+
+
+def test_legacy_neural_backend_is_explicitly_unavailable_without_tensorflow(
+    monkeypatch, mock_logger
+):
+    """The retired backend remains importable but cannot start on 3.14."""
+    monkeypatch.setattr(legacy_neural_backend, "TENSORFLOW_AVAILABLE", False)
+    model = NeuralNetworkModel(logger=mock_logger)
+
+    with pytest.raises(RuntimeError, match="not included.*Python 3.14"):
+        model._build_model()
 
 
 class TestEnsembleModel:

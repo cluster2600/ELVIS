@@ -1,13 +1,14 @@
 # ELVIS V2 architecture
 
-ELVIS V2 is an architecture programme in progress. It replaces implicit,
+ELVIS V2 is an architecture programme in progress with an installable operator
+preview. It replaces implicit,
 coupled paper-trading state changes with deterministic decisions, durable
 journals, single-owner transactions, and an explicit database-enforced
 activation boundary.
 
-> **V2 is not released or deployed.** The compatibility paper runtime remains
-> authoritative. Implemented V2 persistence and activation components are
-> dormant unless the migration ledger says otherwise. `ACTIVE` remains a
+> **The preview is not a deployed runtime.** The compatibility paper runtime
+> remains authoritative. Implemented V2 persistence and activation components
+> are dormant unless the migration ledger says otherwise. `ACTIVE` remains a
 > **NO-GO** until every cut-over gate in the
 > [migration roadmap](architecture_migration/04-migration-roadmap.md) is closed.
 > Live trading is not an executable capability.
@@ -132,16 +133,14 @@ Neither word means deployed.
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
 | Deployment composition | Offline bootstrap, read-only fresh-target preflight and reconciliation review, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
 | Cut-over evidence | Raw V1 snapshot preservation and a non-authoritative two-candidate opening review implemented; source/runtime provenance, a coherent enforced review window, provenance selection, account opening, V2 replay, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
-| Cleanup | Historical V1 documents and one proven-dead credential copier are archived/removed; runtime owners retire only after parity and cut-over proof | Started; no authority change |
+| Cleanup | Redundant V1 prose and unverified deployment helpers are removed; runtime owners retire only after parity and cut-over proof | In progress; no authority change |
 
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
 authoritative slice-by-slice status ledger. This summary intentionally does not
 duplicate its test counts or acceptance evidence.
 
-The V2 application target is Python 3.14. Python 3.10 remains the package's
-temporary compatibility floor and the runtime for the isolated TensorFlow/ML
-trainer, so CI verifies both interpreters. Retiring 3.10 requires its own
-explicit migration after that trainer boundary is replaced or upgraded.
+Python 3.14 is the only supported interpreter. Optional ML integrations without
+compatible wheels are skipped; they do not create a second supported runtime.
 
 ## Incremental delivery gates
 
@@ -227,8 +226,8 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Read-only opening-candidate comparison and no-opening boundary | [Legacy snapshot reconciliation](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
-| Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |
-| Historical or superseded claims | [V1 archive](archive/v1/README.md), `docs/archive/`, and explicitly labelled legacy guides |
+| Installation and deployment boundary | [V2 install](../INSTALL_V2.md) and [deployment status](DEPLOYMENT.md) |
+| Historical or superseded claims | [V1 restore manifest](archive/v1/README.md) and Git tags |
 
 When documents disagree, source code and the roadmap's latest committed
 implementation record win. A generated artefact, successful test, or dormant

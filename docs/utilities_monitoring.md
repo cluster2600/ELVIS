@@ -1,5 +1,9 @@
 # ELVIS Trading System - Utilities & Monitoring Documentation
 
+> **Compatibility paper tooling only.** These utilities belong to the retained
+> paper runtime and are not included in the V2 operator image. They do not
+> authorise live trading or change the V2 `ACTIVE` **NO-GO** boundary.
+
 ## Overview
 
 This document describes the utilities and monitoring infrastructure for the
@@ -205,8 +209,8 @@ Key facts (verified):
   `create_api_tester` used by the dashboard.
 - A standalone `main(stdscr)` entry point exists in the module; in normal
   operation the dashboard is launched from `main.py` via
-  `ConsoleDashboardManager`. `scripts/run_console_dashboard.sh` runs the whole bot
-  (`main.py --mode paper`) in a container with the dashboard attached.
+  `ConsoleDashboardManager`. The retired host-network container wrapper is not
+  part of the supported surface.
 
 ### 3. Trade-History API (`trading/utils/trade_history_api.py`)
 

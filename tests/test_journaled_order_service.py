@@ -576,7 +576,7 @@ def _literal_dynamic_import(
         return None
     try:
         return resolve_name(target, package)
-    except (ImportError, ValueError):
+    except ImportError, ValueError:
         return None
 
 

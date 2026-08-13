@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Train LLM-enhanced models using ALL individual paper trades with patient LLM handling.
 This version is specifically designed for slow LLMs that need more time.

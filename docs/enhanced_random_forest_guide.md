@@ -1,5 +1,10 @@
 # Enhanced Random Forest Implementation Guide
 
+> **Compatibility paper tooling only.** This guide describes an experimental
+> model path retained for paper research. It is not part of the V2 operator
+> image, does not authorise live trading, and does not change the V2 `ACTIVE`
+> **NO-GO** boundary.
+
 ## Overview
 
 The Enhanced Random Forest is a scikit-learn `RandomForestClassifier` wrapped in
@@ -13,9 +18,9 @@ Every "enhanced" capability that depends on a third-party package is **optional
 and guarded** — if the package is not installed, the feature is silently
 disabled and the model still trains and predicts with sklearn + joblib.
 
-> Python-3.14 note: `optuna` and `shap` are **not** pinned in `requirements.txt`
-> and have no reliable 3.14 wheels yet. On a stock 3.14 environment they are
-> absent, so hyperparameter optimization and SHAP explanations are disabled by
+> Python-3.14 note: `optuna` and `shap` are **not** pinned in the minimal
+> installation. There they are absent, so hyperparameter optimization and SHAP
+> explanations are disabled by
 > default. The model falls back to hand-tuned default hyperparameters. This
 > model is **sklearn**, not TensorFlow Decision Forests; the unrelated synthetic
 > YDF Ensemble placeholder was retired.
@@ -209,10 +214,11 @@ Behavior worth knowing:
 
 The core model works with what is already in `requirements.txt` (`scikit-learn`,
 `joblib`, `pandas`, `numpy`, `ta`, `prometheus-client`). The optional extras are
-**not** pinned and may not install on Python 3.14:
+**not** included in the minimal installation and must be resolved and reviewed
+separately:
 
 ```bash
-# Optional — only if wheels are available for your Python version:
+# Optional local experiment; resolve and review separately:
 pip install optuna shap
 ```
 
@@ -320,14 +326,14 @@ options — those do not exist in the code.
 
 ## Troubleshooting
 
-**Optuna not installed / search disabled** — expected on Python 3.14. The model
-logs a warning and uses default hyperparameters. Construct with
-`enable_optuna=False` to silence the warning, or install `optuna` if a wheel is
-available.
+**Optuna not installed / search disabled** — expected in the minimal
+installation. The model logs a warning and uses default hyperparameters.
+Construct with `enable_optuna=False` to silence the warning, or install and
+review `optuna` separately.
 
-**SHAP not installed / explanations disabled** — same story; `explain_prediction`
-returns `None`. Install `shap` if a wheel is available, else run with
-`enable_shap=False`.
+**SHAP not installed / explanations disabled** — same story;
+`explain_prediction` returns `None`. Install and review `shap` separately, or
+run with `enable_shap=False`.
 
 **Technical indicators missing** — if `import ta` fails, the pipeline logs
 "TA-Lib not available - using basic indicators only" and falls back to a reduced
@@ -356,7 +362,7 @@ The plain model lives at `core/models/random_forest_model.py`
 (`class RandomForestModel(BaseModel)`). To switch:
 
 1. **Back up** the current model artifacts.
-2. **(Optional)** install `optuna`/`shap` if wheels are available for your Python.
+2. **(Optional)** install and review `optuna`/`shap` separately.
 3. **Update imports:**
    ```python
    # from core.models.random_forest_model import RandomForestModel

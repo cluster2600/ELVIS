@@ -44,7 +44,7 @@ def _has_finite_tail_values(
             for column in required_columns
             for value in frame[column].iloc[-rows:]
         )
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return False
 
 

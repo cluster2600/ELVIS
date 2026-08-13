@@ -2101,7 +2101,7 @@ def _uses_readiness_repository(source):
                         == _REPOSITORY_MODULE
                     ):
                         return True
-                except (ImportError, ValueError):
+                except ImportError, ValueError:
                     pass
 
     for node in ast.walk(tree):

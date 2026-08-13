@@ -6,6 +6,8 @@ import psutil
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from trading import __version__ as ELVIS_VERSION
+
 try:
     from prometheus_client import (
         CONTENT_TYPE_LATEST,
@@ -125,6 +127,8 @@ LARGEST_LOSS = Gauge("elvis_largest_loss", "Largest losing trade")
 
 # Initialize PriceFetcher for Prometheus metrics
 price_fetcher = None
+_price_fetcher_started = False
+_price_fetcher_start_lock = threading.Lock()
 
 
 def initialize_price_fetcher():
@@ -157,8 +161,18 @@ def initialize_price_fetcher():
         logger.error(f"❌ Failed to initialize PriceFetcher: {e}")
 
 
-# Start PriceFetcher in background thread
-threading.Thread(target=initialize_price_fetcher, daemon=True).start()
+def _start_price_fetcher_once() -> None:
+    """Start market polling only when the compatibility server is launched."""
+    global _price_fetcher_started
+    with _price_fetcher_start_lock:
+        if _price_fetcher_started:
+            return
+        threading.Thread(
+            target=initialize_price_fetcher,
+            name="elvis-price-fetcher",
+            daemon=True,
+        ).start()
+        _price_fetcher_started = True
 
 
 def update_trading_metrics():
@@ -361,7 +375,7 @@ def format_timestamp(ts):
 def safe_float(value):
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 
@@ -940,7 +954,7 @@ def health():
         {
             "status": "healthy",
             "service": "trade_history_api",
-            "version": "1.0.0",
+            "version": ELVIS_VERSION,
             "kill_switch_active": KILL_SWITCH_ACTIVE,
         }
     )
@@ -951,10 +965,11 @@ def start_trade_history_server(host=None, port=5050):
     """
     Starts the trade history Flask API server.
 
-    Binds 127.0.0.1 by default (SECURITY.md); set TRADE_API_HOST=0.0.0.0 to
-    expose it (docker-compose does this for container networking).
+    Binds 127.0.0.1 by default (SECURITY.md); set
+    TRADE_HISTORY_API_HOST=0.0.0.0 only for intentional external exposure.
     """
-    host = host or _os.getenv("TRADE_API_HOST", "127.0.0.1")
+    host = host or _os.getenv("TRADE_HISTORY_API_HOST", "127.0.0.1")
+    _start_price_fetcher_once()
     print(f"Starting Trade History Server on {host}:{port}...")
     app.run(host=host, port=port)
 

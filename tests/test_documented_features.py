@@ -5,6 +5,7 @@ loader, and the RandomForest explainability/tuning methods.
 """
 
 import os
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -44,17 +45,19 @@ def test_default_leverage_env_override():
         del os.environ["DEFAULT_LEVERAGE"]
 
 
-def test_export_utils_csv_and_prometheus():
+def test_export_utils_csv_and_prometheus(tmp_path):
     from core.viz.export_utils import export_to_csv, push_metrics_to_prometheus
 
     p = export_to_csv(
-        [{"a": 1, "b": 2}, {"a": 3, "b": 4}], "/tmp/_elvis_test_export.csv"
+        [{"a": 1, "b": 2}, {"a": 3, "b": 4}],
+        str(tmp_path / "export.csv"),
     )
     assert open(p).read().splitlines()[0] == "a,b"
-    # no gateway running -> returns False, does not raise
-    assert (
-        push_metrics_to_prometheus({"x": 1.0}, "test", gateway="127.0.0.1:1") is False
-    )
+    with patch(
+        "prometheus_client.push_to_gateway", side_effect=OSError("offline")
+    ) as push:
+        assert push_metrics_to_prometheus({"x": 1.0}, "test") is False
+    push.assert_called_once()
 
 
 def _fitted_rf():
@@ -82,11 +85,15 @@ def test_rf_tune_hyperparameters_applies_params():
     assert m.model.get_params()["n_estimators"] == best["n_estimators"]
 
 
-def test_export_feature_importance_sorted():
+def test_export_feature_importance_sorted(tmp_path):
     from core.viz.export_utils import export_feature_importance
 
     m, X, _ = _fitted_rf()
-    p = export_feature_importance(m.model, list(X.columns), "/tmp/_elvis_fi.csv")
+    p = export_feature_importance(
+        m.model,
+        list(X.columns),
+        str(tmp_path / "feature-importance.csv"),
+    )
     rows = open(p).read().splitlines()
     assert rows[0] == "feature,importance"
     vals = [float(r.split(",")[1]) for r in rows[1:]]
