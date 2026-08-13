@@ -260,6 +260,9 @@ bootstrap around those capabilities. M9b.14c3b exposes that library through a
 dormant, one-shot offline CLI; none of these slices is wired into production.
 M9b.14c3c1 adds a separate fresh PostgreSQL 15 rehearsal whose internal-only
 Compose project contains no bot, trainer, activation, or active volume.
+M9b.14c3c2 adds a separate read-only source-clone/fresh-target preflight; it
+binds canonical evidence for a later importer but copies no data and returns no
+lasting authority.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1468,6 +1471,68 @@ separate pinned PostgreSQL 15 image, SCRAM-only HBA allowlist, external-file
 secret boundary, marked disposable volume, and one-shot bootstrap container.
 It intentionally does not override the root Compose topology or prove that the
 existing shared-owner volume is adoptable.
+
+M9b.14c3c2 chooses the fresh-target migration branch through the dormant
+`trading.application.fresh_target_cutover` inspection port and
+`trading.persistence.postgres_cutover_preflight` adapter. The source endpoint
+must be a stopped, verified physical clone of the legacy cluster; the target
+must be a separately bootstrapped, terminal V2 database. The public operation
+accepts exactly `FreshTargetCutoverContext(source_expected_database,
+source_expected_role, target_bootstrap_intent)` through `inspect(context, /)`.
+The intent is application-owned and contains only a
+`FreshTargetBootstrapIntent` plus `FreshTargetRoleManifest`; the external JSON
+retains the operator-facing `target.bootstrap_context` key.
+It is read-only and exposes no reconcile, repair, import, migration, role,
+session-termination, or activation method. Both inspection transactions and
+every connection are closed before a result is returned.
+
+PostgreSQL cluster identity is part of admission. The source and target
+`pg_control_system().system_identifier` values must be different, so two
+databases in one cluster cannot masquerade as a source/target pair. The exact
+V1 `0001` `np` import inventory must contain exactly seven legacy tables, seven
+owned sequences, and ten canonical indexes with the expected columns,
+constraints, persistence, and declared shared-owner authority. It must contain
+no migration ledger, V2 table, routine, type, user trigger, surplus ACL,
+default ACL, or other `np` object. Unrelated source schemas are outside this
+closed inventory; the importer remains allowlisted to the seven
+schema-qualified relations. Their rows are read in a stable order and
+encoded as an ordered stream of typed canonical values before incremental
+SHA-256 accumulation. Per-relation evidence includes its name, row count,
+primary-key minimum and maximum, and digest. This avoids unbounded
+materialization and prevents locale, display-format, query-plan, null, or
+cross-type ambiguity from changing the fingerprint contract. The source must
+have no other session, open position, or semantically invalid admitted row.
+The source and target system identifiers are serialized as decimal strings.
+The target must match the exact terminal V2 catalog, the `LEGACY`
+generation-zero runtime-control row, and the declared empty import boundary.
+That boundary proves row emptiness, not the current `last_value`/`is_called`
+state of the seven legacy serial sequences. The later bounded importer must
+validate and normalize those sequence states after import and bind them into
+its parity evidence.
+
+The one-shot command is `python -m scripts.postgres_cutover_preflight --config
+<fresh-target-preflight-v1.json> --inspect --confirm-stopped-source-clone
+--confirm-exclusive-database-window`. Both confirmations are operator
+assertions, not database fences: a separate maintenance procedure must stop
+source writers before cloning and enforce an exclusive database window during
+inspection. The CLI uses external libpq services only and never accepts a DSN,
+host, port, user, or password in the non-secret JSON.
+
+Exit `0` returns `READY_FOR_FRESH_TARGET`; exit `21` returns `BLOCKED` with the
+applicable exact codes `SOURCE_IDENTITY`, `SOURCE_ACTIVE_SESSIONS`,
+`SOURCE_SCHEMA`, `SOURCE_OPEN_POSITIONS`, `SOURCE_DATA_QUALITY`, `SAME_CLUSTER`,
+`TARGET_NOT_COMPLETE`, `TARGET_MODE`, and `TARGET_NOT_EMPTY`. Exits `2`, `20`,
+and `70` represent input, storage, and internal failure. The compact receipt
+always marks itself stale on return and snapshot-non-authoritative and excludes
+connection details, service and role identifiers, SQL, exception messages, and
+arbitrary error text. Even `READY_FOR_FRESH_TARGET` is non-authoritative; no
+lock or reservation survives the inspection. The full command, evidence,
+rollback, and no-copy boundary are defined in the
+[fresh-target cut-over runbook](../V2_FRESH_TARGET_CUTOVER.md).
+
+The next bounded slice must design the importer, exact row mapping, source
+fingerprint binding, target replay checksum, interruption recovery, and parity
+proof. M9b.14c3c2 copies no data and cannot call bootstrap or activation.
 
 This slice still has no credential writer, session terminator, activation call,
 startup hook, runtime container wiring, or runtime consumer. The remaining c3

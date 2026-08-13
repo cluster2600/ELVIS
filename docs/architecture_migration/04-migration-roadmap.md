@@ -38,7 +38,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c1 isolated fresh-cluster rehearsal verified locally; pull-request CI and runtime cut-over remain pending) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c2 stopped-clone/fresh-target read-only preflight implemented locally; pull-request CI, data import, and runtime cut-over remain pending) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4303,9 +4303,11 @@ return exit `0` twice. The composition contains no bot, trainer, activation,
 runtime startup hook, or active ELVIS volume.
 
 The current shared-owner volume is explicitly outside c3c1. It requires a
-stopped physical clone and a separate c3c2 ownership-remediation or fresh-target
-data-migration decision. The active root Compose, Ansible, Apple scripts,
-runtime DDL, startup health, and `ACTIVE` authority remain unchanged.
+stopped physical clone and a separate ownership-remediation or fresh-target
+data-migration decision. M9b.14c3c2 selects the fresh-target branch through a
+read-only preflight; it does not mount or copy the volume. The active root
+Compose, Ansible, Apple scripts, runtime DDL, startup health, and `ACTIVE`
+authority remain unchanged.
 
 The frozen c3c1 contract suite passed 6 tests under Python 3.10 and 6 under
 Python 3.14. The opt-in Docker/PostgreSQL 15 rehearsal passed 2 scenarios: the
@@ -4319,6 +4321,72 @@ shell syntax, Black, isort, fatal Flake8 selectors, compilation, relative-link
 validation, the three Mermaid source/render sets, and `git diff --check` were
 green. The dedicated GitHub Actions rehearsal remains the pull-request
 acceptance gate; these results do not prove deployment or cut-over.
+
+### M9b.14c3c2 stopped-clone/fresh-target preflight
+
+M9b.14c3c2 chooses a fresh-target migration path rather than repairing the
+legacy shared-superuser ownership boundary in place. It adds the dormant
+`trading.application.fresh_target_cutover` contract, the read-only
+`trading.persistence.postgres_cutover_preflight` adapter, and the one-shot
+`scripts.postgres_cutover_preflight` CLI. The source must be a verified physical
+clone captured after all source writers stop; the target must be a separate,
+freshly bootstrapped terminal V2 database. The active source volume is never an
+input.
+
+The CLI requires `--config`, `--inspect`,
+`--confirm-stopped-source-clone`, and
+`--confirm-exclusive-database-window`. Both confirmations are operator
+assertions. The command cannot establish external quiescence or prevent a
+non-cooperating database administrator from changing evidence. It has no apply,
+repair, copy, reconcile, bootstrap, session-termination, or activation mode.
+
+Admission requires different PostgreSQL cluster system identifiers and an
+exact V1 `0001` `np` import surface: seven tables, seven owned sequences, ten
+canonical indexes, and the declared shared owner. It admits no migration
+ledger, V2 table, routine, type, user trigger, surplus ACL, default ACL, or
+other `np` object. Unrelated
+source schemas are outside this inventory; the later importer remains
+allowlisted to these seven schema-qualified relations. Admission also requires
+no other source session or open position, semantically valid source
+rows, the exact terminal target catalog, the target's `LEGACY` generation-zero
+control row, and an empty target import boundary. Source relation evidence
+contains the name, row count, primary-key minimum and maximum, and SHA-256
+accumulated over a stable ordered stream of typed rows. System identifiers are
+serialized as decimal strings. The adapter keeps memory bounded across fetch
+batches and runs only read-only inspection SQL.
+
+Target emptiness is a row-level boundary. It deliberately does not certify the
+current runtime values of the seven legacy serial sequences; an insert/delete
+cycle can advance them without leaving a row. The future importer must
+validate and normalize every target sequence and include that state in its
+post-import parity receipt.
+
+Exit `0` returns `READY_FOR_FRESH_TARGET`; exit `21` returns `BLOCKED` with only
+the exact applicable codes `SOURCE_IDENTITY`, `SOURCE_ACTIVE_SESSIONS`,
+`SOURCE_SCHEMA`, `SOURCE_OPEN_POSITIONS`, `SOURCE_DATA_QUALITY`, `SAME_CLUSTER`,
+`TARGET_NOT_COMPLETE`, `TARGET_MODE`, and `TARGET_NOT_EMPTY`. Exits `2`, `20`,
+and `70` return compact input, storage, and internal errors. Receipts exclude
+service and role identifiers, connection data, SQL, exception messages, and
+arbitrary error text.
+
+Every receipt says `stale_on_return: true` and
+`snapshot_authoritative: false`. Success neither reserves the pair nor proves
+a later import. The
+[fresh-target runbook](../V2_FRESH_TARGET_CUTOVER.md) records the exact command,
+configuration, trust boundary, no-copy decision, phased rollback, next bounded
+importer slice, and two Mermaid source/SVG/PNG/Excalidraw graph sets.
+
+The frozen local snapshot passed 29 focused contract/startup-guard tests under
+both Python 3.10 and 3.14. The dedicated two-cluster PostgreSQL 15 suite passed
+3 scenarios. The complete PostgreSQL suite passed 470 tests; the complete
+non-PostgreSQL suite passed 2,641 tests with 57 expected skips and 7 subtests.
+Black, isort, fatal Flake8, compilation, link, diagram-artifact, diff, and
+Docker-cleanup checks were green.
+
+This evidence covers exact ready and blocked outcomes, stable hashing across
+fetch boundaries, read-only SQL, redaction, and zero source/target mutation.
+Pull-request CI remains the remote acceptance gate. This slice does not deploy
+or copy data, and `ACTIVE` remains a **NO-GO**.
 
 ## Cut-over policy
 

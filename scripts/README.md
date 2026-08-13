@@ -30,11 +30,18 @@ the repo root to keep the top level clean.
 | Module | Purpose |
 |---|---|
 | `python -m scripts.postgres_bootstrap` | Reconcile the dormant V2 PostgreSQL roles/catalog from a strict non-secret JSON manifest and external libpq services. It is one-shot, operator-confirmed, and never runs at application startup. |
+| `python -m scripts.postgres_cutover_preflight` | Inspect one stopped V1 clone and one separately bootstrapped, empty V2 target. It is read-only, emits stale evidence, and never copies data or authorises cut-over. |
 
 See the [V2 PostgreSQL bootstrap runbook](../docs/V2_POSTGRES_BOOTSTRAP.md) for
 the exact flags, version-1 configuration schema, external `PGSERVICEFILE` and
 `PGPASSFILE` contract, receipts, exit codes, and commit-unknown recovery. A
 `COMPLETE` receipt does not deploy or activate V2.
+
+See the [fresh-target cut-over preflight](../docs/V2_FRESH_TARGET_CUTOVER.md)
+for its three mandatory confirmations, closed version-1 intent document,
+`READY_FOR_FRESH_TARGET`/`BLOCKED` receipts, and rollback boundary. Even a ready
+receipt is non-authoritative and does not permit import, deployment, or
+activation.
 
 ## Vault / secrets (Python)
 
