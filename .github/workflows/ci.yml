@@ -217,6 +217,34 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
         ELVIS_TEST_V2_LEGACY_SNAPSHOT_IMPORT_REQUIRED: '1'
 
+  v2-legacy-snapshot-reconciliation:
+    name: V2 Read-only Legacy Snapshot Reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Python 3.14
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: '3.14'
+
+    - name: Install reconciliation test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install \
+          "pytest==9.0.2" "pytest-timeout==2.4.0" \
+          "psycopg2-binary==2.9.12"
+
+    - name: Run isolated two-cluster reconciliation review
+      run: pytest -q -ra tests/postgres/test_postgres_legacy_snapshot_reconciliation_postgres.py
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+        ELVIS_TEST_V2_LEGACY_SNAPSHOT_RECONCILIATION_REQUIRED: '1'
+
   security:
     name: Security Scan
     runs-on: ubuntu-latest

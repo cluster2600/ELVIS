@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "batch_size": 512,
+  "source": {
+    "expected_database": "elvis_trading",
+    "expected_role": "elvis_user"
+  },
+  "target": {
+    "admin_service": "elvis_fresh_target_admin",
+    "readiness_service": "elvis_fresh_target_readiness",
+    "bootstrap_context": {
+      "expected_database": "elvis_paper_v2",
+      "admin_role": "elvis_bootstrap_admin",
+      "roles": {
+        "schema_owner": "elvis_schema_owner",
+        "migrator": "elvis_migrator",
+        "legacy_runtime": "elvis_legacy_runtime",
+        "atomic_runtime": "elvis_atomic_runtime",
+        "activation": "elvis_activation",
+        "readiness": "elvis_readiness",
+        "trainer": "elvis_trainer"
+      },
+      "adoption": null
+    }
+  },
+  "opening": {
+    "execution_scope": "paper:compatibility",
+    "account_key": "paper:primary",
+    "owner_generation": 1,
+    "collateral_asset": "USDT",
+    "margin_quantum_decimal": "0.01",
+    "hypothesis_starting_collateral_decimal": "100"
+  }
+}

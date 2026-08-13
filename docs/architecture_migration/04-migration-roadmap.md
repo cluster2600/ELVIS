@@ -38,7 +38,7 @@ rollback decision that does not restore unsafe behaviour.
 | M6 | Introduce a fail-closed signal-policy pipeline and move filters one at a time | policy unit tests including exception/timeouts; shadow parity log | disable migrated policy adapter | In progress (M6a core) |
 | M7 | Introduce pre-trade risk planning; move cooldown, sizing, leverage ceiling, and fee viability out of `main.py` | risk table tests, property tests, paper replay; no fallback order | feature flag selects legacy planner | In progress (M7h fee-regime cut-over) |
 | M8 | Make one `PositionService` own fills, stops, take profit, and reconciliation; retire background/inline duplicate ownership | state-machine tests, restart/reconciliation integration test | select legacy position manager | In progress (M8b position reducer; M9b.8 FIFO economics; M9b.9 quote settlement; M9b.11 pure paper accounting; no runtime cut-over) |
-| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c3a bounded raw legacy import implemented locally; V2 replay/reconciliation, pull-request CI, and runtime cut-over remain pending) |
+| M9 | Replace positional PostgreSQL tuples with repositories and migrations | ephemeral PostgreSQL from empty volume, upgrade test, transaction/idempotency tests | compatibility repository adapter | In progress (M9b.14c3c3b read-only imported-vs-operator-hypothesis review implemented locally; source/runtime provenance, coherent review, V2 opening/replay, pull-request CI, and runtime cut-over remain pending) |
 | M10 | Parse configuration once; replace global service lookup at migrated boundaries | config validation matrix, startup failure tests | compose legacy services in adapter | Planned |
 | M11 | Move API, dashboard, metrics, and notifications to read models/post-transition sinks | fault-injection tests prove trading result is unchanged | detach sink | Planned |
 | M12 | Remove dead event handlers, duplicate modules, legacy execution branch, and global lookups after call-site audit | `rg` zero-reference proof, full suite, paper soak | deletion in separate commits | Planned |
@@ -4495,6 +4495,104 @@ parity, both SVG/PNG/Excalidraw render triplets, visual PNG inspection, and
 and all nested V2 rehearsal, preflight, and importer resources left zero
 containers, volumes, or networks after the run. Byte-for-byte file hashes,
 worktree status, and `HEAD` were unchanged across both global suites.
+
+### M9b.14c3c3b read-only legacy snapshot reconciliation
+
+M9b.14c3c3b adds a dormant, read-only review after the bounded c3c3a import.
+It hashes the exact parsed configuration and import-receipt documents, checks
+the receipt's combined seven-relation hash for internal consistency, then
+sequentially revalidates the same target's cluster identity, terminal catalog,
+`LEGACY/0` control, raw relation fingerprints, and sequence parity through
+distinct readiness and admin identities. It opens no source connection and
+performs no DML, DDL, sequence change, `SET ROLE`, account opening,
+provisioning, or activation.
+
+The review preserves two candidate interpretations rather than manufacturing
+history. The imported candidate retains the complete canonical
+`np.account_balances` tuple, including every zero or non-zero additional asset.
+`OPERATOR_EQUITY_HYPOTHESIS` uses an explicit starting-collateral assumption and
+the imported target only. It reconstructs exact float4 PnL and fee inputs,
+folds each sequence deterministically in primary-key order with binary64
+addition, and applies `max(0, starting hypothesis + folded PnL)`. The resulting
+USDT-specific tuple is `BNB=0`, `BTC=0`, and `USDT=hypothesised equity`.
+Trade and liquidation fees remain separate and are never deducted.
+
+This is not PostgreSQL `SUM`, source replay, or evidence of the active runtime's
+starting capital, ordering, algorithm, or state. The latest-reset window
+includes equal timestamps; without a reset it includes every row. A canonical
+naive microsecond timestamp and each exact binary64 result are retained. Equal
+candidate documents merely omit `CANDIDATE_MISMATCH`; they cannot establish
+runtime provenance.
+
+The only dispositions are `DECISION_REQUIRED` and `BLOCKED`.
+`DECISION_REQUIRED` always includes `RUNTIME_PROVENANCE_UNPROVEN`, whether the
+canonical balance documents and SHA-256 values agree or differ. `BLOCKED`
+exposes neither partial opening nor partial numeric evidence. Every receipt
+hard-codes stale true and snapshot authority, coherent snapshot, source
+provenance, target-observation authentication, enforced database window,
+account opening, account provisioning, and runtime activation false. The
+adapter derives the three hypothesis folds from target reads, but the typed
+receipt does not itself authenticate them.
+
+The pure contract is in
+`trading.application.legacy_snapshot_reconciliation`: the explicit
+`LegacySnapshotReconciliationContext`, canonical config and receipt SHA-256
+bindings, ordered candidates, pure opening/hypothesis derivation helpers,
+bounded findings, evidence, two-value disposition, and permanently
+non-authoritative receipt. The only port operation is
+`LegacySnapshotReconciliationPort.reconcile(context, import_receipt)`.
+
+The target session check is a point-in-time query. Terminal, admin, and
+readiness evidence spans separate repeatable-read transactions, so c3c3b never
+claims one coherent observation snapshot or an enforced window. Canonical
+document hashes and the combined source relation-evidence hash bind the supplied
+documents and target readback but do not authenticate their author or the
+declared source. The receipt exposes the declared import disposition and source
+system identifier under that limitation.
+
+The one-shot command is:
+
+```bash
+python -m scripts.postgres_legacy_snapshot_reconciliation \
+  --config <legacy-snapshot-reconciliation-v1.json> \
+  --import-receipt <legacy-snapshot-import.json> \
+  --assess \
+  --confirm-reviewed-database-window \
+  --confirm-disposable-target
+```
+
+Its closed version-1 JSON contains the declared c3c3a source and target
+bootstrap intent, distinct admin/readiness libpq services, explicit execution
+scope, account, generation, collateral and margin quantum, plus
+`hypothesis_starting_collateral_decimal`. The committed example uses `100`.
+The reviewed-window flag is an operator assertion, not an exclusive lock or
+fence. Exit `10` is `DECISION_REQUIRED` and `21` is `BLOCKED`; `2`, `20`, `23`,
+and `70` are typed `INPUT`, `STORAGE`, `CONFLICT`, and `INTERNAL` errors. The
+listed values are the complete exit contract; equality never becomes an
+ordinary-success result.
+
+On the accepted c3c3b snapshot, the focused application, CLI, and
+migration-runner selection passed 74 tests under Python 3.10 and 74 under
+Python 3.14. The dedicated opt-in PostgreSQL 15 reconciliation file passed all
+19 scenarios in 99.48 seconds. Black, isort, Flake8 with the repository's
+88-character limit, Python 3.10/3.14 compilation, and `git diff --check` were
+green. On the final frozen slice, the complete PostgreSQL 15 gate with all five
+V2 opt-ins passed 500 tests, including deterministic retry canaries for
+transient Docker port-publication and host-connection delays. The complete
+non-PostgreSQL gate passed
+2,706 tests, skipped 50, and passed 7 subtests. Both gates preserved the exact
+935-file inventory byte for byte, and the disposable PostgreSQL resources left
+zero containers, volumes, or networks. The complete operator contract and two
+Mermaid/SVG/PNG/editable-Excalidraw graph sets are in the [legacy snapshot
+reconciliation runbook](../V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
+
+This slice structures the historical ambiguity but deliberately does not
+resolve it. A separate reviewed operation must authenticate source/runtime
+provenance, choose and encode the durable opening, provision the V2 account,
+and prove replay before later shadow, rollback, soak, and cut-over gates.
+Python 3.14 remains the V2 application runtime target; Python 3.10 remains a
+temporary compatibility and isolated trainer requirement. `ACTIVE` remains a
+**NO-GO**.
 
 ## Cut-over policy
 

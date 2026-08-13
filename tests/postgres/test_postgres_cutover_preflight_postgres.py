@@ -7,13 +7,14 @@ import re
 import secrets
 import stat
 import subprocess
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
-from psycopg2 import sql
+from psycopg2 import OperationalError, sql
 from psycopg2.extensions import make_dsn
 
 from tests.conftest import _ORIGINAL_PSYCOPG2_CONNECT
@@ -128,12 +129,68 @@ def _write_private(path: Path, contents: str) -> None:
 
 
 def _published_port(container: str) -> int:
-    output = _run(["docker", "port", container, "5432/tcp"]).stdout.strip()
-    match = re.fullmatch(r"127\.0\.0\.1:([0-9]{1,5})", output)
-    assert match is not None
-    port = int(match.group(1))
-    assert 1 <= port <= 65_535
-    return port
+    deadline = time.monotonic() + 5.0
+    while True:
+        result = _run(
+            ["docker", "port", container, "5432/tcp"],
+            expected_exit_codes=(0, 1),
+        )
+        output = result.stdout.strip()
+        match = re.fullmatch(r"127\.0\.0\.1:([0-9]{1,5})", output)
+        if result.returncode == 0 and match is not None:
+            port = int(match.group(1))
+            assert 1 <= port <= 65_535
+            return port
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                "Docker did not publish the expected loopback PostgreSQL port",
+                pytrace=False,
+            )
+        time.sleep(0.05)
+
+
+def test_published_port_retries_until_docker_exposes_the_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    results = iter(
+        (
+            subprocess.CompletedProcess(
+                args=(),
+                returncode=1,
+                stdout="",
+                stderr="mapping is not visible yet",
+            ),
+            subprocess.CompletedProcess(
+                args=(),
+                returncode=0,
+                stdout="127.0.0.1:54321\n",
+                stderr="",
+            ),
+        )
+    )
+    calls: list[tuple[list[str], tuple[int, ...]]] = []
+    sleeps: list[float] = []
+
+    def run_once(
+        command: list[str],
+        *,
+        expected_exit_codes: tuple[int, ...] = (0,),
+        secrets_to_redact: tuple[str, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        assert secrets_to_redact == ()
+        calls.append((command, expected_exit_codes))
+        return next(results)
+
+    monkeypatch.setattr(__name__ + "._run", run_once)
+    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    assert _published_port("test-container") == 54321
+    assert calls == [
+        (["docker", "port", "test-container", "5432/tcp"], (0, 1)),
+        (["docker", "port", "test-container", "5432/tcp"], (0, 1)),
+    ]
+    assert sleeps == [0.05]
 
 
 def _wait_for_postgres(container: str, database: str) -> None:
@@ -157,6 +214,46 @@ def _wait_for_postgres(container: str, database: str) -> None:
 
         time.sleep(0.25)
     pytest.fail(f"PostgreSQL container {container} did not become ready", pytrace=False)
+
+
+def _connect(dsn: str):
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            connection = _ORIGINAL_PSYCOPG2_CONNECT(dsn)
+        except OperationalError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.1, remaining))
+        else:
+            connection.autocommit = False
+            return connection
+
+
+def test_connect_retries_a_transient_published_port_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Connection:
+        autocommit = True
+
+    connection = Connection()
+    results = iter((OperationalError("port is not ready"), connection))
+    sleeps: list[float] = []
+
+    def connect_once(_dsn: str):
+        result = next(results)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monotonic = iter((0.0, 0.0))
+    monkeypatch.setattr(__name__ + "._ORIGINAL_PSYCOPG2_CONNECT", connect_once)
+    monkeypatch.setattr(time, "monotonic", lambda: next(monotonic))
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    assert _connect("test-only-dsn") is connection
+    assert sleeps == [0.1]
 
 
 def _create_isolated_network(network: str, label: str, seed: str) -> None:
@@ -273,9 +370,7 @@ class CutoverPair:
     context: FreshTargetCutoverContext
 
     def connect(self, dsn: str):
-        connection = _ORIGINAL_PSYCOPG2_CONNECT(dsn)
-        connection.autocommit = False
-        return connection
+        return _connect(dsn)
 
     def source_factory(self):
         return self.connect(self.source_dsn)
@@ -334,9 +429,7 @@ def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
     )
 
     def admin_factory():
-        connection = _ORIGINAL_PSYCOPG2_CONNECT(target_dsn)
-        connection.autocommit = False
-        return connection
+        return _connect(target_dsn)
 
     first = PostgresBootstrap(admin_factory).reconcile(context)
     assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
@@ -363,9 +456,7 @@ def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
         dsn = make_dsn(target_dsn, user=role, password=passwords[role])
 
         def connect():
-            connection = _ORIGINAL_PSYCOPG2_CONNECT(dsn)
-            connection.autocommit = False
-            return connection
+            return _connect(dsn)
 
         return connect
 
@@ -383,8 +474,7 @@ def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
 
 
 def _prepare_source(source_dsn: str) -> None:
-    connection = _ORIGINAL_PSYCOPG2_CONNECT(source_dsn)
-    connection.autocommit = False
+    connection = _connect(source_dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute(load_migrations()[0].sql)
@@ -432,7 +522,7 @@ def _prepare_source(source_dsn: str) -> None:
 
 
 def _source_relation_names(dsn: str) -> tuple[str, ...]:
-    connection = _ORIGINAL_PSYCOPG2_CONNECT(dsn)
+    connection = _connect(dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -446,8 +536,7 @@ def _source_relation_names(dsn: str) -> tuple[str, ...]:
 
 
 def _database_snapshot(dsn: str) -> tuple[object, ...]:
-    connection = _ORIGINAL_PSYCOPG2_CONNECT(dsn)
-    connection.autocommit = False
+    connection = _connect(dsn)
     try:
         with connection.cursor() as cursor:
             cursor.execute(
