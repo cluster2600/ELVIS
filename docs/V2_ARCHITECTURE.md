@@ -113,6 +113,7 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Readiness assessment, legacy-writer fence, runtime generations, and locked activation | Implemented and tested | Database capabilities exist but no cut-over is authorised |
 | Least-authority PostgreSQL role/catalog bootstrap, pre-role admission, and offline CLI | Implemented as dormant operator capability | The CLI accepts only a strict non-secret manifest and external libpq service names; it rejects unsafe databases and adds no secret writer, automatic startup hook, active Compose wiring, or deployment activation |
 | Isolated fresh PostgreSQL 15 rehearsal composition | Implemented as a disposable operator harness | Separate internal-only Compose project; never mounts the active volume or composes bot, trainer, or activation |
+| Fresh-target cut-over preflight | Implemented as a dormant read-only operator capability | Inspects a stopped source clone and a separate fresh target, requires distinct cluster system identifiers, streams canonical typed-row evidence, and returns only a stale-on-return sanitized receipt; it copies nothing |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
 | Replay, reconciliation, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
 
@@ -127,8 +128,8 @@ Neither word means deployed.
 | Foundation | Audit, target design, typed domain and application boundaries | Implemented |
 | Progressive runtime extraction | Signal policy, risk, execution, and position ownership moved in small reversible slices | In progress |
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
-| Deployment composition | Offline CLI available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
-| Cut-over evidence | Bounded replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, explicit operator approval | Pending |
+| Deployment composition | Offline bootstrap and read-only fresh-target preflight available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
+| Cut-over evidence | Bounded importer, replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, explicit operator approval | Pending |
 | Cleanup | Remove superseded legacy owners only after parity and cut-over proof | Pending |
 
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
@@ -178,6 +179,11 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
   A volume whose old shared superuser owns that baseline must be rehearsed and
   remediated offline on a clone or replaced by a fresh admin-owned target; the
   bootstrap never performs a silent ownership repair.
+- The chosen fresh-target path starts with the read-only
+  [cut-over preflight](V2_FRESH_TARGET_CUTOVER.md). It must inspect a stopped
+  source clone and a separate terminal V2 target, never the active volume. Its
+  canonical SHA-256 and `READY_FOR_FRESH_TARGET` receipt are non-authoritative
+  evidence, stale on return, and cannot trigger the importer or activation.
 - Startup and health must fail closed when the durable database authority,
   generation, credentials, or catalog cannot be proven exactly.
 - Shadow evaluation must be side-effect free. It cannot submit twice or mutate
@@ -195,6 +201,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | Current implementation status and verification | [Migration roadmap](architecture_migration/04-migration-roadmap.md) |
 | Offline PostgreSQL bootstrap contract and recovery | [Bootstrap runbook](V2_POSTGRES_BOOTSTRAP.md) |
 | Fresh PostgreSQL 15 SCRAM/HBA rehearsal | [Rehearsal runbook](V2_POSTGRES_REHEARSAL.md) |
+| Stopped-clone/fresh-target admission and rollback phases | [Fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |
