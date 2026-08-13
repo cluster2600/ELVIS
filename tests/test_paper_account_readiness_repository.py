@@ -2176,8 +2176,8 @@ def test_readiness_repository_is_unwired_and_not_facade_exported() -> None:
         if _uses_readiness_repository(source_path.read_text(encoding="utf-8")):
             consumers.append(source_path.relative_to(root))
 
-    assert consumers == [
-        Path("trading/persistence/postgres_bootstrap.py"),
+    assert sorted(consumers) == [
         Path("trading/persistence/paper_runtime_activation.py"),
+        Path("trading/persistence/postgres_bootstrap.py"),
     ]
     assert not _uses_readiness_repository(facade_path.read_text(encoding="utf-8"))

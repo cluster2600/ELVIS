@@ -2628,9 +2628,15 @@ def main(mode: str, log_level: str):
                                                         f"(price ${position_current_price:.2f})"
                                                     )
                                                     _trail_pnl = (
-                                                        (position_current_price - entry_price)
+                                                        (
+                                                            position_current_price
+                                                            - entry_price
+                                                        )
                                                         if side.upper() == "BUY"
-                                                        else (entry_price - position_current_price)
+                                                        else (
+                                                            entry_price
+                                                            - position_current_price
+                                                        )
                                                     ) * abs(quantity)
                                                     if _close_position_by_id(
                                                         position,

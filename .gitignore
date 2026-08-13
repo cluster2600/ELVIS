@@ -78,3 +78,4 @@ tmp/
 temp/
 models/rl_agents_evaluation.json
 models/transformer_evaluation.json
+.gstack/

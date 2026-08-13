@@ -99,15 +99,13 @@ def _runtime_snapshot(dsn):
                 "SELECT mode, runtime_generation FROM np.paper_runtime_control"
             )
             control = tuple(cursor.fetchall())
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT runtime_generation, activation_id, execution_scope,
                        account_key, owner_generation, opening_version,
                        opening_payload_sha256
                 FROM np.paper_runtime_generations
                 ORDER BY runtime_generation
-                """
-            )
+                """)
             epochs = tuple(cursor.fetchall())
         return control, epochs
     finally:
