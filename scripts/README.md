@@ -19,12 +19,6 @@ the repo root to keep the top level clean.
 | `run_training.sh` | Unified training entry point (see `../docs/UNIFIED_TRAINING_GUIDE.md`). |
 | `start_bot_with_vault.sh` | Start the bot with Vault/OpenBao auth (requires `VAULT_DEV_ROOT_TOKEN_ID`). |
 
-## Setup
-
-| Script | Purpose |
-|---|---|
-| `setup_secure_config.sh` | Set up encrypted/secure config loading. |
-
 ## Offline administration (Python)
 
 | Module | Purpose |

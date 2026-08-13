@@ -496,7 +496,7 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 ### Documentation Files
 
 - [Verified Architecture (mermaid)](architecture.md)
-- [Bot Architecture Mermaid](bot_architecture_mermaid.md)
+- [Historical Bot Architecture Mermaid](archive/v1/bot_architecture_mermaid.md)
 - [Documentation Index](README.md)
 - [Security Posture](../SECURITY.md)
 - [Vault Setup](VAULT_SETUP.md)
@@ -505,7 +505,7 @@ Prometheus metrics integration allows pushing cross-validation metrics to a Push
 - [Future Improvements](future_improvements.md)
 - [Random Forest Model Documentation](random_forest.md)
 - [Training Pipeline Documentation](training.md)
-- [Release Notes](RELEASE_NOTES.md)
+- [Historical v0.2 Release Notes](archive/v1/RELEASE_NOTES.md)
 
 ---
 

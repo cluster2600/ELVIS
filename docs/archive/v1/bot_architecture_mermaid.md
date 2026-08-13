@@ -1,3 +1,10 @@
+# Historical ELVIS bot topology
+
+> **Historical V1 document.** This simplified diagram is retained for
+> provenance only. It is superseded by the verified
+> [compatibility-runtime architecture](../../architecture.md) and the
+> [V2 architecture](../../V2_ARCHITECTURE.md).
+
 ```mermaid
 graph TD
     Main["main.py"]

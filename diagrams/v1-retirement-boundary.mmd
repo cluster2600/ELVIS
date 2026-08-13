@@ -1,0 +1,6 @@
+flowchart LR
+    CURRENT["V1 compatibility runtime<br/>still authoritative"] --> GATE{"V2 cut-over evidence<br/>and operator approval"}
+    GATE -->|"not complete"| KEEP["Keep operational V1 code<br/>and runbooks"]
+    GATE -->|"complete"| ARCHIVE["Archive superseded docs<br/>and generated artefacts"]
+    ARCHIVE --> REVIEW["Retention review<br/>links, provenance, rollback"]
+    REVIEW --> DELETE["Delete only in a separate<br/>reviewed PR"]
