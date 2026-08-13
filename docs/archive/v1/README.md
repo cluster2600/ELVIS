@@ -21,6 +21,28 @@ One dead credential-copying helper was removed rather than archived:
 read plaintext credential files, rewrote `.env`, and patched a nonexistent
 `your_bot_script.py`. Git history remains the recovery source.
 
+## Removed in slice 2
+
+- `ansible/roles/` contained 202 generated Ansible Galaxy role files that no
+  playbook consumed. Their unused declarations and `roles_path` were removed;
+  `ansible/requirements.yml` now installs only the collections the playbooks
+  may use.
+- `trading/config/data_config.yaml`, `model_config.yaml`, and
+  `risk_config.yaml` were never loaded by code, tests, Compose, Ansible, or CI.
+  Active `training/config/model_config.yaml` and
+  `trading/config/validation_config.yaml` remain tracked.
+
+For forensic inspection only, tag `v0.3.0` retains these exact files. Restore
+them temporarily with:
+
+```bash
+git restore --source=v0.3.0 -- ansible/roles \
+  ansible/requirements.yml ansible/ansible.cfg ansible/run_setup.sh \
+  trading/config/data_config.yaml \
+  trading/config/model_config.yaml \
+  trading/config/risk_config.yaml
+```
+
 ## Retirement boundary
 
 ```mermaid

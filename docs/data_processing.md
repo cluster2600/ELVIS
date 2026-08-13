@@ -348,29 +348,16 @@ it does not touch Binance directly.
 
 ## Configuration
 
-Data-processing configuration lives in **`trading/config/data_config.yaml`**
-(there is no `data_processing_config.yaml`). Relevant sections:
+There is no repository-wide data-processing YAML contract. The retired
+`trading/config/data_config.yaml` was never loaded by production, training,
+tests, Compose, or Ansible and mixed implemented fields with aspirational
+settings.
 
-- `data_source` — `exchange`, `api_key`/`api_secret` (both `null` by default;
-  real credentials come from the secrets/env layer, see below), `data_dir`,
-  `cache_dir`.
-- `feature_engineering` — `technical_indicators` list
-  (`rsi, stoch, macd, bbands, atr, ema, vwap`) and boolean toggles consumed by
-  `DataProcessor` (`market_regime_features`, `orderbook_features`,
-  `funding_features`, `onchain_features`, `feature_selection`, `n_features`).
-- `technical_indicators` — per-indicator parameters (windows, thresholds).
-- `market_regime`, `onchain_data`, `orderbook`, `funding_rates` — parameters
-  for the corresponding feature groups.
-- `data_quality` — `handle_missing_data`, `detect_outliers`,
-  `outlier_threshold`, and `validation_rules` bounds.
-- `feature_selection` / `pipeline` — declarative feature-selection and
-  preprocessing settings.
-
-> Note: not every key in `data_config.yaml` is wired into the current code.
-> `DataProcessor` reads `feature_config`/`quality_config` attributes
-> (`market_regime_features`, `orderbook_features`, `funding_features`,
-> `handle_missing_data`); the `onchain_*`, `feature_selection`, and `pipeline`
-> sections describe intended behavior that is only partially implemented.
+`DataProcessor` receives `exchange`, `feature_config`, `quality_config`, and a
+logger from its caller. Its current consumers build those values in Python.
+Training entry points load the separately maintained
+`training/config/model_config.yaml`; strategy validation uses
+`trading/config/validation_config.yaml`.
 
 ### API credentials
 
@@ -424,7 +411,8 @@ Run them with `pytest` (per-module, matching the project's test conventions).
 - `utils/price_fetcher.py` — `PriceFetcher` (WebSocket + Redis + Prometheus)
 - `training/data/trade_history_processor.py` — `TradeHistoryProcessor`
 - `training/data/data_downloader.py` — one-shot BTCUSDT CSV dump script
-- `trading/config/data_config.yaml` — data-processing configuration
+- `training/config/model_config.yaml` — active training configuration
+- `trading/config/validation_config.yaml` — active strategy-validation configuration
 - `core/bootstrap.py` — DI wiring for `price_fetcher` and `data_processor`
 
 ### Related documentation
