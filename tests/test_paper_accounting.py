@@ -1024,6 +1024,12 @@ def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
     repository_path = root / "trading" / "persistence" / "paper_account_journal.py"
     owner_path = root / "trading" / "persistence" / "atomic_paper_account_owner.py"
     readiness_path = root / "trading" / "persistence" / "paper_account_readiness.py"
+    reconciliation_contract_path = (
+        root / "trading" / "application" / "legacy_snapshot_reconciliation.py"
+    )
+    reconciliation_adapter_path = (
+        root / "trading" / "persistence" / "postgres_legacy_snapshot_reconciliation.py"
+    )
     consumers = []
     for source_path in root.rglob("*.py"):
         if (
@@ -1035,6 +1041,8 @@ def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
                 repository_path,
                 owner_path,
                 readiness_path,
+                reconciliation_contract_path,
+                reconciliation_adapter_path,
             }
             or "tests" in source_path.parts
             or ".venv" in source_path.parts

@@ -156,8 +156,17 @@ Graph artefacts:
 The current ELVIS volume was initialized by the shared runtime superuser. The
 official image's initialization variables and HBA defaults apply only to an
 empty data directory, so c3c1 must never mount, rename, delete, or demote that
-volume. A future c3c2 must use a stopped, verified clone and an explicitly
-reviewed ownership-remediation or fresh-target data-migration strategy.
+volume. The next slice must use a stopped, verified clone and make an
+explicitly reviewed ownership-remediation or fresh-target decision.
+
+M9b.14c3c2 now chooses the fresh-target branch without copying data. Its
+[read-only cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) inspects a stopped
+source clone and a separately bootstrapped target, requires distinct cluster
+system identifiers, and emits only stale-on-return evidence for the next
+bounded importer. M9b.14c3c3a now supplies that dormant, independently
+revalidated [raw snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) without mounting
+the active source volume, synthesizing V2 ledger history, or changing runtime
+authority. The active source volume remains outside c3c1, c3c2, and c3c3a.
 
 ## Rollback and cleanup
 
@@ -186,6 +195,8 @@ docker compose \
 - runtime startup and health are not fail-closed on the V2 catalog;
 - replay, reconciliation, rollback rehearsal, soak, and operator activation
   approval remain pending.
+- the raw fresh-target import is dormant and non-authoritative; V2 replay and
+  semantic reconciliation of that history remain later slices.
 
 ## Verification status
 

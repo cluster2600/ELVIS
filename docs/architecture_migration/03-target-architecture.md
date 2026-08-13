@@ -260,6 +260,14 @@ bootstrap around those capabilities. M9b.14c3b exposes that library through a
 dormant, one-shot offline CLI; none of these slices is wired into production.
 M9b.14c3c1 adds a separate fresh PostgreSQL 15 rehearsal whose internal-only
 Compose project contains no bot, trainer, activation, or active volume.
+M9b.14c3c2 adds a separate read-only source-clone/fresh-target preflight; it
+binds canonical evidence for a later importer but copies no data and returns no
+lasting authority.
+M9b.14c3c3a adds that dormant bounded raw importer. It revalidates the c3c2
+pair, copies only the seven V1 relations with explicit IDs while keeping
+`open_positions` empty, commits all rows atomically, then normalizes the seven
+non-transactional serial sequences under a separate exact recovery boundary.
+It synthesizes no V2 journal, position stream, account ledger, or runtime epoch.
 `PositionService`, the pre-trade service, and `CycleOutcome` remain later
 slices; they are not placeholder classes in the current package.
 
@@ -1469,6 +1477,161 @@ secret boundary, marked disposable volume, and one-shot bootstrap container.
 It intentionally does not override the root Compose topology or prove that the
 existing shared-owner volume is adoptable.
 
+M9b.14c3c2 chooses the fresh-target migration branch through the dormant
+`trading.application.fresh_target_cutover` inspection port and
+`trading.persistence.postgres_cutover_preflight` adapter. The source endpoint
+must be a stopped, verified physical clone of the legacy cluster; the target
+must be a separately bootstrapped, terminal V2 database. The public operation
+accepts exactly `FreshTargetCutoverContext(source_expected_database,
+source_expected_role, target_bootstrap_intent)` through `inspect(context, /)`.
+The intent is application-owned and contains only a
+`FreshTargetBootstrapIntent` plus `FreshTargetRoleManifest`; the external JSON
+retains the operator-facing `target.bootstrap_context` key.
+It is read-only and exposes no reconcile, repair, import, migration, role,
+session-termination, or activation method. Both inspection transactions and
+every connection are closed before a result is returned.
+
+PostgreSQL cluster identity is part of admission. The source and target
+`pg_control_system().system_identifier` values must be different, so two
+databases in one cluster cannot masquerade as a source/target pair. The exact
+V1 `0001` `np` import inventory must contain exactly seven legacy tables, seven
+owned sequences, and ten canonical indexes with the expected columns,
+constraints, persistence, and declared shared-owner authority. It must contain
+no migration ledger, V2 table, routine, type, user trigger, surplus ACL,
+default ACL, or other `np` object. Unrelated source schemas are outside this
+closed inventory; the importer remains allowlisted to the seven
+schema-qualified relations. Their rows are read in a stable order and
+encoded as an ordered stream of typed canonical values before incremental
+SHA-256 accumulation. Per-relation evidence includes its name, row count,
+primary-key minimum and maximum, and digest. This avoids unbounded
+materialization and prevents locale, display-format, query-plan, null, or
+cross-type ambiguity from changing the fingerprint contract. The source must
+have no other session, open position, or semantically invalid admitted row.
+The source and target system identifiers are serialized as decimal strings.
+The target must match the exact terminal V2 catalog, the `LEGACY`
+generation-zero runtime-control row, and the declared empty import boundary.
+That boundary proves row emptiness, not the current `last_value`/`is_called`
+state of the seven legacy serial sequences. The later bounded importer must
+validate and normalize those sequence states after import and bind them into
+its parity evidence.
+
+The one-shot command is `python -m scripts.postgres_cutover_preflight --config
+<fresh-target-preflight-v1.json> --inspect --confirm-stopped-source-clone
+--confirm-exclusive-database-window`. Both confirmations are operator
+assertions, not database fences: a separate maintenance procedure must stop
+source writers before cloning and enforce an exclusive database window during
+inspection. The CLI uses external libpq services only and never accepts a DSN,
+host, port, user, or password in the non-secret JSON.
+
+Exit `0` returns `READY_FOR_FRESH_TARGET`; exit `21` returns `BLOCKED` with the
+applicable exact codes `SOURCE_IDENTITY`, `SOURCE_ACTIVE_SESSIONS`,
+`SOURCE_SCHEMA`, `SOURCE_OPEN_POSITIONS`, `SOURCE_DATA_QUALITY`, `SAME_CLUSTER`,
+`TARGET_NOT_COMPLETE`, `TARGET_MODE`, and `TARGET_NOT_EMPTY`. Exits `2`, `20`,
+and `70` represent input, storage, and internal failure. The compact receipt
+always marks itself stale on return and snapshot-non-authoritative and excludes
+connection details, service and role identifiers, SQL, exception messages, and
+arbitrary error text. Even `READY_FOR_FRESH_TARGET` is non-authoritative; no
+lock or reservation survives the inspection. The full command, evidence,
+rollback, and no-copy boundary are defined in the
+[fresh-target cut-over runbook](../V2_FRESH_TARGET_CUTOVER.md).
+
+M9b.14c3c2 deliberately deferred the importer, exact row mapping, source
+fingerprint binding, target replay checksum, interruption recovery, and parity
+proof. It copies no data and cannot call bootstrap or activation.
+
+M9b.14c3c3a implements the bounded identity-shaped raw copy described by that
+design boundary. It imports only `np.account_balances`, `np.liquidations`,
+`np.margin_history`, `np.model_predictions`, `np.open_positions`, `np.trades`,
+and `np.trading_session_resets`; both `np.open_positions` inventories must be
+empty. Original integer IDs and gaps are preserved. The application batch is
+bounded from 1 through 512. Compiled admission limits allow at most 100,000
+total rows, 65,536 canonical bytes for one row, and 512 MiB of canonical source
+bytes; they are not operator-tunable. Source rows remain inside one
+repeatable-read, read-only snapshot and no business row is spooled to disk.
+
+The c3c3a CLI accepts only an exact secret-free c3c2 `READY` receipt as a strict
+JSON document. Its source fingerprints, canonical hash, and distinct cluster
+system identifiers are bound as stale expected evidence,
+never trusted as lasting authority. The importer rechecks the complete source
+and terminal target before mutation, then locks and
+revalidates the target's exact `LEGACY/0` empty-or-exact import boundary. A
+partial, surplus, or foreign target is conflict, never an upsert, truncate, or
+repair. All explicit-ID inserts share one target transaction. A known failure
+rolls back; an unknown commit outcome triggers an independent exact target
+readback in the same invocation. Exact committed rows continue recovery, an
+empty target is commit-unknown, and a partial target is conflict.
+
+Sequence `setval` state is not transactional. C3c3a therefore commits and
+verifies raw rows before normalizing any of the seven legacy sequences. Exact
+prior rows resume at sequence normalization. A sequence-phase interruption
+returns no receipt; a later invocation must revalidate exact rows before
+normalizing and rereading all seven sequences again. The terminal receipt binds
+row counts, key bounds, typed SHA-256 digests, and exact sequence evidence, but
+every connection and lock has closed before return, so it remains stale and
+snapshot-non-authoritative.
+
+The importer does not populate `np.orders`, `np.order_events`, position streams,
+paper-account streams or ledgers, runtime generations, or migration history.
+V1 lacks the immutable order/fill/account/effect/generation provenance required
+to invent those durable facts. The exact operational contract and rollback are
+in the [legacy snapshot import runbook](../V2_LEGACY_SNAPSHOT_IMPORT.md).
+
+M9b.14c3c3b adds a separate read-only reconciliation review over that imported
+target. It canonically hashes the supplied configuration and c3c3a receipt,
+requires the receipt's combined seven-relation hash to be internally
+consistent, and rereads the target identity, terminal catalog, `LEGACY/0`
+control, raw-row fingerprints, and sequences through distinct readiness and
+admin identities. It opens no source connection. These hashes bind documents
+and target evidence; they do not authenticate who produced the documents or
+the declared source cluster.
+
+The pure application contract lives in
+`trading.application.legacy_snapshot_reconciliation`.
+`LegacySnapshotReconciliationContext` binds the import context and both
+canonical input-document SHA-256 values to the future execution scope, account
+key, positive owner generation, collateral asset, positive exact margin
+quantum, and non-negative operator starting-collateral hypothesis.
+`LegacyOpeningCandidateSource` fixes `IMPORTED_ACCOUNT_BALANCES` followed by
+`OPERATOR_EQUITY_HYPOTHESIS`. The canonical opening-document SHA-256 is derived
+from the complete policy, generation, scope, and sorted unreserved balance
+tuple. `LegacySnapshotReconciliationEvidence` retains the canonical naive reset
+timestamp and three separate `hypothesis_*` Decimal folds. The positional-only
+port remains `LegacySnapshotReconciliationPort.reconcile(context,
+import_receipt)`.
+
+The PostgreSQL adapter is
+`PostgresLegacySnapshotReconciliation(target_admin_connection_factory,
+target_readiness_connection_factory)`. It uses only repeatable-read, read-only
+transactions and performs no DML, DDL, sequence change, `SET ROLE`, source
+connection, opening, provisioning, or activation. Its terminal, admin, and
+readiness observations are sequential and do not share one database snapshot.
+The client-session query is only a point-in-time check and does not enforce the
+operator-declared review window. Every receipt therefore hard-codes
+`coherent_snapshot_observed`, `source_provenance_authenticated`, and
+`target_observations_authenticated`, and `database_window_enforced` to false,
+alongside the false opening, provisioning, activation, and snapshot-authority
+flags. The adapter derives the three hypothesis folds from target reads, but
+the typed receipt alone does not authenticate those observations.
+
+The imported candidate preserves every exact `np.account_balances` float4 row
+in canonical asset order and requires the declared collateral. The operator
+hypothesis reads exact float4 bytes for rows at or after the latest reset, or
+all rows without a reset, then performs deterministic binary64 folds in primary
+key order. It keeps PnL, trade fees, and liquidation fees separate and derives
+the USDT hypothesis tuple `BNB=0`, `BTC=0`, and
+`USDT=max(0, declared starting hypothesis + folded PnL)`. This algorithm is not
+PostgreSQL `SUM`, source replay, or proof of the active compatibility runtime's
+starting capital, ordering, algorithm, or state.
+
+The only dispositions are `DECISION_REQUIRED` and `BLOCKED`.
+`DECISION_REQUIRED` always includes `RUNTIME_PROVENANCE_UNPROVEN`, even when
+both complete candidate documents and hashes are equal; a difference adds
+`CANDIDATE_MISMATCH`. `BLOCKED` exposes no partial opening or numeric evidence.
+There is no match state, busy error, account-opening authority, provisioning
+authority, or runtime-activation authority. The complete operator contract is
+in the [legacy snapshot reconciliation
+runbook](../V2_LEGACY_SNAPSHOT_RECONCILIATION.md).
+
 This slice still has no credential writer, session terminator, activation call,
 startup hook, runtime container wiring, or runtime consumer. The remaining c3
 deployment workflow must supply production Compose/Ansible role and
@@ -1476,9 +1639,11 @@ SCRAM-secret provisioning, production HBA/network policy, credential rotation,
 real-volume rehearsal, and removal of migration or other DDL authority from
 runtime processes. M9b.14d must then compose the dedicated runtime identities
 with fail-closed startup and health gates while keeping bootstrap and activation
-offline. Reconciliation, bounded replay, side-effect-free shadow comparison,
-stale-writer removal, tested pause/rollback, soak evidence, and explicit
-operator approval still block cut-over. `ACTIVE` remains a **NO-GO**.
+offline. C3c3b neither authenticates source/runtime provenance nor selects
+opening provenance or creates a V2 account. Source-authenticated provenance,
+opening, bounded replay, side-effect-free shadow comparison, stale-writer
+removal, tested pause/rollback, soak evidence, and explicit operator approval
+still block cut-over. `ACTIVE` remains a **NO-GO**.
 
 ## Runtime and configuration
 

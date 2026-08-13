@@ -126,7 +126,7 @@ tests/             # pytest suite (CI: python 3.10 + 3.14, heavy deps absent)
 | Profitability roadmap | [docs/profitability_roadmap.md](docs/profitability_roadmap.md) · [status](docs/profitability_roadmap_implementation.md) |
 | Paper trading setup | [docs/PAPER_TRADING_SETUP.md](docs/PAPER_TRADING_SETUP.md) |
 | Apple containers | [docs/README_APPLE_CONTAINERS.md](docs/README_APPLE_CONTAINERS.md) |
-| Release notes | [CHANGELOG.md](CHANGELOG.md) · [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) |
+| Release notes | [CHANGELOG.md](CHANGELOG.md) · [historical v0.2 notes](docs/archive/v1/RELEASE_NOTES.md) |
 
 ## Testing
 

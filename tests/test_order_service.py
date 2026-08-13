@@ -177,7 +177,16 @@ def test_execution_protocol_is_structural() -> None:
 
 
 def _unexpected_application_imports(source: str) -> set[str]:
-    standard_library_roots = {"dataclasses", "datetime", "enum", "typing"}
+    standard_library_roots = {
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "enum",
+        "hashlib",
+        "json",
+        "math",
+        "typing",
+    }
     tree = ast.parse(source)
     dynamic_import_aliases = {"__import__"}
     importlib_aliases = {"importlib"}
