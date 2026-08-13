@@ -812,7 +812,7 @@ def test_readiness_contract_is_pure_and_has_no_runtime_consumer() -> None:
     facade_path = root / "trading" / "application" / "__init__.py"
     consumers = []
     scanned = []
-    for source_path in root.rglob("*.py"):
+    for source_path in sorted(root.rglob("*.py")):
         if (
             source_path in {module_path, facade_path}
             or "tests" in source_path.parts
@@ -827,9 +827,9 @@ def test_readiness_contract_is_pure_and_has_no_runtime_consumer() -> None:
             consumers.append(source_path.relative_to(root))
 
     assert consumers == [
+        Path("trading/application/paper_runtime_activation.py"),
         Path("trading/persistence/paper_account_readiness.py"),
         Path("trading/persistence/paper_runtime_activation.py"),
-        Path("trading/application/paper_runtime_activation.py"),
     ]
     assert {Path("main.py"), Path("core/bootstrap.py")} <= set(scanned)
 

@@ -8,21 +8,24 @@ on:
 
 env:
   PYTHON_VERSION: '3.14'
+  BLACK_VERSION: '26.5.1'
+  ISORT_VERSION: '8.0.1'
+  FLAKE8_VERSION: '7.3.0'
 
 jobs:
   lint:
     name: Lint Code
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
     
     - name: Cache pip packages
-      uses: actions/cache@v3
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
@@ -32,7 +35,10 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black isort
+        pip install \
+          "black==${BLACK_VERSION}" \
+          "flake8==${FLAKE8_VERSION}" \
+          "isort==${ISORT_VERSION}"
     
     - name: Run Black
       run: black --check .
@@ -44,22 +50,22 @@ jobs:
       run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
   test:
-    name: Run Tests
+    name: Run Tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.14']
+        python-version: ['3.10', '3.14']
     
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ matrix.python-version }}
     
     - name: Cache pip packages
-      uses: actions/cache@v3
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
@@ -84,14 +90,17 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
     
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
       with:
         file: ./coverage.xml
         fail_ci_if_error: false
 
   postgres:
-    name: PostgreSQL 15 Integration
+    name: PostgreSQL 15 Integration (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.14']
     services:
       postgres:
         image: postgres:15-alpine
@@ -108,12 +117,12 @@ jobs:
           --health-retries 10
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
-        python-version: '3.10'
+        python-version: ${{ matrix.python-version }}
 
     - name: Install PostgreSQL test dependencies
       run: |
@@ -137,18 +146,19 @@ jobs:
       contents: read
       security-events: write   # SARIF upload
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
+        version: 'v0.70.0'
         scan-type: 'fs'
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
 
     - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
       with:
         sarif_file: 'trivy-results.sarif'
 
@@ -162,13 +172,13 @@ jobs:
       packages: write   # push to ghcr.io (same registry as release.yml)
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
     - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -177,7 +187,7 @@ jobs:
 
     - name: Extract metadata
       id: meta
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
       with:
         images: ghcr.io/cluster2600/elvis
         tags: |
@@ -185,7 +195,7 @@ jobs:
           type=sha
 
     - name: Build and push Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       with:
         context: .
         push: ${{ github.ref == 'refs/heads/main' }}

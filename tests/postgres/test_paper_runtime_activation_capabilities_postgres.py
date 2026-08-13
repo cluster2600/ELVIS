@@ -170,8 +170,7 @@ def test_capabilities_are_exact_security_definers_with_public_execute_revoked(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT
                     routine_row.proname,
                     pg_get_function_identity_arguments(routine_row.oid),
@@ -205,8 +204,7 @@ def test_capabilities_are_exact_security_definers_with_public_execute_revoked(
                       'activate_paper_runtime_generation'
                   )
                 ORDER BY routine_row.proname
-                """
-            )
+                """)
             rows = cursor.fetchall()
 
         assert tuple(row[:9] for row in rows) == (
@@ -359,8 +357,7 @@ def test_fence_holds_exact_share_set_and_all_ordered_row_drains(
     try:
         with holder.cursor() as cursor:
             cursor.execute("SELECT np.acquire_paper_runtime_activation_fence()")
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT table_row.relname, lock_row.mode
                 FROM pg_locks lock_row
                 JOIN pg_class table_row ON table_row.oid = lock_row.relation
@@ -372,11 +369,9 @@ def test_fence_holds_exact_share_set_and_all_ordered_row_drains(
                   AND table_row.relkind = 'r'
                   AND lock_row.mode IN ('ShareLock', 'RowShareLock')
                 ORDER BY lock_row.mode, table_row.relname
-                """
-            )
+                """)
             locks = cursor.fetchall()
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT prosrc
                 FROM pg_proc routine_row
                 JOIN pg_namespace namespace_row
@@ -384,8 +379,7 @@ def test_fence_holds_exact_share_set_and_all_ordered_row_drains(
                 WHERE namespace_row.nspname = 'np'
                   AND routine_row.proname =
                       'acquire_paper_runtime_activation_fence'
-                """
-            )
+                """)
             source = cursor.fetchone()[0]
 
         assert tuple(name for name, mode in locks if mode == "ShareLock") == (
@@ -593,8 +587,7 @@ def test_function_source_acl_or_owner_tamper_is_early_readiness_drift(
     try:
         with administrator.cursor() as cursor:
             if tamper == "source":
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE OR REPLACE FUNCTION
                         np.acquire_paper_runtime_activation_fence()
                     RETURNS VOID
@@ -606,8 +599,7 @@ def test_function_source_acl_or_owner_tamper_is_early_readiness_drift(
                         RETURN;
                     END
                     $function$
-                    """
-                )
+                    """)
             elif tamper == "acl":
                 cursor.execute(
                     "GRANT EXECUTE ON FUNCTION "

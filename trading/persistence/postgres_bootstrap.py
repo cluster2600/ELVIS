@@ -1573,7 +1573,7 @@ CROSS JOIN LATERAL aclexplode(
 LEFT JOIN pg_roles grantee_role ON grantee_role.oid = database_acl.grantee
 WHERE database_row.datname = current_database()
   AND database_acl.grantee <> database_row.datdba
-ORDER BY 1, 2
+ORDER BY 1, 2, 3, 4
 """
 _SELECT_DEFAULT_ACLS_SQL = """
 SELECT

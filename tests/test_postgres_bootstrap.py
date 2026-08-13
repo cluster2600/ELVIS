@@ -69,6 +69,14 @@ def make_connection() -> MagicMock:
     return connection
 
 
+def test_database_acl_evidence_query_has_a_total_order() -> None:
+    query = " ".join(
+        postgres_bootstrap_module._SELECT_DATABASE_ACL_GRANTEES_SQL.split()
+    )
+
+    assert query.endswith("ORDER BY 1, 2, 3, 4")
+
+
 def assert_secret_absent_from_exception_graph(
     error: BaseException, secret: str
 ) -> None:

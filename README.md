@@ -107,7 +107,7 @@ observability/     # prometheus / grafana / loki / promtail configs
 docker/            # Dockerfile variants (ml310, minimal, simple)
 ansible/           # server provisioning + deployment
 docs/              # all documentation (index below)
-tests/             # pytest suite (CI: python 3.14, heavy deps absent)
+tests/             # pytest suite (CI: python 3.10 + 3.14, heavy deps absent)
 ```
 
 ## Documentation
@@ -130,13 +130,14 @@ tests/             # pytest suite (CI: python 3.14, heavy deps absent)
 ## Testing
 
 ```bash
-venv/bin/python -m pytest tests/ -q        # full suite
-venv/bin/python -m pytest -m perf          # latency tripwires
+.venv/bin/python -m pytest tests/ -q        # full suite
+.venv/bin/python -m pytest -m perf          # latency tripwires
 ```
 
-CI runs lint (black/isort/flake8), the test suite on Python 3.14 without the
-heavy ML deps, security scans (bandit, Trivy), and a Docker build on `v*` tags
-publishing to `ghcr.io/cluster2600/elvis`.
+CI uses pinned Black/isort/flake8 versions, runs the non-PostgreSQL and
+PostgreSQL 15 suites on Python 3.10 and 3.14, scans the repository with Trivy,
+and builds the container on branch pushes. Pushes to `main` publish the image
+to `ghcr.io/cluster2600/elvis`.
 
 ## License
 

@@ -1,10 +1,9 @@
 # ELVIS V2 architecture
 
-ELVIS V2 is an architecture programme in progress on the
-`codex/elvis-architecture-migration` branch. It replaces implicit, coupled
-paper-trading state changes with deterministic decisions, durable journals,
-single-owner transactions, and an explicit database-enforced activation
-boundary.
+ELVIS V2 is an architecture programme in progress. It replaces implicit,
+coupled paper-trading state changes with deterministic decisions, durable
+journals, single-owner transactions, and an explicit database-enforced
+activation boundary.
 
 > **V2 is not released or deployed.** The compatibility paper runtime remains
 > authoritative. Implemented V2 persistence and activation components are
@@ -134,6 +133,34 @@ Neither word means deployed.
 The [roadmap](architecture_migration/04-migration-roadmap.md) is the
 authoritative slice-by-slice status ledger. This summary intentionally does not
 duplicate its test counts or acceptance evidence.
+
+The V2 application target is Python 3.14. Python 3.10 remains the package's
+temporary compatibility floor and the runtime for the isolated TensorFlow/ML
+trainer, so CI verifies both interpreters. Retiring 3.10 requires its own
+explicit migration after that trainer boundary is replaced or upgraded.
+
+## Incremental delivery gates
+
+V2 lands as small pull requests with independent evidence. A later gate cannot
+turn an earlier red gate into success, and merging dormant capability never
+authorises runtime cut-over.
+
+```mermaid
+flowchart LR
+    CI["Deterministic CI baseline"] --> CLI["Offline bootstrap CLI"]
+    CLI --> NODDL["Remove runtime DDL"]
+    NODDL --> IDENT["Dedicated identities"]
+    IDENT --> READY["Fail-closed readiness"]
+    READY --> PROOF["Replay, rollback and soak"]
+    PROOF --> APPROVAL{"Operator approval"}
+    APPROVAL -->|not granted| DORMANT["V2 remains dormant"]
+    APPROVAL -->|explicitly granted| CUTOVER["V2 paper cut-over"]
+```
+
+Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
+[editable Excalidraw](../diagrams/v2-delivery-gates.excalidraw),
+[SVG](../diagrams/v2-delivery-gates.svg), and
+[PNG](../diagrams/v2-delivery-gates.png).
 
 ## Operator safety contract
 

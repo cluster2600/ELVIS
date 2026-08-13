@@ -1,0 +1,9 @@
+flowchart LR
+    CI["Deterministic CI baseline"] --> CLI["Offline bootstrap CLI"]
+    CLI --> NODDL["Remove runtime DDL"]
+    NODDL --> IDENT["Dedicated identities"]
+    IDENT --> READY["Fail-closed readiness"]
+    READY --> PROOF["Replay, rollback and soak"]
+    PROOF --> APPROVAL{"Operator approval"}
+    APPROVAL -->|not granted| DORMANT["V2 remains dormant"]
+    APPROVAL -->|explicitly granted| CUTOVER["V2 paper cut-over"]

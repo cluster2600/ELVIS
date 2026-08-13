@@ -553,8 +553,7 @@ def _trades_sequence_evidence(cluster: BootstrapCluster):
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT sequence_catalog.seqincrement,
                        sequence_catalog.seqcycle,
                        COALESCE(owner_table.relname, ''),
@@ -572,8 +571,7 @@ def _trades_sequence_evidence(cluster: BootstrapCluster):
                   ON owner_column.attrelid = ownership.refobjid
                  AND owner_column.attnum = ownership.refobjsubid
                 WHERE sequence_row.oid = 'np.trades_id_seq'::regclass
-                """
-            )
+                """)
             return cursor.fetchone()
     finally:
         connection.close()
@@ -583,8 +581,7 @@ def _public_schema_evidence(cluster: BootstrapCluster):
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(namespace_row.nspowner),
                        COALESCE(grantee_role.rolname, 'PUBLIC'),
                        schema_acl.privilege_type,
@@ -600,8 +597,7 @@ def _public_schema_evidence(cluster: BootstrapCluster):
                   ON grantee_role.oid = schema_acl.grantee
                 WHERE namespace_row.nspname = 'public'
                 ORDER BY 2, 3
-                """
-            )
+                """)
             return tuple(cursor.fetchall())
     finally:
         connection.close()
@@ -1120,8 +1116,7 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 (cluster.roles.schema_owner, cluster.roles.migrator)
             ]
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT relation_row.relname,
                        COALESCE(grantee_row.rolname, 'PUBLIC'),
                        relation_acl.privilege_type
@@ -1133,12 +1128,10 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                   AND relation_row.relkind = 'r'
                   AND relation_acl.grantee <> relation_row.relowner
                 ORDER BY 1, 2, 3
-                """
-            )
+                """)
             assert set(cursor.fetchall()) == _expected_table_grants(cluster)
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT relation_row.relname,
                        COALESCE(grantee_row.rolname, 'PUBLIC'),
                        relation_acl.privilege_type
@@ -1150,15 +1143,13 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                   AND relation_row.relkind = 'S'
                   AND relation_acl.grantee <> relation_row.relowner
                 ORDER BY 1, 2, 3
-                """
-            )
+                """)
             assert cursor.fetchall() == [
                 (sequence, cluster.roles.legacy_runtime, "USAGE")
                 for sequence in sorted(_LEGACY_SEQUENCES)
             ]
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT COALESCE(grantee_row.rolname, 'PUBLIC'),
                        schema_acl.privilege_type
                 FROM pg_namespace namespace_row
@@ -1168,27 +1159,23 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 WHERE namespace_row.nspname = 'np'
                   AND schema_acl.grantee <> namespace_row.nspowner
                 ORDER BY 1, 2
-                """
-            )
+                """)
             assert cursor.fetchall() == [
                 (role, "USAGE") for role in sorted(cluster.roles.login_roles)
             ]
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(nspowner),
                        obj_description(oid, 'pg_namespace')
                 FROM pg_namespace
                 WHERE nspname = 'np'
-                """
-            )
+                """)
             assert cursor.fetchone() == (
                 cluster.roles.schema_owner,
                 f"elvis-postgres-bootstrap-schema:v1:{cluster.database}",
             )
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT function_row.proname,
                        COALESCE(grantee_row.rolname, 'PUBLIC'),
                        function_acl.privilege_type
@@ -1199,12 +1186,10 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 WHERE function_row.pronamespace = 'np'::regnamespace
                   AND function_acl.grantee <> function_row.proowner
                 ORDER BY 1, 2, 3
-                """
-            )
+                """)
             assert cursor.fetchall() == []
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT COALESCE(grantee_row.rolname, 'PUBLIC'),
                        default_acl.defaclobjtype,
                        expanded_acl.privilege_type
@@ -1215,19 +1200,16 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 WHERE default_acl.defaclnamespace = 'np'::regnamespace
                   AND expanded_acl.grantee <> default_acl.defaclrole
                 ORDER BY 1, 2, 3
-                """
-            )
+                """)
             assert cursor.fetchall() == []
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT relname, relkind, pg_get_userbyid(relowner)
                 FROM pg_class
                 WHERE relnamespace = 'np'::regnamespace
                   AND relkind IN ('r', 'S')
                 ORDER BY relkind, relname
-                """
-            )
+                """)
             relations = tuple(cursor.fetchall())
             assert {(name, kind) for name, kind, _owner in relations} == {
                 *((table, "r") for table in _AUTHORITY_TABLES),
@@ -1237,15 +1219,13 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 cluster.roles.schema_owner
             }
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT proname, pg_get_function_identity_arguments(function_row.oid),
                        pg_get_userbyid(proowner)
                 FROM pg_proc function_row
                 WHERE pronamespace = 'np'::regnamespace
                 ORDER BY proname
-                """
-            )
+                """)
             functions = tuple(cursor.fetchall())
             activation_owners = {
                 owner
@@ -1528,14 +1508,12 @@ def test_adoption_schema_marker_is_exact_idempotent_and_tamper_evident(
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(nspowner),
                        obj_description(oid, 'pg_namespace')
                 FROM pg_namespace
                 WHERE nspname = 'np'
-                """
-            )
+                """)
             assert cursor.fetchone() == (cluster.roles.schema_owner, expected_marker)
     finally:
         connection.close()
@@ -1619,8 +1597,7 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
                 (cluster.database,),
             )
             assert cursor.fetchone() == (cluster.old_runtime, True)
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(namespace_row.nspowner),
                        pg_get_userbyid(ledger_row.relowner)
                 FROM pg_namespace namespace_row
@@ -1628,8 +1605,7 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
                   ON ledger_row.relnamespace = namespace_row.oid
                  AND ledger_row.relname = 'schema_migrations'
                 WHERE namespace_row.nspname = 'np'
-                """
-            )
+                """)
             assert cursor.fetchone() == (cluster.old_runtime, cluster.old_runtime)
     finally:
         connection.close()
@@ -1656,14 +1632,12 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
                 (cluster.database,),
             )
             assert cursor.fetchone() == (cluster.admin_role,)
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(nspowner),
                        obj_description(oid, 'pg_namespace')
                 FROM pg_namespace
                 WHERE nspname = 'np'
-                """
-            )
+                """)
             assert cursor.fetchone() == (
                 cluster.roles.schema_owner,
                 f"elvis-postgres-bootstrap-schema:v1:{cluster.database}",
@@ -1695,14 +1669,12 @@ def test_varchar_typmod_drift_is_rejected_without_repair(bootstrap_cluster):
         connection = cluster.admin_factory()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT format_type(column_row.atttypid, column_row.atttypmod)
                     FROM pg_attribute column_row
                     WHERE column_row.attrelid = 'np.orders'::regclass
                       AND column_row.attname = 'position_effect'
-                    """
-                )
+                    """)
                 return cursor.fetchone()
         finally:
             connection.close()
@@ -1840,8 +1812,7 @@ def test_safe_additional_plain_index_owned_by_schema_owner_is_accepted(
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT index_row.indisunique,
                        index_row.indisvalid,
                        index_row.indisready,
@@ -1851,8 +1822,7 @@ def test_safe_additional_plain_index_owned_by_schema_owner_is_accepted(
                 FROM pg_index index_row
                 JOIN pg_class class_row ON class_row.oid = index_row.indexrelid
                 WHERE class_row.oid = 'np.safe_additional_trades_side_idx'::regclass
-                """
-            )
+                """)
             assert cursor.fetchone() == (
                 False,
                 True,
@@ -2770,16 +2740,14 @@ def test_unexpected_user_schema_or_public_routine_is_rejected_without_repair(
                     "GRANT CREATE ON SCHEMA extra_bootstrap_authority TO PUBLIC"
                 )
             elif outside_catalog_drift == "security_definer":
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE FUNCTION public.bootstrap_security_definer_probe()
                     RETURNS INTEGER
                     LANGUAGE sql
                     SECURITY DEFINER
                     SET search_path = pg_catalog
                     AS 'SELECT 1'
-                    """
-                )
+                    """)
             else:
                 cursor.execute("REVOKE USAGE ON SCHEMA public FROM PUBLIC")
     finally:
@@ -2832,15 +2800,13 @@ def test_unexpected_user_schema_or_public_routine_is_rejected_without_repair(
                 cursor.execute("SELECT to_regnamespace('extra_bootstrap_authority')")
                 assert cursor.fetchone() == ("extra_bootstrap_authority",)
             elif outside_catalog_drift == "security_definer":
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT prosecdef
                     FROM pg_proc
                     WHERE oid = (
                         'public.bootstrap_security_definer_probe()'::regprocedure
                     )
-                """
-                )
+                """)
                 assert cursor.fetchone() == (True,)
             else:
                 assert public_evidence == (
@@ -2912,8 +2878,7 @@ def test_standalone_enum_in_np_is_rejected_without_repair(bootstrap_cluster):
         connection = cluster.admin_factory()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT pg_get_userbyid(type_row.typowner),
                            type_row.typtype,
                            type_row.typacl::text,
@@ -2925,8 +2890,7 @@ def test_standalone_enum_in_np_is_rejected_without_repair(bootstrap_cluster):
                            )
                     FROM pg_type type_row
                     WHERE type_row.oid = 'np.hidden_bootstrap_enum'::regtype
-                    """
-                )
+                    """)
                 return cursor.fetchone()
         finally:
             connection.close()
@@ -3378,8 +3342,7 @@ def test_adoption_requires_migration_authority_to_own_schema_and_ledger(
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT pg_get_userbyid(namespace_row.nspowner),
                        pg_get_userbyid(ledger_row.relowner)
                 FROM pg_namespace namespace_row
@@ -3387,8 +3350,7 @@ def test_adoption_requires_migration_authority_to_own_schema_and_ledger(
                   ON ledger_row.relnamespace = namespace_row.oid
                  AND ledger_row.relname = 'schema_migrations'
                 WHERE namespace_row.nspname = 'np'
-                """
-            )
+                """)
             assert cursor.fetchone() == (
                 (cluster.outsider if wrong_owner == "schema" else cluster.old_runtime),
                 (cluster.outsider if wrong_owner == "ledger" else cluster.old_runtime),
