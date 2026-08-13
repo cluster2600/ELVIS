@@ -9,6 +9,10 @@
 > Follow the pending gates in the
 > [V2 migration roadmap](architecture_migration/04-migration-roadmap.md);
 > `ACTIVE` remains a **NO-GO**.
+>
+> **Legacy Ansible quarantine:** the tracked inventory contains placeholders
+> and legacy root/become defaults. The playbooks are retained for compatibility
+> evidence but are not production-approved or exercised by this cleanup.
 
 ## Deployment with Ansible
 

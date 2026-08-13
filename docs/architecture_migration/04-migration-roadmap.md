@@ -4627,6 +4627,38 @@ visual PNG inspection, and `git diff --check` were green. PostgreSQL was not
 run locally because the slice changes no Python production or database code;
 the pull request still runs the repository's complete GitHub matrix.
 
+### V1 retirement hygiene, slice 2
+
+The second cleanup slice removes generated or orphaned repository content, not
+runtime authority. Eight unused Geerlingguy roles (202 files) are no longer
+vendored under `ansible/roles/`, and their unused declarations and role search
+path are removed. `ansible/requirements.yml` and `run_setup.sh` continue to
+install the declared Galaxy collections. All four Ansible playbooks, inventory,
+configuration, templates, and the compatibility deployment guide remain
+tracked.
+
+The slice also removes `trading/config/data_config.yaml`,
+`trading/config/model_config.yaml`, and `trading/config/risk_config.yaml` after
+repository-wide reference checks found no code, script, test, Compose, Ansible,
+or CI consumer. `training/config/model_config.yaml`,
+`trading/config/validation_config.yaml`, root `trading_config.yaml`, and
+`config/config.py` remain in place because they have active consumers or an
+explicit compatibility contract.
+
+Tag `v0.3.0` preserves the exact removed files for forensic inspection. The
+recovery command is recorded in the
+[V1 archive index](../archive/v1/README.md). This slice changes no playbook,
+runtime code, database, deployment target, or activation state. `ACTIVE`
+remains a **NO-GO**.
+
+The retirement contract passes 7 tests under both Python 3.10 and Python 3.14.
+All four retained playbooks pass both Ansible syntax and task-list validation
+with an intentionally nonexistent roles path, and `run_setup.sh` passes Bash
+syntax validation. The complete non-PostgreSQL suite passes 2,713 tests, skips
+50, and passes 7 subtests. Offline link validation checks 325 Markdown targets
+with zero errors; Black, isort, fatal-error Flake8, dual-Python compilation,
+and `git diff --check` are green.
+
 ## Cut-over policy
 
 The paper-runtime control has four modes:

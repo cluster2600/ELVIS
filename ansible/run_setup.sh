@@ -55,12 +55,12 @@ check_requirements() {
     print_success "Requirements check passed"
 }
 
-# Function to install Ansible Galaxy requirements
+# Function to install Ansible Galaxy collections
 install_galaxy_requirements() {
-    print_status "Installing Ansible Galaxy collections and roles..."
+    print_status "Installing Ansible Galaxy collections..."
     
     if [ -f "requirements.yml" ]; then
-        ansible-galaxy install -r requirements.yml --force
+        ansible-galaxy collection install -r requirements.yml --force
         print_success "Ansible Galaxy requirements installed"
     else
         print_warning "requirements.yml not found, skipping Galaxy installation"
@@ -159,7 +159,7 @@ show_usage() {
     echo "  -t, --test     Test connection only"
     echo "  -v, --verbose  Verbose output"
     echo "  --check        Run in check mode (dry run)"
-    echo "  --skip-galaxy  Skip Ansible Galaxy installation"
+    echo "  --skip-galaxy  Skip Galaxy collection installation (preinstalled only)"
     echo "  --docker       Use Docker deployment (recommended)"
     echo ""
     echo "Examples:"
@@ -223,6 +223,7 @@ main() {
     
     print_status "Starting ELVIS Trading Bot setup..."
     print_status "Environment: $environment"
+    print_warning "Legacy compatibility automation only; not a V2 production cut-over."
     
     # Check requirements
     check_requirements

@@ -438,10 +438,12 @@ monitoring:
 override to `trading.default_leverage` so the loaded config matches the runtime
 behaviour enforced by `config.config.validate_leverage_config`.
 
-Additional per-domain YAML lives under `trading/config/` (`data_config.yaml`,
-`model_config.yaml`, `risk_config.yaml`, `validation_config.yaml`) and
-`config/config.py` holds `TRADING_CONFIG` / `PAPER_TRADING_CONFIG` /
-`API_CONFIG`.
+The only active YAML under `trading/config/` is `validation_config.yaml`, used
+by `trading/scripts/validate_strategy.py`. Model training uses the distinct
+`training/config/model_config.yaml`. Runtime settings come from
+`config/config.py`, environment variables, and constructor inputs; the retired
+`data_config.yaml`, `model_config.yaml`, and `risk_config.yaml` files were never
+loaded.
 
 ### Notes on the `monitoring` block
 

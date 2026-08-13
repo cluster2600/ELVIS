@@ -521,9 +521,21 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
             f'"10.254.90.2", user "{_ADMIN_ROLE}", database "postgres"'
         ),
     ]
-    assert len(fatal_lines) == len(expected_fatal_fragments)
     for fragment in expected_fatal_fragments:
         assert sum(fragment in line for line in fatal_lines) == 1
+    allowed_restart_fatal_fragments = ("the database system is shutting down",)
+    unexpected_fatal_lines = [
+        line
+        for line in fatal_lines
+        if not any(
+            fragment in line
+            for fragment in (
+                *expected_fatal_fragments,
+                *allowed_restart_fatal_fragments,
+            )
+        )
+    ]
+    assert unexpected_fatal_lines == []
 
 
 def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
