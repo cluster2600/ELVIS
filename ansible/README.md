@@ -5,8 +5,18 @@
 > generation-bound cut-over. See the
 > [V2 architecture](../docs/V2_ARCHITECTURE.md) and
 > [migration roadmap](../docs/architecture_migration/04-migration-roadmap.md).
+>
+> **Not production-approved.** The tracked inventory contains example hosts and
+> legacy root/become defaults. These playbooks have syntax evidence only in this
+> cleanup slice; they were not executed against staging or production.
 
 This directory contains Ansible playbooks and configuration files to automate the installation and setup of the ELVIS Trading Bot and all its dependencies.
+
+Galaxy collections are declared in `requirements.yml` and installed by
+`run_setup.sh`. The playbooks use no Galaxy roles; the old vendored
+`ansible/roles/` cache is no longer tracked or downloaded. Run the setup without
+`--skip-galaxy` after a fresh clone unless every declared collection is already
+installed.
 
 ## Quick Start
 
@@ -100,6 +110,7 @@ ansible/
 
 ### Skip Ansible Galaxy Installation
 ```bash
+# Use only when every declared collection is already installed.
 ./run_setup.sh --skip-galaxy
 ```
 

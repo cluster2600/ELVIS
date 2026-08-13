@@ -59,7 +59,7 @@ graph TB
     
     subgraph "Configuration"
         Config[config.py]
-        ModelConfig[model_config.yaml]
+        ModelConfig[training/config/model_config.yaml]
         APIConfig[API Configuration]
     end
     

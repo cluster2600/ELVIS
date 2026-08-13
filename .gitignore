@@ -28,8 +28,9 @@ env-*/
 .venv/
 DeepSeek-R1-Distill-Qwen-1.5B/
 
-# Vendored framework sources
+# Generated/vendor dependency trees
 tensorflow/
+ansible/roles/
 
 # OS/editor noise
 .DS_Store

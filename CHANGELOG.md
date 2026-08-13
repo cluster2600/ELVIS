@@ -25,6 +25,12 @@ See the [V2 architecture overview](docs/V2_ARCHITECTURE.md) and authoritative
 - No compatibility-runtime code, active deployment file, database baseline, or
   operational runbook was retired. The archive boundary is documentation and
   repository hygiene only; it grants no V2 deployment or activation authority.
+- Removed 202 generated Ansible Galaxy role files and their unused requirement
+  declarations; no playbook imported them. Galaxy collection installation and
+  all compatibility playbooks remain.
+- Removed three orphaned `trading/config` YAML files that had no executable,
+  test, Compose, Ansible, or CI consumer; active training and validation YAML
+  contracts remain tracked.
 
 ## [v0.3.0] - 2026-07-12 - Root reorganization, profitability roadmap, py3.10/3.14 container split
 
