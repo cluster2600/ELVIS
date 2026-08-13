@@ -111,7 +111,7 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Order, fill, position, and paper-account journal/replay contracts | Implemented and tested | Persistence path remains dormant |
 | Atomic paper submission/account owners | Implemented and tested | Not composed into the running bot |
 | Readiness assessment, legacy-writer fence, runtime generations, and locked activation | Implemented and tested | Database capabilities exist but no cut-over is authorised |
-| Least-authority PostgreSQL role/catalog bootstrap and pre-role admission | Implemented as an operator library | Rejects an unsafe database before managed roles are created; no CLI, secret writer, startup hook, Compose wiring, or deployment activation |
+| Least-authority PostgreSQL role/catalog bootstrap, pre-role admission, and offline CLI | Implemented as dormant operator capability | The CLI accepts only a strict non-secret manifest and external libpq service names; it rejects unsafe databases and adds no secret writer, startup hook, Compose wiring, or deployment activation |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
 | Replay, reconciliation, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
 
@@ -126,7 +126,7 @@ Neither word means deployed.
 | Foundation | Audit, target design, typed domain and application boundaries | Implemented |
 | Progressive runtime extraction | Signal policy, risk, execution, and position ownership moved in small reversible slices | In progress |
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
-| Deployment composition | Offline orchestration, dedicated credentials, restrictive database/network policy, removal of runtime DDL, fail-closed health | Pending |
+| Deployment composition | Offline CLI available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
 | Cut-over evidence | Bounded replay, reconciliation, side-effect-free shadowing, rollback rehearsal, soak, explicit operator approval | Pending |
 | Cleanup | Remove superseded legacy owners only after parity and cut-over proof | Pending |
 
@@ -166,7 +166,8 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 
 - Paper trading is the only executable mode; V2 does not add live submission.
 - Bootstrap and activation are offline operator actions, never runtime startup
-  side effects.
+  side effects. The exact bootstrap procedure is in the
+  [offline PostgreSQL runbook](V2_POSTGRES_BOOTSTRAP.md).
 - Secrets remain outside Git and outside command arguments, logs, and receipts.
 - Role/catalog admission must run inside an operator-enforced exclusive DDL and
   role-administration window; the advisory lock coordinates only cooperating
@@ -191,6 +192,7 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 | V2 overview, approach, data flow, and safety | This page |
 | Detailed V2 contracts | [Target architecture](architecture_migration/03-target-architecture.md) |
 | Current implementation status and verification | [Migration roadmap](architecture_migration/04-migration-roadmap.md) |
+| Offline PostgreSQL bootstrap contract and recovery | [Bootstrap runbook](V2_POSTGRES_BOOTSTRAP.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Current deployment commands | [Deployment guide](DEPLOYMENT.md), subject to its V2 warning |

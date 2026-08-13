@@ -1,0 +1,14 @@
+flowchart TD
+    PRE["prove prerequisites"] --> RUN["run one explicit pass"]
+    RUN --> RESULT{"receipt or error"}
+    RESULT -->|"credentials required"| PROVISION["provision six external credentials"]
+    PROVISION --> SERVICES["add six libpq service names"]
+    SERVICES --> RUN
+    RESULT -->|"demotion required"| APPROVE["approve demotion manifest and flag"]
+    APPROVE --> DEMOTE["run demotion pass"]
+    DEMOTE --> DRAIN["drain old sessions and verify inert role"]
+    DRAIN --> RUN
+    RESULT -->|"complete"| RECORD["record receipt; keep V2 dormant"]
+    RESULT -->|"typed failure"| STOP["stop and investigate drift"]
+    RESULT -->|"commit unknown"| READBACK["preserve window and inspect named phase"]
+    READBACK --> RUN
