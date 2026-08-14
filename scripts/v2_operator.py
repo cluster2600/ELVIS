@@ -12,7 +12,7 @@ import sys
 from collections.abc import Sequence
 from typing import Protocol
 
-_VERSION = "2.0.0-alpha.1"
+_VERSION = "2.0.0-alpha.2"
 _COMMANDS = {
     "bootstrap": (
         "scripts.postgres_bootstrap",

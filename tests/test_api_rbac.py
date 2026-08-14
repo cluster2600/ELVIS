@@ -107,10 +107,10 @@ def test_admin_cannot_claim_live_mode(client):
 
 
 def test_api_health_and_schema_report_the_python314_preview(client):
-    assert client.get("/health").get_json()["version"] == "2.0.0a1"
+    assert client.get("/health").get_json()["version"] == "2.0.0a2"
 
     schema = client.get("/api/swagger.json").get_json()
-    assert schema["info"]["version"] == "2.0.0a1"
+    assert schema["info"]["version"] == "2.0.0a2"
     assert schema["components"]["schemas"]["BotStatus"]["properties"]["mode"][
         "enum"
     ] == ["paper"]

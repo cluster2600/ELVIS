@@ -1,6 +1,6 @@
 # Install the ELVIS V2 operator preview
 
-`v2.0.0-alpha.1` is a **paper/migration operator preview** for Python 3.14.
+`v2.0.0-alpha.2` is a **paper/migration operator preview** for Python 3.14.
 It packages the bounded PostgreSQL bootstrap, cut-over inspection, snapshot
 import, and reconciliation tools in one multi-architecture container.
 
@@ -23,7 +23,7 @@ Python 3.14.
 ## Download and verify
 
 ```bash
-TAG=v2.0.0-alpha.1
+TAG=v2.0.0-alpha.2
 mkdir elvis-v2-operator-preview
 cd elvis-v2-operator-preview
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elvis-trading-bot"
-version = "2.0.0a1"
+version = "2.0.0a2"
 description = "ELVIS algorithmic trading bot"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
