@@ -1,5 +1,16 @@
 # ELVIS V2 fresh-target cut-over preflight
 
+> **Historical alpha.2 preflight — superseded for production.** This document
+> records a pre-retirement inspection from the alpha.2 preview. It is not
+> trajectory-B/1B production authority: the
+> [production plan](architecture_migration/05-v2-production-plan.md),
+> [failure register](architecture_migration/06-v2-production-failure-register.md),
+> and [E2E matrix](architecture_migration/07-v2-production-e2e-matrix.md)
+> supersede it. No V1 source state, V1 clone, or c3c2/c3c3 import output may
+> seed the trajectory-B production opening or account. Within this historical
+> slice, a stopped V1 clone is pre-retirement read-only evidence only; after
+> signed retirement, V1 is never a writer or rollback authority.
+
 This runbook defines M9b.14c3c2: a one-shot, read-only inspection that binds a
 stopped clone of the legacy PostgreSQL source to a separate, freshly
 bootstrapped V2 target. It records whether that pair is eligible for a later,
@@ -29,10 +40,11 @@ M9b.14c3c2 therefore selects a fresh-target migration path:
 4. record a canonical source-data fingerprint and exact target evidence; and
 5. design the importer in the next bounded pull request.
 
-The source clone remains the rollback and audit reference. The fresh target is
-disposable until later import, replay, reconciliation, and cut-over gates have
-all passed. A checksum is evidence about inspected rows, not a backup and not a
-copy of those rows.
+The stopped source clone was an alpha.2 pre-retirement audit reference, not a
+production seed or post-retirement rollback authority. The fresh target was
+disposable until the later import, replay, reconciliation, and cut-over gates
+then envisaged had all passed. A checksum is evidence about inspected rows, not
+a backup and not a copy of those rows.
 
 ## Evidence and trust boundary
 
@@ -366,37 +378,42 @@ Handled errors contain only their typed code:
 No exit authorises a data copy, target mutation, deployment, credential
 rotation, runtime start, or transition to `ACTIVE`.
 
-## Planned production path and rollback
+## Historical alpha.2 follow-on sketch (superseded)
 
-Only the blue preflight steps in this diagram belong to c3c2. The amber import,
-validation, fencing, and activation steps require later reviewed pull requests
-and fresh evidence.
+Only the blue preflight steps in this diagram belonged to c3c2. The amber
+import, validation, fencing, and activation nodes preserve the alpha.2 preview
+sequence for historical review; they are not the trajectory-B/1B production
+path. The production plan, failure register, and E2E matrix linked in the
+banner above replace this sketch. No source clone, importer, or imported target
+shown here may seed the trajectory-B production opening.
 
 ```mermaid
 flowchart TD
-    LEGACY["legacy paper runtime<br/>authoritative"] --> CLONE["stopped verified source clone"]
+    LEGACY["legacy paper runtime (authoritative)"] --> CLONE["stopped verified source clone"]
     CLONE --> PREF["C3C2 read-only preflight"]
-    PREF --> RECEIPT["READY_FOR_<br/>FRESH_TARGET<br/>stale on return"]
+    PREF --> RECEIPT["READY_FOR_
+FRESH_TARGET
+(stale on return)"]
     RECEIPT --> REVIEW{"revalidate evidence"}
-    REVIEW -->|"reject or stale"| EARLY["discard fresh target<br/>keep legacy"]
+    REVIEW -->|"reject or stale"| EARLY["discard fresh target (keep legacy)"]
     REVIEW -->|"approved later"| IMPORT["future bounded importer"]
     IMPORT -->|"failure"| EARLY
     IMPORT -->|"success"| VALIDATE["target replay and validation"]
     VALIDATE -->|"failure"| EARLY
-    VALIDATE -->|"pass"| PAUSE["PAUSED + sole-writer fence"]
+    VALIDATE -->|"pass"| PAUSE["signed V1 retirement (PAUSED + sole-writer fence)"]
     PAUSE --> APPROVE{"explicit cut-over approval"}
     APPROVE -->|"not granted"| RECOVER["reconcile in PAUSED"]
     APPROVE -->|"granted"| ACTIVE["V2 ACTIVE"]
     ACTIVE -->|"rollback"| RECOVER
-    RECOVER --> SELECT{"select one writer"}
-    SELECT -->|"legacy"| LEGACY
-    SELECT -->|"V2"| ACTIVE
+    RECOVER --> REAPPROVE{"new V2 activation approval"}
+    REAPPROVE -->|"not granted"| RECOVER
+    REAPPROVE -->|"granted"| ACTIVE
 
     classDef current fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e;
     classDef future fill:#fef3c7,stroke:#b45309,color:#78350f;
     classDef stop fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d;
     class PREF,RECEIPT current;
-    class IMPORT,VALIDATE,PAUSE,APPROVE,ACTIVE,RECOVER,SELECT future;
+    class IMPORT,VALIDATE,PAUSE,APPROVE,ACTIVE,RECOVER,REAPPROVE future;
     class EARLY stop;
 ```
 
@@ -406,16 +423,16 @@ Graph artefacts:
 [PNG](../diagrams/v2-c3c2-cutover-rollback.png), and
 [editable Excalidraw](../diagrams/v2-c3c2-cutover-rollback.excalidraw).
 
-Rollback depends on the latest phase:
+Historical containment depended on the alpha.2 phase:
 
-| Phase | Authority | Rollback boundary |
+| Historical phase | Authority at that time | Containment boundary |
 |---|---|---|
 | c3c2 inspection | Legacy runtime | Close the read-only connections. Keep or discard only the fresh target under a separately verified operator procedure; the source clone and active source are untouched. |
 | c3c3a raw import, before authority change | Legacy runtime | Stop the importer, preserve evidence, and use its exact empty/exact/conflicting readback procedure. Discard or rebuild only the fresh target under a separate verified procedure. |
 | c3c3b read-only candidate review | Legacy runtime | Close the target connections and preserve the stale review receipt. `DECISION_REQUIRED` or `BLOCKED` never permits opening, provisioning, or activation; c3c3b has no match outcome. |
 | Future validation or shadow | Legacy runtime | Reject cut-over, keep V2 non-authoritative, and rebuild the target if exact replay or reconciliation cannot be proved. |
-| Future `PAUSED` transition | No writer until reconciled | Preserve the fence, reconcile both sides, and explicitly select one writer before resuming. |
-| Future `ACTIVE` | V2 only | Return to `PAUSED`, drain and reconcile the V2 owner, then explicitly select legacy or V2. Never enable both writers. |
+| Future `PAUSED` after signed V1 retirement | V2 remains the only eligible writer | Preserve the fence, reconcile V2 durable state, and activate only an approved compatible V2 candidate. V1 cannot regain authority. |
+| Future `ACTIVE` | V2 only | Set kill, drain and reconcile V2 work, return to `PAUSED`, and activate only an approved compatible V2 candidate. |
 
 There is no destructive cleanup command in this runbook because c3c2 does not
 own the production source, clone mechanism, backup store, or target lifecycle.

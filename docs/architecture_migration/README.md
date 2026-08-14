@@ -9,8 +9,9 @@ PostgreSQL identities.
 > **Programme status:** the Python 3.14 operator preview is installable, but it
 > is not a deployed or activated V2 runtime. The compatibility paper process
 > remains authoritative and `ACTIVE` remains a
-> **NO-GO**. See the concise [V2 overview](../V2_ARCHITECTURE.md) before using
-> the detailed records below.
+> **NO-GO**. The concise [V2 overview](../V2_ARCHITECTURE.md) describes the
+> historical alpha.2 target; documents 05–07 below supersede its authority and
+> rollback model for trajectory B/1B production work.
 
 The documents deliberately separate observed facts, selected design,
 implemented-but-dormant components, and future work. A proposed or tested
@@ -23,10 +24,19 @@ running bot.
    pre-V2 baseline, component map, dependency analysis, and failure modes.
 2. [Reference architecture analysis](02-reference-architectures.md) — source
    review that informed V2 without copying their topology or code.
-3. [Target architecture](03-target-architecture.md) — the deliberately small
-   V2 modular-monolith design and its detailed contracts.
-4. [Migration roadmap](04-migration-roadmap.md) — atomic migration slices,
-   verification gates, rollback rules, and authoritative current status.
+3. [Target architecture](03-target-architecture.md) — historical alpha.2 target
+   design; useful background, but it does not authorise a trajectory-B cut-over.
+4. [Migration roadmap](04-migration-roadmap.md) — historical alpha.2 delivery
+   ledger. Its V1 rollback language is superseded for paper production by
+   documents 05–07.
+5. [Paper-production plan](05-v2-production-plan.md) — authoritative production
+   delivery sequence, approved trajectory B/1B invariants, and async
+   virtual-venue design.
+6. [Paper-production failure register](06-v2-production-failure-register.md) —
+   open P0/P1/P2 defects, regression expectations, closure gates, and rollback
+   rules.
+7. [Paper-production E2E matrix](07-v2-production-e2e-matrix.md) — G0 through
+   G17 acceptance scenarios and immutable evidence requirements.
 
 ## V2 status at a glance
 
@@ -35,7 +45,7 @@ running bot.
 | Typed domain, order service, feature contracts, and selected policy/risk boundaries | Implemented incrementally | Some boundaries serve the compatibility runtime |
 | Durable journals, replay, account ledger, atomic owners, readiness, fence, generations, activation, and role/catalog bootstrap | Implemented and tested | Dormant; no running consumer or authority |
 | Offline bootstrap, stopped-clone/fresh-target preflight, bounded raw V1 import, and read-only imported-vs-operator-hypothesis review | Implemented and packaged in the preview | Dormant; review receipts are cross-snapshot, source-unauthenticated, stale, and non-authoritative; no match or account opening |
-| Source/runtime provenance authentication, coherent enforced review, dedicated production composition, opening-provenance selection, V2 replay of imported history, shadow comparison, rollback rehearsal, soak, and approval | Pending evidence | Blocks `ACTIVE` |
+| Signed fresh-opening approval, one-way V1 retirement, activation/candidate binding, async virtual venue with pending-order holds, dedicated production composition, V2-only recovery, backup/restore, soak, release and course evidence | Planned; every runtime-production defect remains open | Blocks `ACTIVE` |
 
 ## Evidence snapshot
 
@@ -62,6 +72,6 @@ the migration adopts architectural ideas only.
 - **Planned**: accepted direction, not yet implemented.
 - **Removed**: deleted only after its replacement is active and verified.
 
-The roadmap is the authoritative status page. The repository remains the source
-of truth, and an explicit operator decision is required for every deployment or
-cut-over action.
+Documents 05–07 are the authoritative production programme, open-defect ledger
+and acceptance contract. The repository remains the source of truth, and an
+explicit operator decision is required for every deployment or cut-over action.

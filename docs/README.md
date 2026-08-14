@@ -8,8 +8,10 @@ trading runtime. The compatibility paper process remains authoritative and
 ## Start here
 
 1. [Install the V2 preview](../INSTALL_V2.md).
-2. Read the [V2 architecture and safety boundary](V2_ARCHITECTURE.md).
-3. Check the [current migration gates](architecture_migration/04-migration-roadmap.md).
+2. Read the [historical preview architecture](V2_ARCHITECTURE.md) for background.
+3. Use the authoritative [production plan](architecture_migration/05-v2-production-plan.md),
+   [failure register](architecture_migration/06-v2-production-failure-register.md),
+   and [E2E gates](architecture_migration/07-v2-production-e2e-matrix.md).
 4. Choose only the operator runbook that matches the reviewed operation:
    [bootstrap](V2_POSTGRES_BOOTSTRAP.md),
    [isolated rehearsal](V2_POSTGRES_REHEARSAL.md),
@@ -21,11 +23,14 @@ trading runtime. The compatibility paper process remains authoritative and
 
 | Document | Authority |
 |---|---|
-| [V2 architecture](V2_ARCHITECTURE.md) | Canonical approach and safety contract |
-| [Target architecture](architecture_migration/03-target-architecture.md) | Detailed component and data contracts |
-| [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Current status and open gates |
+| [V2 architecture](V2_ARCHITECTURE.md) | Historical alpha.2 preview background; superseded for production authority |
+| [Target architecture](architecture_migration/03-target-architecture.md) | Historical alpha.2 component contracts |
+| [Migration roadmap](architecture_migration/04-migration-roadmap.md) | Historical alpha.2 delivery ledger |
+| [Production plan](architecture_migration/05-v2-production-plan.md) | Authoritative trajectory-B/1B design and delivery contract |
+| [Failure register](architecture_migration/06-v2-production-failure-register.md) | Authoritative open production blockers |
+| [E2E matrix](architecture_migration/07-v2-production-e2e-matrix.md) | Authoritative G0–G17 acceptance evidence |
 | `V2_*` runbooks | Offline operator procedures; never activation authority |
-| [Compatibility architecture](architecture.md) | Current paper-runtime topology and rollback context |
+| [Compatibility architecture](architecture.md) | Current pre-cut-over paper-runtime topology and evidence context |
 | [Paper setup](PAPER_TRADING_SETUP.md) | Source-only compatibility operation |
 | [V1 restore manifest](archive/v1/README.md) | Historical recovery pointer, not instructions |
 
@@ -36,7 +41,9 @@ authority.
 ## Compatibility references
 
 The following pages remain because the current paper runtime is still the
-rollback authority. Each is explicitly labelled as compatibility material:
+temporary writer before the one-way V2 cut-over. It is not a future rollback
+authority, and none of its state may seed the trajectory-B production opening.
+Each page is explicitly labelled as compatibility material:
 
 - [runtime architecture](architecture.md);
 - [system topology](ELVIS_SYSTEM_ARCHITECTURE.md);
