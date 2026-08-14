@@ -13,6 +13,7 @@ trading runtime. The compatibility paper process remains authoritative and
    [failure register](architecture_migration/06-v2-production-failure-register.md),
    and [E2E gates](architecture_migration/07-v2-production-e2e-matrix.md).
 4. Choose only the operator runbook that matches the reviewed operation:
+   [fresh-opening preparation](V2_FRESH_OPENING_PLAN.md),
    [bootstrap](V2_POSTGRES_BOOTSTRAP.md),
    [isolated rehearsal](V2_POSTGRES_REHEARSAL.md),
    [fresh-target preflight](V2_FRESH_TARGET_CUTOVER.md),

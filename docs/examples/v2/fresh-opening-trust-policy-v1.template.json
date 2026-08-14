@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "purpose": "ELVIS_V2_FRESH_PAPER_OPENING",
+  "trust_domain": "example",
+  "max_approval_lifetime_seconds": 3600,
+  "anchors": [
+    {
+      "signer_key_id": "example",
+      "approver_identity": "example",
+      "ed25519_public_key": "0000000000000000000000000000000000000000000000000000000000000000",
+      "revoked": true
+    }
+  ]
+}

@@ -45,7 +45,8 @@ running bot.
 | Typed domain, order service, feature contracts, and selected policy/risk boundaries | Implemented incrementally | Some boundaries serve the compatibility runtime |
 | Durable journals, replay, account ledger, atomic owners, readiness, fence, generations, activation, and role/catalog bootstrap | Implemented and tested | Dormant; no running consumer or authority |
 | Offline bootstrap, stopped-clone/fresh-target preflight, bounded raw V1 import, and read-only imported-vs-operator-hypothesis review | Implemented and packaged in the preview | Dormant; review receipts are cross-snapshot, source-unauthenticated, stale, and non-authoritative; no match or account opening |
-| Signed fresh-opening approval, one-way V1 retirement, activation/candidate binding, async virtual venue with pending-order holds, dedicated production composition, V2-only recovery, backup/restore, soak, release and course evidence | Planned; every runtime-production defect remains open | Blocks `ACTIVE` |
+| Pure signed fresh-opening preparation | Implemented source-only after alpha.2 | Read-only canonical intent, detached approval and trust verification; no database contact, nonce reservation, account opening, provisioning or activation |
+| Durable fresh opening, one-way V1 retirement, activation/candidate binding, async virtual venue with pending-order holds, dedicated production composition, V2-only recovery, backup/restore, soak, release and course evidence | Planned; every runtime-production defect remains open | Blocks `ACTIVE` |
 
 ## Evidence snapshot
 

@@ -21,6 +21,7 @@ the repo root to keep the top level clean.
 
 | Module | Purpose |
 |---|---|
+| `python3.14 -m scripts.v2_opening_plan` | Prepare and verify one signed trajectory-B fresh-opening intent from bounded local files. It never contacts PostgreSQL, reserves a nonce, opens/provisions an account, or grants runtime authority. |
 | `python -m scripts.postgres_bootstrap` | Reconcile the dormant V2 PostgreSQL roles/catalog from a strict non-secret JSON manifest and external libpq services. It is one-shot, operator-confirmed, and never runs at application startup. |
 | `python -m scripts.postgres_cutover_preflight` | Inspect one stopped V1 clone and one separately bootstrapped, empty V2 target. It is read-only, emits stale evidence, and never copies data or authorises cut-over. |
 | `python -m scripts.postgres_legacy_snapshot_import` | Bind a strict secret-free c3c2 `READY` receipt as stale expected evidence, revalidate both databases, then copy only the seven raw V1 relations with bounded batches, atomic row commit, and post-commit sequence recovery. It never synthesizes V2 history or authorises activation. |
@@ -30,6 +31,11 @@ See the [V2 PostgreSQL bootstrap runbook](../docs/V2_POSTGRES_BOOTSTRAP.md) for
 the exact flags, version-1 configuration schema, external `PGSERVICEFILE` and
 `PGPASSFILE` contract, receipts, exit codes, and commit-unknown recovery. A
 `COMPLETE` receipt does not deploy or activate V2.
+
+See the [fresh-opening plan](../docs/V2_FRESH_OPENING_PLAN.md) for the source-only
+Python 3.14 command, three strict local documents, externally pinned trust/key
+fingerprints, result and exit-code contract, and explicit PR3 nonce/database
+boundary. `PREPARED` is read-only evidence, never an opening or activation.
 
 See the [fresh-target cut-over preflight](../docs/V2_FRESH_TARGET_CUTOVER.md)
 for its three mandatory confirmations, closed version-1 intent document,
