@@ -1,4 +1,6 @@
 import ast
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -559,6 +561,8 @@ def test_apply_migrations_rejects_a_prepared_connection_without_rollback() -> No
 
 def test_migration_runner_is_not_wired_to_production_startup() -> None:
     root = Path(__file__).parents[1]
+    opening_plan_path = Path("scripts/v2_opening_plan.py")
+    opening_plan_allowed_imports = {"trading.persistence.paper_account_journal_codec"}
     consumers = []
     for source_path in sorted(root.rglob("*.py")):
         if (
@@ -569,22 +573,28 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
         ):
             continue
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        imports_persistence = any(
-            (
-                isinstance(node, ast.Import)
-                and any(
-                    alias.name.startswith("trading.persistence") for alias in node.names
+        persistence_imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                persistence_imports.update(
+                    alias.name
+                    for alias in node.names
+                    if alias.name.startswith("trading.persistence")
                 )
-            )
-            or (
+            elif (
                 isinstance(node, ast.ImportFrom)
                 and node.module is not None
                 and node.module.startswith("trading.persistence")
-            )
-            for node in ast.walk(tree)
-        )
-        if imports_persistence:
-            consumers.append(source_path.relative_to(root))
+            ):
+                persistence_imports.add(node.module)
+        relative_path = source_path.relative_to(root)
+        if (
+            relative_path == opening_plan_path
+            and persistence_imports == opening_plan_allowed_imports
+        ):
+            continue
+        if persistence_imports:
+            consumers.append(relative_path)
 
     assert consumers == [
         Path("scripts/postgres_bootstrap.py"),
@@ -592,3 +602,46 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
         Path("scripts/postgres_legacy_snapshot_import.py"),
         Path("scripts/postgres_legacy_snapshot_reconciliation.py"),
     ]
+
+
+def test_opening_plan_composition_does_not_load_migration_authority() -> None:
+    root = Path(__file__).parents[1]
+    program = """
+import sys
+import scripts.v2_opening_plan
+assert "trading.persistence.migration_runner" not in sys.modules
+assert "psycopg2" not in sys.modules
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_persistence_facade_loads_migration_exports_only_on_request() -> None:
+    root = Path(__file__).parents[1]
+    program = """
+import sys
+import trading.persistence as persistence
+assert "trading.persistence.migration_runner" not in sys.modules
+assert "psycopg2" not in sys.modules
+assert persistence.Migration.__name__ == "Migration"
+assert "trading.persistence.migration_runner" in sys.modules
+assert "psycopg2" in sys.modules
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr

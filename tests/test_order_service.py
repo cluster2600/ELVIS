@@ -183,6 +183,7 @@ def _unexpected_application_imports(source: str) -> set[str]:
         "decimal",
         "enum",
         "hashlib",
+        "hmac",
         "json",
         "math",
         "typing",

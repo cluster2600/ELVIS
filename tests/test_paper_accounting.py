@@ -1016,7 +1016,7 @@ def test_consumer_detector_allows_unrelated_forms(source) -> None:
     assert not _uses_paper_accounting(source)
 
 
-def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
+def test_paper_accounting_is_pure_and_has_only_explicit_non_runtime_consumers() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "domain" / "paper_accounting.py"
     facade_path = root / "trading" / "domain" / "__init__.py"
@@ -1030,6 +1030,7 @@ def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
     reconciliation_adapter_path = (
         root / "trading" / "persistence" / "postgres_legacy_snapshot_reconciliation.py"
     )
+    opening_plan_composition_path = root / "scripts" / "v2_opening_plan.py"
     consumers = []
     for source_path in root.rglob("*.py"):
         if (
@@ -1043,6 +1044,7 @@ def test_paper_accounting_is_pure_and_has_no_runtime_consumer() -> None:
                 readiness_path,
                 reconciliation_contract_path,
                 reconciliation_adapter_path,
+                opening_plan_composition_path,
             }
             or "tests" in source_path.parts
             or ".venv" in source_path.parts

@@ -1585,13 +1585,19 @@ def test_account_codec_consumer_detector_allows_unrelated_forms(source: str) -> 
     assert not _uses_account_codec(source)
 
 
-def test_account_codec_has_no_runtime_consumer() -> None:
+def test_account_codec_has_only_explicit_non_runtime_consumers() -> None:
     root = Path(__file__).parents[1]
     module_path = root / "trading" / "persistence" / "paper_account_journal_codec.py"
     facade_path = root / "trading" / "persistence" / "__init__.py"
     repository_path = root / "trading" / "persistence" / "paper_account_journal.py"
     owner_path = root / "trading" / "persistence" / "atomic_paper_account_owner.py"
-    allowed_consumers = {facade_path, repository_path, owner_path}
+    opening_plan_composition_path = root / "scripts" / "v2_opening_plan.py"
+    allowed_consumers = {
+        facade_path,
+        repository_path,
+        owner_path,
+        opening_plan_composition_path,
+    }
     ignored_parts = {".git", ".venv", "__pycache__", "build", "dist", "tests"}
     consumers = []
 
