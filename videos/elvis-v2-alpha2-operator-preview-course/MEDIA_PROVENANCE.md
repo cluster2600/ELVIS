@@ -74,9 +74,16 @@ Ces éléments doivent être exclus du cadre ou couverts lors de la revue.
 
 ## Éléments interdits ou non prouvés
 
-- `images/elvis.png` : ancien fichier retiré de l'arbre actif, car sa
-  ressemblance avec Elvis Presley n'avait aucune provenance de droits établie.
-  Toute réintroduction est bloquée sans licence et revue écrites.
+- `images/elvis.png` : illustration générative fournie par le propriétaire du
+  dépôt, initialement ajoutée par le commit
+  `6926f49fb43a7468457202ac151e2b430b748e70`. Le propriétaire a explicitement
+  demandé son rétablissement sur la page d'accueil le 14 août 2026. Le fichier
+  restauré conserve le SHA-256
+  `e01bfa3c866e701fb2805f99251761dbda2b90345f057ba7cc4083fc08200141`.
+  Cette déclaration documente son origine et la demande de restauration sur le
+  README ; elle ne vaut ni licence ni revue juridique indépendante. Tout usage
+  distinct dans un cours ou une campagne marketing reste soumis à une revue
+  séparée. L'image n'est pas une preuve d'interface ou de runtime V2.
 - `images/dashboard.png` : ne constitue pas une preuve de l'interface ou du
   runtime V2 ; usage comme preuve bloqué.
 - Images générées de terminal ou sorties recomposées : ne peuvent pas être
