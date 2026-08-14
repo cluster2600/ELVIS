@@ -3,7 +3,7 @@ name: V2 operator prerelease
 on:
   push:
     tags:
-      - v2.0.0-alpha.1
+      - v2.0.0-alpha.2
 
 permissions: {}
 
@@ -12,9 +12,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  V2_RELEASE_TAG: v2.0.0-alpha.1
-  V2_PROJECT_VERSION: 2.0.0a1
-  V2_IMAGE_VERSION: 2.0.0-alpha.1
+  V2_RELEASE_TAG: v2.0.0-alpha.2
+  V2_PROJECT_VERSION: 2.0.0a2
+  V2_IMAGE_VERSION: 2.0.0-alpha.2
   V2_IMAGE: ghcr.io/cluster2600/elvis-v2-operator
 
 jobs:
@@ -69,7 +69,7 @@ jobs:
           project_version = os.environ["V2_PROJECT_VERSION"]
           image_version = os.environ["V2_IMAGE_VERSION"]
           expected = {
-              "v2.0.0-alpha.1": ("2.0.0a1", "2.0.0-alpha.1"),
+              "v2.0.0-alpha.2": ("2.0.0a2", "2.0.0-alpha.2"),
           }
           if expected.get(tag) != (project_version, image_version):
               raise SystemExit("unapproved release version mapping")
@@ -150,7 +150,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the immutable commit tag
+      - name: Build and push a run-unique candidate image
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -159,7 +159,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.V2_IMAGE }}:sha-${{ needs.verify.outputs.release-commit }}
+            ${{ env.V2_IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.verify.outputs.release-commit }}
@@ -238,6 +238,11 @@ jobs:
           set -euo pipefail
           image_ref="${V2_IMAGE}@${IMAGE_DIGEST}"
 
+          cleanup_smoke_image() {
+            docker image rm "${image_ref}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_smoke_image EXIT
+
           for platform in linux/amd64 linux/arm64; do
             docker pull --platform "${platform}" "${image_ref}"
             help="$({
@@ -265,7 +270,10 @@ jobs:
                 --security-opt no-new-privileges \
                 "${image_ref}" "${command}" --help >/dev/null
             done
+            docker image rm "${image_ref}" >/dev/null
           done
+
+          trap - EXIT
 
       - name: Smoke a clean-directory Compose install
         shell: bash
@@ -456,31 +464,71 @@ jobs:
       - name: Recheck asset checksums
         run: cd release-assets && sha256sum --check SHA256SUMS
 
-      - name: Promote the verified digest without moving an existing tag
+      - name: Promote the verified digest without moving existing tags
         env:
           IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest }}
+          RELEASE_COMMIT: ${{ needs.verify.outputs.release-commit }}
         shell: bash
         run: |
           set -euo pipefail
+          commit_ref="${V2_IMAGE}:sha-${RELEASE_COMMIT}"
           versioned_ref="${V2_IMAGE}:${V2_IMAGE_VERSION}"
           immutable_ref="${V2_IMAGE}@${IMAGE_DIGEST}"
+          registry_repository="cluster2600/elvis-v2-operator"
+          registry_token="$(
+            curl --fail --silent --show-error --get \
+              --data-urlencode 'service=ghcr.io' \
+              --data-urlencode "scope=repository:${registry_repository}:pull" \
+              https://ghcr.io/token \
+              | jq -er '.token'
+          )"
 
-          if inspection="$(docker buildx imagetools inspect \
-            "${versioned_ref}" 2>/dev/null)"; then
-            existing_digest="$(awk '$1 == "Digest:" {print $2; exit}' \
-              <<<"${inspection}")"
-            [[ -n "${existing_digest}" ]]
-            [[ "${existing_digest}" == "${IMAGE_DIGEST}" ]]
-          else
-            docker buildx imagetools create \
-              --tag "${versioned_ref}" \
-              "${immutable_ref}"
-          fi
+          promote_or_verify() {
+            target_ref="$1"
+            target_tag="${target_ref##*:}"
+            response_headers="$(mktemp)"
+            status="$(
+              curl --silent --show-error --location \
+                --output /dev/null \
+                --dump-header "${response_headers}" \
+                --write-out '%{http_code}' \
+                --header "Authorization: Bearer ${registry_token}" \
+                --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+                "https://ghcr.io/v2/${registry_repository}/manifests/${target_tag}"
+            )"
 
-          promoted="$(docker buildx imagetools inspect "${versioned_ref}")"
-          promoted_digest="$(awk '$1 == "Digest:" {print $2; exit}' \
-            <<<"${promoted}")"
-          [[ "${promoted_digest}" == "${IMAGE_DIGEST}" ]]
+            case "${status}" in
+              200)
+                existing_digest="$(awk \
+                  'tolower($1) == "docker-content-digest:" {
+                    gsub(/\r/, "", $2); digest = $2
+                  } END {print digest}' "${response_headers}")"
+                rm -f "${response_headers}"
+                [[ -n "${existing_digest}" ]]
+                [[ "${existing_digest}" == "${IMAGE_DIGEST}" ]]
+                ;;
+              404)
+                rm -f "${response_headers}"
+                docker buildx imagetools create \
+                  --tag "${target_ref}" \
+                  "${immutable_ref}"
+                ;;
+              *)
+                rm -f "${response_headers}"
+                printf 'registry probe for %s returned HTTP %s\n' \
+                  "${target_ref}" "${status}" >&2
+                return 1
+                ;;
+            esac
+
+            promoted="$(docker buildx imagetools inspect "${target_ref}")"
+            promoted_digest="$(awk '$1 == "Digest:" {print $2; exit}' \
+              <<<"${promoted}")"
+            [[ "${promoted_digest}" == "${IMAGE_DIGEST}" ]]
+          }
+
+          promote_or_verify "${commit_ref}"
+          promote_or_verify "${versioned_ref}"
 
       - name: Create a non-latest GitHub prerelease
         env:

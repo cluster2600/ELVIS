@@ -2,7 +2,7 @@ name: elvis-v2-operator-preview
 
 services:
   operator:
-    image: ${ELVIS_V2_OPERATOR_IMAGE:-ghcr.io/cluster2600/elvis-v2-operator:2.0.0-alpha.1}
+    image: ${ELVIS_V2_OPERATOR_IMAGE:-ghcr.io/cluster2600/elvis-v2-operator:2.0.0-alpha.2}
     pull_policy: always
     user: ${ELVIS_V2_OPERATOR_UID:-65532}:${ELVIS_V2_OPERATOR_GID:-65532}
     init: true
@@ -24,4 +24,3 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     command: ["--help"]
-

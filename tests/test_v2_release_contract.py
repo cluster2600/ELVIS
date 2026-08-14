@@ -17,9 +17,9 @@ DOCKERFILE = ROOT / "deploy" / "v2" / "operator.Dockerfile"
 COMPOSE = ROOT / "deploy" / "v2" / "compose.preview.yml"
 PREVIEW_ENV = ROOT / "deploy" / "v2" / "v2-preview.env.example"
 
-RELEASE_TAG = "v2.0.0-alpha.1"
-PROJECT_VERSION = "2.0.0a1"
-IMAGE_VERSION = "2.0.0-alpha.1"
+RELEASE_TAG = "v2.0.0-alpha.2"
+PROJECT_VERSION = "2.0.0a2"
+IMAGE_VERSION = "2.0.0-alpha.2"
 IMAGE = "ghcr.io/cluster2600/elvis-v2-operator"
 COMMANDS = {
     "bootstrap": "scripts.postgres_bootstrap",
@@ -35,10 +35,46 @@ def _text(path: Path) -> str:
 
 def test_project_and_release_versions_are_exactly_mapped() -> None:
     project = tomllib.loads(_text(ROOT / "pyproject.toml"))["project"]
+    workflow = _text(WORKFLOW)
 
     assert project["version"] == PROJECT_VERSION
     assert project["requires-python"] == ">=3.14,<3.15"
     assert v2_operator._VERSION == IMAGE_VERSION
+    assert f"V2_RELEASE_TAG: {RELEASE_TAG}" in workflow
+    assert f"V2_PROJECT_VERSION: {PROJECT_VERSION}" in workflow
+    assert f"V2_IMAGE_VERSION: {IMAGE_VERSION}" in workflow
+
+
+def test_alpha2_version_is_consistent_across_install_surfaces() -> None:
+    expected_references = {
+        "INSTALL_V2.md": (f"`{RELEASE_TAG}`", f"TAG={RELEASE_TAG}"),
+        "RELEASE_NOTES.md": (
+            f"# ELVIS V2 operator preview — {RELEASE_TAG}",
+            f"{IMAGE}:{IMAGE_VERSION}",
+        ),
+        "CHANGELOG.md": (f"## {RELEASE_TAG} —",),
+        "deploy/v2/compose.preview.yml": (f"{IMAGE}:{IMAGE_VERSION}",),
+        "deploy/v2/v2-preview.env.example": (f"{IMAGE}:{IMAGE_VERSION}",),
+    }
+
+    for relative, references in expected_references.items():
+        content = _text(ROOT / relative)
+        for reference in references:
+            assert reference in content, f"{reference!r} missing from {relative}"
+
+    non_historical_surfaces = (
+        WORKFLOW,
+        ROOT / "pyproject.toml",
+        ROOT / "trading/__init__.py",
+        ROOT / "scripts/v2_operator.py",
+        COMPOSE,
+        PREVIEW_ENV,
+        ROOT / "INSTALL_V2.md",
+    )
+    for path in non_historical_surfaces:
+        content = _text(path)
+        assert "2.0.0a1" not in content, path
+        assert "2.0.0-alpha.1" not in content, path
 
 
 def test_dispatcher_exposes_only_bounded_operator_commands() -> None:
@@ -172,8 +208,8 @@ def test_release_workflow_uses_only_commit_pinned_actions() -> None:
 def test_release_gate_requires_exact_main_sha_and_successful_ci() -> None:
     workflow = _text(WORKFLOW)
 
-    assert "- v2.0.0-alpha.1" in workflow
-    assert "V2_PROJECT_VERSION: 2.0.0a1" in workflow
+    assert f"- {RELEASE_TAG}" in workflow
+    assert f"V2_PROJECT_VERSION: {PROJECT_VERSION}" in workflow
     assert '[[ "${tagged_commit}" == "${main_commit}" ]]' in workflow
     assert 'event_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"' in workflow
     assert '[[ "${tagged_commit}" == "${event_commit}" ]]' in workflow
@@ -189,18 +225,22 @@ def test_release_gate_requires_exact_main_sha_and_successful_ci() -> None:
     assert re.search(r"publish-image:.*?\n\s+needs: verify\n", workflow, re.S)
 
 
-def test_release_build_uses_immutable_sha_then_promotes_one_prerelease_tag() -> None:
+def test_release_build_uses_ephemeral_candidate_then_promotes_after_gates() -> None:
     workflow = _text(WORKFLOW)
+    publish = workflow[
+        workflow.index("  publish-image:\n") : workflow.index("  scan-image:\n")
+    ]
+    release = workflow[workflow.index("  release:\n") :]
     tags_match = re.search(
         r"^\s{10}tags: \|\n(?P<tags>^\s{12}.+\n)",
-        workflow,
+        publish,
         re.M,
     )
 
     assert tags_match is not None
     tags = {line.strip() for line in tags_match.group("tags").splitlines()}
     assert tags == {
-        "${{ env.V2_IMAGE }}:sha-${{ needs.verify.outputs.release-commit }}",
+        "${{ env.V2_IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}",
     }
     assert (
         "org.opencontainers.image.revision="
@@ -210,12 +250,64 @@ def test_release_build_uses_immutable_sha_then_promotes_one_prerelease_tag() -> 
     assert "pattern={{major}}" not in workflow
     assert "pattern={{minor}}" not in workflow
     assert "ghcr.io/cluster2600/elvis\n" not in workflow
-    assert 'versioned_ref="${V2_IMAGE}:${V2_IMAGE_VERSION}"' in workflow
-    assert "docker buildx imagetools create" in workflow
-    assert '[[ "${existing_digest}" == "${IMAGE_DIGEST}" ]]' in workflow
-    assert workflow.index("docker buildx imagetools create") < workflow.index(
+    assert ":sha-${{ needs.verify.outputs.release-commit }}" not in publish
+    assert 'versioned_ref="${V2_IMAGE}:${V2_IMAGE_VERSION}"' in release
+    assert 'commit_ref="${V2_IMAGE}:sha-${RELEASE_COMMIT}"' in release
+    assert "promote_or_verify()" in release
+    assert 'promote_or_verify "${commit_ref}"' in release
+    assert 'promote_or_verify "${versioned_ref}"' in release
+    assert "docker buildx imagetools create" in release
+    assert '[[ "${existing_digest}" == "${IMAGE_DIGEST}" ]]' in release
+    assert release.index("docker buildx imagetools create") < release.index(
         'gh release create "${V2_RELEASE_TAG}"'
     )
+
+
+def test_release_promotion_creates_only_after_explicit_registry_absence() -> None:
+    workflow = _text(WORKFLOW)
+    release = workflow[workflow.index("  release:\n") :]
+    promotion = release[
+        release.index("          promote_or_verify() {\n") : release.index(
+            '          promote_or_verify "${commit_ref}"\n'
+        )
+    ]
+
+    assert "--write-out '%{http_code}'" in promotion
+    assert 'case "${status}" in' in promotion
+    assert "|| true" not in promotion
+
+    status_case = re.search(
+        r'^            case "\$\{status\}" in\n(?P<body>.*?)^            esac$',
+        promotion,
+        re.M | re.S,
+    )
+    assert status_case is not None
+
+    branches = {}
+    for label in ("200", "404", "*"):
+        branch = re.search(
+            rf"^              {re.escape(label)}\)\n"
+            rf"(?P<body>.*?)"
+            rf"^                ;;$",
+            status_case.group("body"),
+            re.M | re.S,
+        )
+        assert branch is not None, f"missing registry status branch {label}"
+        branches[label] = branch.group("body")
+
+    create = "docker buildx imagetools create"
+    assert create not in branches["200"]
+    assert branches["200"].index('[[ -n "${existing_digest}" ]]') < branches[
+        "200"
+    ].index('[[ "${existing_digest}" == "${IMAGE_DIGEST}" ]]')
+    assert branches["404"].count(create) == 1
+    assert create not in branches["*"]
+    assert "return 1" in branches["*"]
+    assert promotion.count(create) == 1
+
+    post_case = promotion[promotion.index("            esac") :]
+    assert 'docker buildx imagetools inspect "${target_ref}"' in post_case
+    assert '[[ "${promoted_digest}" == "${IMAGE_DIGEST}" ]]' in post_case
 
 
 def test_release_build_smokes_and_evidence_precede_release_creation() -> None:
@@ -294,6 +386,37 @@ def test_release_build_smokes_and_evidence_precede_release_creation() -> None:
     assert "--prerelease" in workflow
     assert "--latest=false" in workflow
     assert "--verify-tag" in workflow
+
+
+def test_multiarch_smoke_evicts_same_digest_between_platform_pulls() -> None:
+    workflow = _text(WORKFLOW)
+    smoke = workflow[
+        workflow.index(
+            "      - name: Import-smoke all four commands anonymously on amd64 and arm64"
+        ) : workflow.index("      - name: Smoke a clean-directory Compose install")
+    ]
+
+    assert 'image_ref="${V2_IMAGE}@${IMAGE_DIGEST}"' in smoke
+    assert "for platform in linux/amd64 linux/arm64; do" in smoke
+    assert 'docker pull --platform "${platform}" "${image_ref}"' in smoke
+
+    cleanup = re.search(
+        r"cleanup_smoke_image\(\) \{\n" r"(?P<body>.*?)" r"^          \}",
+        smoke,
+        re.M | re.S,
+    )
+    assert cleanup is not None
+    assert 'docker image rm "${image_ref}"' in cleanup.group("body")
+    assert "|| true" in cleanup.group("body")
+    assert smoke.index("trap cleanup_smoke_image EXIT") < smoke.index(
+        "for platform in linux/amd64 linux/arm64; do"
+    )
+
+    strict_eviction = '            docker image rm "${image_ref}" >/dev/null\n'
+    loop_end = "          done\n\n          trap - EXIT"
+    assert smoke.count(strict_eviction) == 1
+    assert loop_end in smoke
+    assert smoke.index(strict_eviction) < smoke.index(loop_end)
 
 
 def test_install_guide_and_notes_keep_active_no_go() -> None:

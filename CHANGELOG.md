@@ -4,6 +4,18 @@ Release history is curated from tagged source. Older development diaries and
 completion claims remain available through Git tags, especially `v0.3.0`; they
 are not operational documentation.
 
+## v2.0.0-alpha.2 — 2026-08-14
+
+- Preserve the `v2.0.0-alpha.1` tag from the failed release attempt and publish
+  the correction under a new immutable prerelease identity.
+- Remove each platform-specific local image reference after its anonymous
+  multi-architecture smoke, including best-effort cleanup on failure, so the
+  next platform pull cannot conflict with the previous digest reference.
+- Gate a run-unique candidate digest before compare-or-create promotion of both
+  immutable commit and prerelease installation tags.
+- Keep the Python 3.14-only operator scope and `ACTIVE` **NO-GO** boundary
+  unchanged.
+
 ## v2.0.0-alpha.1 — 2026-08-14
 
 - Package the offline V2 PostgreSQL bootstrap, cut-over preflight, bounded raw

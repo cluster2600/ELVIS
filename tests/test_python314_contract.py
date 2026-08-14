@@ -73,7 +73,7 @@ def _module_version(path: Path) -> str:
 def test_release_metadata_is_python314_only() -> None:
     metadata = _project_metadata()
 
-    assert metadata["project"]["version"] == "2.0.0a1"
+    assert metadata["project"]["version"] == "2.0.0a2"
     assert metadata["project"]["requires-python"] == ">=3.14,<3.15"
     assert metadata["project"]["classifiers"] == [
         "Programming Language :: Python :: 3 :: Only",
@@ -86,7 +86,7 @@ def test_release_metadata_is_python314_only() -> None:
         "error::pytest.PytestReturnNotNoneWarning"
     ]
     assert (REPOSITORY_ROOT / ".python-version").read_text().strip() == "3.14"
-    assert _module_version(REPOSITORY_ROOT / "trading/__init__.py") == "2.0.0a1"
+    assert _module_version(REPOSITORY_ROOT / "trading/__init__.py") == "2.0.0a2"
 
 
 def test_active_tree_has_no_retired_python_runtime_references() -> None:
