@@ -39,6 +39,7 @@ from trading.application.legacy_snapshot_reconciliation import (
     legacy_operator_equity_hypothesis_balances,
     legacy_snapshot_import_receipt_sha256,
 )
+from trading.persistence.postgres_bootstrap import PostgresBootstrap
 from trading.persistence.postgres_legacy_snapshot_reconciliation import (
     PostgresLegacySnapshotReconciliation,
     PostgresLegacySnapshotReconciliationConflict,
@@ -374,6 +375,37 @@ def _active_session(dsn: str):
     finally:
         connection.rollback()
         connection.close()
+
+
+def test_head6_readiness_marker_and_historical_inspector_are_live_canaries(
+    import_pair: ImportPair,
+    monkeypatch,
+) -> None:
+    pair = import_pair
+    _prepare_source_case(pair, collateral_balance="1000")
+    receipt = _import(pair)
+    readiness = pair.context.target_bootstrap_intent.roles.readiness
+    expected_marker = (
+        f"elvis-postgres-bootstrap:v1:"
+        f"{pair.context.target_bootstrap_intent.expected_database}:readiness"
+    )
+    assert _fetchone(
+        pair.target_admin_dsn,
+        sql.SQL(
+            "SELECT pg_catalog.shobj_description(oid, 'pg_authid') "
+            "FROM pg_catalog.pg_roles WHERE rolname = {}"
+        ).format(sql.Literal(readiness)),
+    ) == (expected_marker,)
+
+    def reject_v2_inspection(*_args, **_kwargs):
+        raise AssertionError("the V2 terminal inspector must remain unreachable")
+
+    monkeypatch.setattr(PostgresBootstrap, "inspect_terminal", reject_v2_inspection)
+    result = _reconciler(pair, {}).reconcile(_context(pair, receipt), receipt)
+
+    assert result.disposition is (
+        LegacySnapshotReconciliationDisposition.DECISION_REQUIRED
+    )
 
 
 def test_reset_window_decision_is_read_only_and_keeps_fee_evidence_separate(

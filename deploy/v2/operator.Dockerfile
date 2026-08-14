@@ -20,6 +20,7 @@ RUN mkdir -p \
     && touch trading/application/__init__.py trading/domain/__init__.py
 COPY trading/__init__.py ./trading/
 COPY trading/application/fresh_target_cutover.py \
+     trading/application/fresh_opening.py \
      trading/application/legacy_snapshot_import.py \
      trading/application/legacy_snapshot_reconciliation.py \
      trading/application/paper_account_readiness.py \
@@ -50,6 +51,7 @@ COPY trading/persistence/sql_migrations/*.sql \
      ./trading/persistence/sql_migrations/
 COPY scripts/__init__.py \
      scripts/v2_operator.py \
+     scripts/v2_opening_plan.py \
      scripts/postgres_bootstrap.py \
      scripts/postgres_cutover_preflight.py \
      scripts/postgres_legacy_snapshot_import.py \

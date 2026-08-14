@@ -30,6 +30,7 @@ from trading.persistence.postgres_bootstrap import (
     PostgresBootstrapContext,
     PostgresBootstrapRoles,
     PostgresBootstrapStorageError,
+    PostgresBootstrapTerminalInspection,
 )
 from trading.persistence.postgres_cutover_preflight import (
     PostgresCutoverPreflight,
@@ -567,7 +568,42 @@ def test_error_exit_mapping_redacts_the_exception_graph(
     assert str(error) not in captured.out
 
 
-def test_terminal_inspection_severs_driver_exception_graph() -> None:
+def test_target_inspection_uses_the_historical_head6_boundary(monkeypatch) -> None:
+    target_factory = MagicMock()
+    current_terminal = MagicMock(
+        side_effect=AssertionError("historical workflow must not claim V2 terminal")
+    )
+    historical_terminal = MagicMock(
+        return_value=PostgresBootstrapTerminalInspection(
+            system_identifier=22,
+            exact=True,
+            migration_versions=(1, 2, 3, 4, 5, 6),
+            runtime_mode="LEGACY",
+            runtime_generation=0,
+            nonempty_relations=(),
+        )
+    )
+    monkeypatch.setattr(PostgresBootstrap, "inspect_terminal", current_terminal)
+    monkeypatch.setattr(
+        PostgresBootstrap,
+        "inspect_historical_terminal",
+        historical_terminal,
+    )
+
+    target = PostgresCutoverPreflight(
+        MagicMock(),
+        target_factory,
+    )._inspect_target(_context())
+
+    assert target == _target()
+    current_terminal.assert_not_called()
+    historical_terminal.assert_called_once()
+    historical_context = historical_terminal.call_args.args[0]
+    assert historical_context.roles == _roles()
+    assert historical_context.roles.opening is None
+
+
+def test_historical_terminal_inspection_severs_driver_exception_graph() -> None:
     secret = "postgresql://operator:never-print@example.invalid/elvis"
     connection = MagicMock()
     connection.autocommit = False
@@ -577,7 +613,9 @@ def test_terminal_inspection_severs_driver_exception_graph() -> None:
     cursor.execute.side_effect = RuntimeError(secret)
 
     with pytest.raises(PostgresBootstrapStorageError) as raised:
-        PostgresBootstrap(lambda: connection).inspect_terminal(_bootstrap_context())
+        PostgresBootstrap(lambda: connection).inspect_historical_terminal(
+            _bootstrap_context()
+        )
 
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None

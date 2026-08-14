@@ -7,6 +7,10 @@ import psycopg2
 import pytest
 from psycopg2 import sql
 
+from tests.postgres.test_paper_account_readiness_postgres import (
+    _readiness_opening_role,
+    _seed_fresh_opening_provenance,
+)
 from tests.postgres.test_paper_runtime_activation_postgres import (
     ACCOUNT_KEY,
     OWNER_GENERATION,
@@ -26,6 +30,9 @@ from trading.application.paper_runtime_activation import (
 )
 from trading.persistence.migration_runner import apply_migrations, load_migrations
 from trading.persistence.order_position_journal import PostgresOrderPositionJournal
+from trading.persistence.paper_account_journal_codec import (
+    encode_paper_account_opening,
+)
 from trading.persistence.paper_account_readiness import PostgresPaperAccountReadiness
 from trading.persistence.paper_runtime_activation import PostgresPaperRuntimeActivation
 
@@ -55,6 +62,40 @@ AUTHORITY_RELATIONS = (
     "trades",
     "trading_session_resets",
 )
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_capability_opening_role(postgres_database_dsn):
+    yield
+    connection = _connect(postgres_database_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = _readiness_opening_role(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (role_name,),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name))
+                )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _seed_current_provenance(dsn, opening):
+    encoded = encode_paper_account_opening(
+        opening.execution_scope,
+        opening.owner_generation,
+        opening.account,
+    )
+    _seed_fresh_opening_provenance(dsn, encoded)
+    return encoded
 
 
 def _role_connection(dsn, role_name):
@@ -136,7 +177,7 @@ def test_version_five_upgrade_adds_exact_capabilities_without_business_rewrite(
             legacy_before = cursor.fetchall()
         connection.rollback()
 
-        assert apply_migrations(connection, migrations) == (6,)
+        assert apply_migrations(connection, migrations) == (6, 7)
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT xmin::text, ctid::text, account_key, execution_scope, "
@@ -217,7 +258,7 @@ def test_capabilities_are_exact_security_definers_with_public_execute_revoked(
                 False,
                 False,
                 "plpgsql",
-                ["search_path=pg_catalog"],
+                ["search_path=pg_catalog, pg_temp"],
             ),
             (
                 "activate_paper_runtime_generation",
@@ -231,7 +272,7 @@ def test_capabilities_are_exact_security_definers_with_public_execute_revoked(
                 False,
                 True,
                 "plpgsql",
-                ["search_path=pg_catalog"],
+                ["search_path=pg_catalog, pg_temp"],
             ),
         )
         assert rows[0][9] == rows[1][9]
@@ -507,6 +548,118 @@ def test_read_committed_discards_prebody_snapshot_before_successful_fence(
     assert _runtime_snapshot(migrated_postgres_dsn) == ((("LEGACY", 0),), ())
 
 
+def test_activation_mutation_rejects_missing_opening_provenance_without_delta(
+    migrated_postgres_dsn,
+):
+    opening = _provision(migrated_postgres_dsn)
+    before = _runtime_snapshot(migrated_postgres_dsn)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            with pytest.raises(psycopg2.Error) as raised:
+                _direct_mutation(
+                    cursor,
+                    (
+                        "LEGACY",
+                        0,
+                        1,
+                        "missing-provenance",
+                        SCOPE,
+                        ACCOUNT_KEY,
+                        OWNER_GENERATION,
+                        opening.current.opening_payload_sha256,
+                    ),
+                )
+        assert raised.value.pgcode == "55000"
+        connection.rollback()
+    finally:
+        connection.close()
+
+    assert _runtime_snapshot(migrated_postgres_dsn) == before
+
+
+def test_activation_mutation_accepts_only_the_exact_current_opening_provenance(
+    migrated_postgres_dsn,
+):
+    opening = _provision(migrated_postgres_dsn)
+    encoded = _seed_current_provenance(migrated_postgres_dsn, opening)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT np.paper_fresh_opening_target_is_current()")
+            assert cursor.fetchone() == (True,)
+            assert _direct_mutation(
+                cursor,
+                (
+                    "LEGACY",
+                    0,
+                    1,
+                    "exact-provenance",
+                    encoded.execution_scope,
+                    encoded.account_key,
+                    encoded.owner_generation,
+                    encoded.opening_payload_sha256,
+                ),
+            ) == [("ACTIVE", 1)]
+        connection.commit()
+    finally:
+        connection.close()
+
+    control, generations = _runtime_snapshot(migrated_postgres_dsn)
+    assert control == (("ACTIVE", 1),)
+    assert tuple(row[:2] for row in generations) == ((1, "exact-provenance"),)
+
+
+@pytest.mark.parametrize("drift", ("schema_marker", "opening_anchor", "catalog"))
+def test_activation_mutation_rejects_current_physical_target_drift(
+    migrated_postgres_dsn,
+    drift,
+):
+    opening = _provision(migrated_postgres_dsn)
+    encoded = _seed_current_provenance(migrated_postgres_dsn, opening)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            if drift == "schema_marker":
+                cursor.execute("COMMENT ON SCHEMA np IS 'drifted'")
+            elif drift == "opening_anchor":
+                cursor.execute("SELECT current_database()")
+                opening_role = _readiness_opening_role(cursor.fetchone()[0])
+                cursor.execute(
+                    sql.SQL("COMMENT ON ROLE {} IS 'drifted'").format(
+                        sql.Identifier(opening_role)
+                    )
+                )
+            else:
+                cursor.execute("CREATE TABLE np.unexpected_activation_object (id int)")
+        connection.commit()
+
+        before = _runtime_snapshot(migrated_postgres_dsn)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT np.paper_fresh_opening_target_is_current()")
+            assert cursor.fetchone() == (False,)
+            with pytest.raises(psycopg2.Error) as raised:
+                _direct_mutation(
+                    cursor,
+                    (
+                        "LEGACY",
+                        0,
+                        1,
+                        f"physical-drift-{drift}",
+                        encoded.execution_scope,
+                        encoded.account_key,
+                        encoded.owner_generation,
+                        encoded.opening_payload_sha256,
+                    ),
+                )
+        assert raised.value.pgcode == "55000"
+        connection.rollback()
+    finally:
+        connection.close()
+
+    assert _runtime_snapshot(migrated_postgres_dsn) == before
+
+
 @pytest.mark.parametrize(
     "invalid",
     (
@@ -550,6 +703,7 @@ def test_mutation_pt001_cas_failure_rolls_back_inserted_epoch(
     migrated_postgres_dsn,
 ):
     opening = _provision(migrated_postgres_dsn)
+    _seed_current_provenance(migrated_postgres_dsn, opening)
     before = _runtime_snapshot(migrated_postgres_dsn)
     connection = _connect(migrated_postgres_dsn)
     try:

@@ -25,13 +25,11 @@ from trading.application.fresh_target_cutover import (
     FreshTargetCutoverStatus,
     FreshTargetRoleManifest,
 )
-from trading.persistence import load_migrations
+from trading.persistence import apply_migrations, load_migrations
 from trading.persistence import postgres_cutover_preflight as preflight_module
 from trading.persistence.postgres_bootstrap import (
-    PostgresBootstrap,
     PostgresBootstrapContext,
     PostgresBootstrapRoles,
-    PostgresBootstrapStatus,
 )
 from trading.persistence.postgres_cutover_preflight import PostgresCutoverPreflight
 
@@ -52,6 +50,61 @@ _LEGACY_RELATIONS = (
     "np.trades",
     "np.trading_session_resets",
 )
+_HISTORICAL_HEAD6_AUTHORITY_TABLES = (
+    "account_balances",
+    "liquidations",
+    "margin_history",
+    "model_predictions",
+    "open_positions",
+    "order_events",
+    "orders",
+    "paper_account_balances",
+    "paper_account_batch_manifests",
+    "paper_account_postings",
+    "paper_account_settlements",
+    "paper_account_streams",
+    "paper_margin_reservations",
+    "paper_runtime_control",
+    "paper_runtime_generations",
+    "position_streams",
+    "schema_migrations",
+    "trades",
+    "trading_session_resets",
+)
+_HISTORICAL_HEAD6_LEGACY_SEQUENCES = tuple(
+    f"{relation.removeprefix('np.')}_id_seq" for relation in _LEGACY_RELATIONS
+)
+_HISTORICAL_HEAD6_NON_ACTIVATION_FUNCTIONS = (
+    "np.enforce_legacy_paper_runtime_fence()",
+    "np.reject_paper_runtime_generation_mutation()",
+)
+_HISTORICAL_HEAD6_ACTIVATION_FUNCTIONS = (
+    "np.acquire_paper_runtime_activation_fence()",
+    (
+        "np.activate_paper_runtime_generation("
+        "text,bigint,bigint,text,text,text,bigint,text)"
+    ),
+)
+_HISTORICAL_HEAD6_LEGACY_PRIVILEGES = {
+    "account_balances": ("SELECT", "INSERT", "UPDATE"),
+    "liquidations": ("SELECT", "INSERT"),
+    "margin_history": ("SELECT", "INSERT"),
+    "model_predictions": ("SELECT", "INSERT", "UPDATE"),
+    "open_positions": ("SELECT", "INSERT", "DELETE"),
+    "trades": ("SELECT", "INSERT", "DELETE"),
+    "trading_session_resets": ("SELECT", "INSERT"),
+}
+_HISTORICAL_HEAD6_ATOMIC_PRIVILEGES = {
+    "order_events": ("SELECT", "INSERT"),
+    "orders": ("SELECT", "INSERT", "UPDATE"),
+    "paper_account_balances": ("SELECT", "INSERT", "UPDATE"),
+    "paper_account_batch_manifests": ("SELECT", "INSERT"),
+    "paper_account_postings": ("SELECT", "INSERT"),
+    "paper_account_settlements": ("SELECT", "INSERT"),
+    "paper_account_streams": ("SELECT", "INSERT", "UPDATE"),
+    "paper_margin_reservations": ("SELECT", "INSERT", "DELETE"),
+    "position_streams": ("SELECT", "INSERT", "UPDATE"),
+}
 _MUTATING_SQL = re.compile(
     r"^\s*(?:ALTER|CALL|COPY|CREATE|DELETE|DO|DROP|GRANT|INSERT|REVOKE|TRUNCATE|UPDATE)\b",
     re.IGNORECASE,
@@ -411,36 +464,86 @@ class CutoverPair:
             connection.close()
 
 
-def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
-    roles = PostgresBootstrapRoles(
-        schema_owner=f"ct_{suffix}_owner",
-        migrator=f"ct_{suffix}_migrator",
-        legacy_runtime=f"ct_{suffix}_legacy",
-        atomic_runtime=f"ct_{suffix}_atomic",
-        activation=f"ct_{suffix}_activation",
-        readiness=f"ct_{suffix}_readiness",
-        trainer=f"ct_{suffix}_trainer",
-    )
+def _bootstrap_historical_head6_target(
+    target_dsn: str,
+    suffix: str,
+    *,
+    role_prefix: str,
+    roles: PostgresBootstrapRoles | None = None,
+) -> tuple[PostgresBootstrapContext, str]:
+    if roles is None:
+        roles = PostgresBootstrapRoles(
+            schema_owner=f"{role_prefix}_{suffix}_owner",
+            migrator=f"{role_prefix}_{suffix}_migrator",
+            legacy_runtime=f"{role_prefix}_{suffix}_legacy",
+            atomic_runtime=f"{role_prefix}_{suffix}_atomic",
+            activation=f"{role_prefix}_{suffix}_activation",
+            readiness=f"{role_prefix}_{suffix}_readiness",
+            trainer=f"{role_prefix}_{suffix}_trainer",
+        )
     context = PostgresBootstrapContext(
         expected_database=_TARGET_DATABASE,
         admin_role=_ADMIN_ROLE,
         roles=roles,
         adoption=None,
     )
-
-    def admin_factory():
-        return _connect(target_dsn)
-
-    first = PostgresBootstrap(admin_factory).reconcile(context)
-    assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-
+    manifest = (
+        ("schema_owner", roles.schema_owner),
+        ("migrator", roles.migrator),
+        ("legacy_runtime", roles.legacy_runtime),
+        ("atomic_runtime", roles.atomic_runtime),
+        ("activation", roles.activation),
+        ("readiness", roles.readiness),
+        ("trainer", roles.trainer),
+    )
+    login_roles = tuple(role for purpose, role in manifest if purpose != "schema_owner")
     passwords = {
         role: f"test-only-{suffix}-{index}-{secrets.token_hex(8)}"
-        for index, role in enumerate(roles.login_roles)
+        for index, role in enumerate(login_roles)
     }
-    admin = admin_factory()
-    admin.autocommit = True
+    admin = _connect(target_dsn)
     try:
+        with admin.cursor() as cursor:
+            for purpose, role in manifest:
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOSUPERUSER NOINHERIT NOCREATEDB "
+                        "NOCREATEROLE NOREPLICATION NOBYPASSRLS "
+                        "CONNECTION LIMIT -1 PASSWORD NULL"
+                    ).format(sql.Identifier(role))
+                )
+                cursor.execute(
+                    sql.SQL("COMMENT ON ROLE {} IS %s").format(sql.Identifier(role)),
+                    (f"elvis-postgres-bootstrap:v1:{_TARGET_DATABASE}:{purpose}",),
+                )
+            cursor.execute(
+                sql.SQL("GRANT {} TO {}").format(
+                    sql.Identifier(roles.schema_owner),
+                    sql.Identifier(roles.migrator),
+                )
+            )
+            cursor.execute(
+                sql.SQL("REVOKE CREATE ON DATABASE {} FROM PUBLIC").format(
+                    sql.Identifier(_TARGET_DATABASE)
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(_TARGET_DATABASE),
+                    sql.Identifier(roles.schema_owner),
+                )
+            )
+            cursor.execute(
+                sql.SQL("CREATE SCHEMA np AUTHORIZATION {}").format(
+                    sql.Identifier(roles.schema_owner)
+                )
+            )
+            cursor.execute(
+                "COMMENT ON SCHEMA np IS %s",
+                (f"elvis-postgres-bootstrap-schema:v1:{_TARGET_DATABASE}",),
+            )
+        admin.commit()
+        admin.autocommit = True
         with admin.cursor() as cursor:
             for role, password in passwords.items():
                 cursor.execute(
@@ -452,24 +555,223 @@ def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
     finally:
         admin.close()
 
-    def role_factory(role: str):
-        dsn = make_dsn(target_dsn, user=role, password=passwords[role])
+    migrator_dsn = make_dsn(
+        target_dsn,
+        user=roles.migrator,
+        password=passwords[roles.migrator],
+    )
+    migrator = _connect(migrator_dsn)
+    try:
+        migrator.autocommit = True
+        with migrator.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("SET ROLE {}").format(sql.Identifier(roles.schema_owner))
+            )
+        migrator.autocommit = False
+        assert apply_migrations(migrator, load_migrations()[:6]) == (
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+    finally:
+        migrator.close()
 
-        def connect():
-            return _connect(dsn)
+    admin = _connect(target_dsn)
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER SCHEMA np OWNER TO {}").format(
+                    sql.Identifier(roles.schema_owner)
+                )
+            )
+            for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE np.{} OWNER TO {}").format(
+                        sql.Identifier(table),
+                        sql.Identifier(roles.schema_owner),
+                    )
+                )
+            for sequence in _HISTORICAL_HEAD6_LEGACY_SEQUENCES:
+                cursor.execute(
+                    sql.SQL("ALTER SEQUENCE np.{} OWNER TO {}").format(
+                        sql.Identifier(sequence),
+                        sql.Identifier(roles.schema_owner),
+                    )
+                )
+            for function in _HISTORICAL_HEAD6_NON_ACTIVATION_FUNCTIONS:
+                cursor.execute(
+                    sql.SQL("ALTER FUNCTION {} OWNER TO {}").format(
+                        sql.SQL(function),
+                        sql.Identifier(roles.schema_owner),
+                    )
+                )
+            for function in _HISTORICAL_HEAD6_ACTIVATION_FUNCTIONS:
+                cursor.execute(
+                    sql.SQL("ALTER FUNCTION {} OWNER TO {}").format(
+                        sql.SQL(function),
+                        sql.Identifier(roles.activation),
+                    )
+                )
 
-        return connect
+            cursor.execute("REVOKE ALL ON SCHEMA np FROM PUBLIC")
+            cursor.execute(
+                sql.SQL("GRANT USAGE ON SCHEMA np TO {}").format(
+                    sql.SQL(", ").join(sql.Identifier(role) for role in login_roles)
+                )
+            )
+            for role in login_roles:
+                cursor.execute(
+                    sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA np FROM {}").format(
+                        sql.Identifier(role)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL("REVOKE ALL ON ALL SEQUENCES IN SCHEMA np FROM {}").format(
+                        sql.Identifier(role)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL("REVOKE ALL ON ALL FUNCTIONS IN SCHEMA np FROM {}").format(
+                        sql.Identifier(role)
+                    )
+                )
+            cursor.execute("REVOKE ALL ON ALL TABLES IN SCHEMA np FROM PUBLIC")
+            cursor.execute("REVOKE ALL ON ALL SEQUENCES IN SCHEMA np FROM PUBLIC")
+            cursor.execute("REVOKE ALL ON ALL FUNCTIONS IN SCHEMA np FROM PUBLIC")
 
-    complete = PostgresBootstrap(
-        admin_factory,
-        migrator_connection_factory=role_factory(roles.migrator),
-        legacy_runtime_connection_factory=role_factory(roles.legacy_runtime),
-        atomic_runtime_connection_factory=role_factory(roles.atomic_runtime),
-        activation_connection_factory=role_factory(roles.activation),
-        readiness_connection_factory=role_factory(roles.readiness),
-        trainer_connection_factory=role_factory(roles.trainer),
-    ).reconcile(context)
-    assert complete.status is PostgresBootstrapStatus.COMPLETE
+            for table, privileges in _HISTORICAL_HEAD6_LEGACY_PRIVILEGES.items():
+                cursor.execute(
+                    sql.SQL("GRANT {} ON TABLE np.{} TO {}").format(
+                        sql.SQL(", ").join(sql.SQL(item) for item in privileges),
+                        sql.Identifier(table),
+                        sql.Identifier(roles.legacy_runtime),
+                    )
+                )
+            for table, privileges in _HISTORICAL_HEAD6_ATOMIC_PRIVILEGES.items():
+                cursor.execute(
+                    sql.SQL("GRANT {} ON TABLE np.{} TO {}").format(
+                        sql.SQL(", ").join(sql.SQL(item) for item in privileges),
+                        sql.Identifier(table),
+                        sql.Identifier(roles.atomic_runtime),
+                    )
+                )
+            cursor.execute(
+                sql.SQL(
+                    "GRANT SELECT ON TABLE np.paper_runtime_control, "
+                    "np.paper_runtime_generations TO {}"
+                ).format(sql.Identifier(roles.atomic_runtime))
+            )
+            cursor.execute(
+                sql.SQL("GRANT SELECT ON TABLE {} TO {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL("np.{}").format(sql.Identifier(table))
+                        for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES
+                    ),
+                    sql.Identifier(roles.readiness),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT SELECT ON TABLE np.trades TO {}").format(
+                    sql.Identifier(roles.trainer)
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT USAGE ON SEQUENCE {} TO {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL("np.{}").format(sql.Identifier(sequence))
+                        for sequence in _HISTORICAL_HEAD6_LEGACY_SEQUENCES
+                    ),
+                    sql.Identifier(roles.legacy_runtime),
+                )
+            )
+            cursor.execute(
+                sql.SQL(
+                    "GRANT UPDATE(control_key) ON np.paper_runtime_control TO {}"
+                ).format(sql.Identifier(roles.atomic_runtime))
+            )
+            cursor.execute(
+                sql.SQL("GRANT UPDATE(id) ON np.open_positions TO {}").format(
+                    sql.Identifier(roles.legacy_runtime)
+                )
+            )
+            cursor.execute(
+                sql.SQL(
+                    "GRANT UPDATE(activation_id) "
+                    "ON np.paper_runtime_generations TO {}"
+                ).format(sql.Identifier(roles.atomic_runtime))
+            )
+            cursor.execute(
+                sql.SQL("GRANT SELECT ON TABLE {} TO {}").format(
+                    sql.SQL(", ").join(
+                        sql.SQL("np.{}").format(sql.Identifier(table))
+                        for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES
+                    ),
+                    sql.Identifier(roles.activation),
+                )
+            )
+            for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES:
+                cursor.execute(
+                    sql.SQL("GRANT UPDATE ON TABLE np.{} TO {}").format(
+                        sql.Identifier(table),
+                        sql.Identifier(roles.activation),
+                    )
+                )
+            cursor.execute(
+                sql.SQL("GRANT INSERT ON np.paper_runtime_generations TO {}").format(
+                    sql.Identifier(roles.activation)
+                )
+            )
+            for function in _HISTORICAL_HEAD6_ACTIVATION_FUNCTIONS:
+                cursor.execute(
+                    sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(
+                        sql.SQL(function)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(
+                        sql.SQL(function),
+                        sql.Identifier(roles.activation),
+                    )
+                )
+            cursor.execute(
+                sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(
+                    sql.Identifier(_TARGET_DATABASE)
+                )
+            )
+            cursor.execute(
+                sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                    sql.Identifier(_TARGET_DATABASE),
+                    sql.Identifier(_ADMIN_ROLE),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(_TARGET_DATABASE),
+                    sql.Identifier(roles.schema_owner),
+                )
+            )
+            cursor.execute(
+                sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                    sql.Identifier(_TARGET_DATABASE),
+                    sql.SQL(", ").join(sql.Identifier(role) for role in login_roles),
+                )
+            )
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        admin.commit()
+    finally:
+        admin.close()
+    return context, migrator_dsn
+
+
+def _bootstrap_target(target_dsn: str, suffix: str) -> PostgresBootstrapContext:
+    context, _migrator_dsn = _bootstrap_historical_head6_target(
+        target_dsn,
+        suffix,
+        role_prefix="ct",
+    )
     return context
 
 
@@ -1117,6 +1419,66 @@ def test_target_terminal_mode_migration_and_data_drift_block_without_repair(
         pair.execute(
             pair.target_dsn,
             "ALTER TABLE np.schema_migrations_expected RENAME TO schema_migrations",
+        )
+
+    function_connection = pair.connect(pair.target_dsn)
+    try:
+        with function_connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_get_functiondef("
+                "'np.enforce_legacy_paper_runtime_fence()'::regprocedure)"
+            )
+            original_function = cursor.fetchone()[0]
+        function_connection.rollback()
+    finally:
+        function_connection.close()
+    pair.execute(
+        pair.target_dsn,
+        """
+        CREATE OR REPLACE FUNCTION np.enforce_legacy_paper_runtime_fence()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = pg_catalog
+        AS $function$
+        BEGIN
+            RAISE EXCEPTION USING
+                ERRCODE = '55000',
+                MESSAGE = 'poisoned historical function was executed';
+        END
+        $function$
+        """,
+    )
+    try:
+        before_poisoned_function = _database_snapshot(pair.target_dsn)
+        poisoned_function = inspector.inspect(pair.context)
+        assert poisoned_function.status is FreshTargetCutoverStatus.BLOCKED
+        assert poisoned_function.target.terminal_catalog_exact is False
+        assert FreshTargetCutoverBlocker.TARGET_NOT_COMPLETE in (
+            poisoned_function.blockers
+        )
+        assert _database_snapshot(pair.target_dsn) == before_poisoned_function
+    finally:
+        pair.execute(pair.target_dsn, original_function)
+
+    pair.execute(
+        pair.target_dsn,
+        "ALTER TABLE np.trades " "DISABLE TRIGGER legacy_paper_runtime_fence_trades",
+    )
+    try:
+        before_disabled_trigger = _database_snapshot(pair.target_dsn)
+        disabled_trigger = inspector.inspect(pair.context)
+        assert disabled_trigger.status is FreshTargetCutoverStatus.BLOCKED
+        assert disabled_trigger.target.terminal_catalog_exact is False
+        assert FreshTargetCutoverBlocker.TARGET_NOT_COMPLETE in (
+            disabled_trigger.blockers
+        )
+        assert _database_snapshot(pair.target_dsn) == before_disabled_trigger
+    finally:
+        pair.execute(
+            pair.target_dsn,
+            "ALTER TABLE np.trades "
+            "ENABLE ALWAYS TRIGGER legacy_paper_runtime_fence_trades",
         )
 
     pair.execute(

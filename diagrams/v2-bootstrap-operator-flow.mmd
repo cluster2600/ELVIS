@@ -1,14 +1,20 @@
 flowchart TD
-    PRE["prove prerequisites"] --> RUN["run one explicit pass"]
-    RUN --> RESULT{"receipt or error"}
-    RESULT -->|"credentials required"| PROVISION["provision six external credentials"]
-    PROVISION --> SERVICES["add six libpq service names"]
-    SERVICES --> RUN
-    RESULT -->|"demotion required"| APPROVE["approve demotion manifest and flag"]
-    APPROVE --> DEMOTE["run demotion pass"]
-    DEMOTE --> DRAIN["drain old sessions and verify inert role"]
-    DRAIN --> RUN
-    RESULT -->|"complete"| RECORD["record receipt; keep V2 dormant"]
-    RESULT -->|"typed failure"| STOP["stop and investigate drift"]
-    RESULT -->|"commit unknown"| READBACK["preserve window and inspect named phase"]
-    READBACK --> RUN
+    accTitle: ELVIS V2 bootstrap operator flow
+    accDescr: The operator replaces invalid templates with approved private evidence, stages eight roles, provisions three bootstrap credentials, completes bootstrap, and verifies two terminal logins plus six inert roles; legacy and atomic runtime remain future labels without target capability in PR3.
+
+    TEMPLATES["Committed templates<br/>intentionally invalid"] --> PRIVATE["Create private approved config<br/>signed documents and exact pins"]
+    PRIVATE --> AUTH["Authenticate config digest<br/>candidate and pin authority"]
+    AUTH --> FIRST["Run explicit bootstrap-v2 stage pass"]
+    FIRST --> STAGE["CREDENTIALS_<br/>REQUIRED<br/>8 managed roles staged NOLOGIN"]
+
+    STAGE --> PROVISION["Provision 3 credentials<br/>migrator · readiness · trainer"]
+    PROVISION --> SERVICES["Add 3 private libpq services<br/>none for schema_owner, opening,<br/>legacy_runtime, atomic_runtime, or activation"]
+    SERVICES --> FINAL["Run explicit completion pass<br/>3 managed-login probes"]
+    FINAL --> COMPLETE["COMPLETE<br/>head-7 catalog sealed"]
+
+    COMPLETE --> VERIFY["Verify committed terminal state"]
+    VERIFY --> LOGIN["2 terminal LOGIN roles<br/>readiness · trainer"]
+    VERIFY --> INERT["6 inert NOLOGIN roles<br/>schema_owner · migrator · opening<br/>legacy_runtime · atomic_runtime · activation"]
+    INERT --> ANCHOR["opening anchor<br/>no service, HBA, ACL, or capability"]
+    INERT --> FUTURE["legacy_runtime and atomic_runtime<br/>future role labels only<br/>no target service, HBA, ACL, or capability in PR3<br/>V1 source remains elsewhere"]
+    COMPLETE -. "does not authorise" .-> RUNTIME["Activation and runtime<br/>not started"]

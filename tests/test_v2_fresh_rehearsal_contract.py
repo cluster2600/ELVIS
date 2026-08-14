@@ -21,8 +21,10 @@ _PREVIEW_SERVICE_FILE = _DEPLOYMENT / "pg_service.preview.conf.example"
 _HBA = _DEPLOYMENT / "postgres" / "pg_hba.conf"
 _REHEARSAL_ENTRYPOINT = _DEPLOYMENT / "postgres" / "rehearsal-entrypoint.sh"
 _MARKER_WRITER = _DEPLOYMENT / "postgres" / "write-rehearsal-marker.sh"
-_STAGE_MANIFEST = _DEPLOYMENT / "bootstrap-stage-v1.example.json"
-_COMPLETE_MANIFEST = _DEPLOYMENT / "bootstrap-complete-v1.example.json"
+_HISTORICAL_STAGE_MANIFEST = _DEPLOYMENT / "bootstrap-stage-v1.example.json"
+_HISTORICAL_COMPLETE_MANIFEST = _DEPLOYMENT / "bootstrap-complete-v1.example.json"
+_STAGE_MANIFEST = _DEPLOYMENT / "bootstrap-stage-v2.example.json"
+_COMPLETE_MANIFEST = _DEPLOYMENT / "bootstrap-complete-v2.example.json"
 _SERVICE_FILE = _DEPLOYMENT / "pg_service.conf.example"
 _CUTOVER_PREFLIGHT_MANIFEST = _DEPLOYMENT / "cutover-preflight-v1.example.json"
 _LEGACY_SNAPSHOT_IMPORT_MANIFEST = (
@@ -31,6 +33,9 @@ _LEGACY_SNAPSHOT_IMPORT_MANIFEST = (
 _LEGACY_SNAPSHOT_RECONCILIATION_MANIFEST = (
     _DEPLOYMENT / "legacy-snapshot-reconciliation-v1.example.json"
 )
+_BOOTSTRAP_RUNBOOK = _REPOSITORY / "docs" / "V2_POSTGRES_BOOTSTRAP.md"
+_BOOTSTRAP_TRUST_DIAGRAM = _REPOSITORY / "diagrams" / "v2-bootstrap-trust-boundary.mmd"
+_BOOTSTRAP_FLOW_DIAGRAM = _REPOSITORY / "diagrams" / "v2-bootstrap-operator-flow.mmd"
 
 _DATABASE = "elvis_paper_v2_rehearsal"
 _ADMIN_ROLE = "elvis_bootstrap_admin"
@@ -38,18 +43,20 @@ _SUBNET = "10.254.90.0/28"
 _ROLE_KEYS = (
     "schema_owner",
     "migrator",
+    "opening",
     "legacy_runtime",
     "atomic_runtime",
     "activation",
     "readiness",
     "trainer",
 )
-_LOGIN_ROLE_KEYS = _ROLE_KEYS[1:]
+_LOGIN_ROLE_KEYS = (
+    "migrator",
+    "readiness",
+    "trainer",
+)
 _LOGIN_ROLES = (
     "elvis_v2_migrator",
-    "elvis_v2_legacy_runtime",
-    "elvis_v2_atomic_runtime",
-    "elvis_v2_activation",
     "elvis_v2_readiness",
     "elvis_v2_trainer",
 )
@@ -63,6 +70,8 @@ _EXPECTED_FILES = {
     _HBA,
     _REHEARSAL_ENTRYPOINT,
     _MARKER_WRITER,
+    _HISTORICAL_STAGE_MANIFEST,
+    _HISTORICAL_COMPLETE_MANIFEST,
     _STAGE_MANIFEST,
     _COMPLETE_MANIFEST,
     _SERVICE_FILE,
@@ -91,6 +100,17 @@ def _hba_rows() -> list[tuple[str, ...]]:
         if line:
             rows.append(tuple(line.split()))
     return rows
+
+
+def test_bootstrap_runbook_embeds_the_exact_diagram_sources() -> None:
+    runbook = _BOOTSTRAP_RUNBOOK.read_text(encoding="utf-8")
+    mermaid_fences = re.findall(r"```mermaid\n(.*?)```", runbook, re.S)
+
+    for diagram in (_BOOTSTRAP_TRUST_DIAGRAM, _BOOTSTRAP_FLOW_DIAGRAM):
+        source = diagram.read_text(encoding="utf-8")
+        assert mermaid_fences.count(source) == 1
+        relative = diagram.relative_to(_REPOSITORY)
+        assert f"../{relative.as_posix()}" in runbook
 
 
 def test_v2_deployment_surface_is_exact_and_dormant() -> None:
@@ -226,19 +246,29 @@ def test_v2_stage_and_complete_manifests_encode_only_service_names() -> None:
         "admin_role",
         "roles",
         "services",
+        "opening_admission",
         "adoption",
     }
     expected_service_keys = {"admin", *_ROLE_KEYS}
 
     for manifest in (stage, complete):
         assert set(manifest) == expected_top_level
-        assert manifest["schema_version"] == 1
+        assert manifest["schema_version"] == 2
         assert manifest["expected_database"] == _DATABASE
         assert manifest["admin_role"] == _ADMIN_ROLE
         assert manifest["adoption"] is None
         assert set(manifest["roles"]) == set(_ROLE_KEYS)
         assert set(manifest["services"]) == expected_service_keys
         assert manifest["services"]["schema_owner"] is None
+        assert manifest["services"]["opening"] is None
+        assert manifest["services"]["legacy_runtime"] is None
+        assert manifest["services"]["atomic_runtime"] is None
+        assert manifest["services"]["activation"] is None
+        assert set(manifest["opening_admission"]) == {
+            "candidate_sha256",
+            "pin_authority_record_sha256",
+            "deployment_incarnation_id",
+        }
 
     assert stage["roles"] == complete["roles"]
     assert tuple(complete["roles"][key] for key in _LOGIN_ROLE_KEYS) == _LOGIN_ROLES
@@ -250,6 +280,15 @@ def test_v2_stage_and_complete_manifests_encode_only_service_names() -> None:
     assert all(isinstance(service_id, str) for service_id in complete_service_ids)
     assert len(set(complete_service_ids)) == len(_LOGIN_ROLE_KEYS)
     assert complete_service_ids == _LOGIN_ROLES
+
+    for historical_path in (
+        _HISTORICAL_STAGE_MANIFEST,
+        _HISTORICAL_COMPLETE_MANIFEST,
+    ):
+        historical = _load_manifest(historical_path)
+        assert historical["schema_version"] == 1
+        assert "opening" not in historical["roles"]
+        assert "opening" not in historical["services"]
 
 
 def test_v2_libpq_services_are_exact_separate_identities_without_passwords() -> None:

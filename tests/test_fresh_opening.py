@@ -27,11 +27,20 @@ from trading.application.fresh_opening import (
     FreshOpeningTrustAnchor,
     FreshOpeningTrustPolicy,
     ProspectiveFreshOpeningCandidate,
+    derive_prospective_fresh_opening_candidate,
     encode_detached_fresh_opening_approval,
     encode_fresh_opening_intent,
     encode_fresh_opening_trust_policy,
     fresh_opening_signing_bytes,
     prepare_fresh_opening,
+)
+from trading.application.fresh_opening_provisioning import (
+    FreshOpeningPhysicalTarget,
+    FreshOpeningProvisioningDisposition,
+    FreshOpeningProvisioningReceipt,
+    FreshOpeningProvisioningRequest,
+    FreshOpeningProvisioningResult,
+    FreshOpeningProvisioningService,
 )
 from trading.domain.paper_accounting import (
     PaperAccountBalance,
@@ -106,6 +115,20 @@ class _CryptographyEd25519Verifier:
 
 OPENING_CODEC = _CanonicalOpeningCodec()
 SIGNATURE_VERIFIER = _CryptographyEd25519Verifier()
+
+
+def _target(**overrides: object) -> FreshOpeningPhysicalTarget:
+    values: dict[str, object] = {
+        "expected_database": "elvis_paper_v2",
+        "expected_system_identifier": 123456789,
+        "control_plane_role": "elvis_bootstrap_admin",
+        "opening_anchor_role": "elvis_v2_opening",
+        "deployment_incarnation_id": "deployment-2026-08-14-001",
+        "terminal_catalog_sha256": "c" * 64,
+        "pin_authority_record_sha256": "d" * 64,
+    }
+    values.update(overrides)
+    return FreshOpeningPhysicalTarget(**values)
 
 
 def _anchor(**overrides: object) -> FreshOpeningTrustAnchor:
@@ -224,6 +247,88 @@ def _prepare(
     )
 
 
+def _provisioning_request(
+    *,
+    policy: FreshOpeningTrustPolicy | None = None,
+    intent: FreshOpeningIntent | None = None,
+    approval: DetachedFreshOpeningApproval | None = None,
+    target: FreshOpeningPhysicalTarget | None = None,
+) -> FreshOpeningProvisioningRequest:
+    actual_policy = policy or _policy()
+    actual_intent = intent or _intent(actual_policy)
+    actual_approval = approval or _approval(actual_intent)
+    return FreshOpeningProvisioningRequest(
+        intent=actual_intent,
+        approval=actual_approval,
+        trust_policy=actual_policy,
+        expected_trust_policy_sha256=(
+            encode_fresh_opening_trust_policy(actual_policy).sha256
+        ),
+        expected_signer_public_key_sha256=(actual_policy.anchors[0].public_key_sha256),
+        target=target or _target(),
+    )
+
+
+def _provisioning_receipt(
+    request: FreshOpeningProvisioningRequest,
+    candidate: ProspectiveFreshOpeningCandidate,
+    *,
+    target: FreshOpeningPhysicalTarget | None = None,
+) -> FreshOpeningProvisioningReceipt:
+    payload = '{"schema_version":1}'
+    return FreshOpeningProvisioningReceipt(
+        document=CanonicalFreshOpeningDocument(
+            payload,
+            hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        ),
+        target=target or request.target,
+        intent_sha256=candidate.intent_document.sha256,
+        approval_sha256=candidate.approval_document.sha256,
+        trust_policy_sha256=candidate.trust_policy_document.sha256,
+        candidate_sha256=candidate.candidate_document.sha256,
+        opening_payload_sha256=candidate.opening.opening_payload_sha256,
+    )
+
+
+class _ReplayProvisioningPort:
+    def __init__(self) -> None:
+        self.authority_calls = 0
+
+    def provision(self, request, candidate, current_authority, /):
+        del current_authority
+        return FreshOpeningProvisioningResult(
+            disposition=FreshOpeningProvisioningDisposition.REPLAYED,
+            primary_reason_code="EXACT_DURABLE_REPLAY",
+            receipt=_provisioning_receipt(request, candidate),
+            current_authority_evaluated=False,
+        )
+
+
+class _CreateProvisioningPort:
+    def __init__(self, evaluated_at: datetime) -> None:
+        self.evaluated_at = evaluated_at
+        self.preparation: FreshOpeningPreparation | None = None
+
+    def provision(self, request, candidate, current_authority, /):
+        self.preparation = current_authority.evaluate(self.evaluated_at)
+        if self.preparation.disposition is not (
+            FreshOpeningPreparationDisposition.PREPARED
+        ):
+            return FreshOpeningProvisioningResult(
+                disposition=FreshOpeningProvisioningDisposition.BLOCKED,
+                primary_reason_code=self.preparation.disposition.value,
+                receipt=None,
+                current_authority_evaluated=True,
+            )
+        assert self.preparation.candidate == candidate
+        return FreshOpeningProvisioningResult(
+            disposition=FreshOpeningProvisioningDisposition.CREATED,
+            primary_reason_code="FRESH_OPENING_CREATED",
+            receipt=_provisioning_receipt(request, candidate),
+            current_authority_evaluated=True,
+        )
+
+
 def test_prepared_candidate_uses_exact_real_opening_codec_and_grants_no_authority() -> (
     None
 ):
@@ -322,6 +427,133 @@ def test_policy_intent_approval_and_candidate_are_canonical_json() -> None:
         "legacy",
     }
     assert not any(value in documents[3].payload.lower() for value in forbidden)
+
+
+def test_prospective_candidate_can_be_rebuilt_only_for_exact_readback() -> None:
+    policy = _policy()
+    intent = _intent(policy)
+    approval = _approval(intent)
+    prepared = _prepare(policy=policy, intent=intent, approval=approval)
+
+    rebuilt = derive_prospective_fresh_opening_candidate(
+        intent,
+        approval,
+        policy,
+        opening_codec=OPENING_CODEC,
+    )
+
+    assert rebuilt == prepared.candidate
+
+
+def test_readback_candidate_rebuild_does_not_apply_current_authority() -> None:
+    original_policy = _policy()
+    intent = _intent(original_policy)
+    approval = _approval(intent)
+    revoked_policy = _policy(_anchor(revoked=True))
+
+    rebuilt = derive_prospective_fresh_opening_candidate(
+        intent,
+        approval,
+        original_policy,
+        opening_codec=OPENING_CODEC,
+    )
+    blocked = prepare_fresh_opening(
+        intent,
+        approval,
+        opening_codec=OPENING_CODEC,
+        signature_verifier=SIGNATURE_VERIFIER,
+        trust_policy=revoked_policy,
+        expected_trust_policy_sha256=(
+            encode_fresh_opening_trust_policy(revoked_policy).sha256
+        ),
+        expected_signer_public_key_sha256=PUBLIC_KEY_SHA256,
+        evaluated_at=EXPIRES_AT + timedelta(seconds=1),
+    )
+
+    assert rebuilt.candidate_document.sha256 == CANDIDATE_GOLDEN_SHA
+    assert blocked.disposition is not FreshOpeningPreparationDisposition.PREPARED
+    assert blocked.candidate is None
+
+
+def test_durable_exact_replay_precedes_expiry_and_revocation_checks() -> None:
+    policy = _policy()
+    request = _provisioning_request(policy=policy)
+    port = _ReplayProvisioningPort()
+    service = FreshOpeningProvisioningService(
+        port,
+        OPENING_CODEC,
+        SIGNATURE_VERIFIER,
+    )
+
+    result = service.provision(request)
+
+    assert result.disposition is FreshOpeningProvisioningDisposition.REPLAYED
+    assert result.current_authority_evaluated is False
+    assert result.receipt is not None
+    assert result.side_effect_state == "COMMITTED"
+    assert result.runtime_activation_authorized is False
+    assert result.trading_authorized is False
+
+
+def test_absent_opening_uses_locked_database_time_for_current_authority() -> None:
+    request = _provisioning_request()
+    port = _CreateProvisioningPort(EVALUATED_AT)
+    service = FreshOpeningProvisioningService(
+        port,
+        OPENING_CODEC,
+        SIGNATURE_VERIFIER,
+    )
+
+    result = service.provision(request)
+
+    assert port.preparation is not None
+    assert port.preparation.disposition is FreshOpeningPreparationDisposition.PREPARED
+    assert result.disposition is FreshOpeningProvisioningDisposition.CREATED
+    assert result.current_authority_evaluated is True
+    assert result.receipt is not None
+    assert result.receipt.runtime_mode == "LEGACY"
+    assert result.receipt.runtime_generation == 0
+    assert result.receipt.authority_transition_sequence == 0
+
+
+def test_absent_opening_is_blocked_at_the_locked_expired_time() -> None:
+    request = _provisioning_request()
+    port = _CreateProvisioningPort(EXPIRES_AT)
+    result = FreshOpeningProvisioningService(
+        port,
+        OPENING_CODEC,
+        SIGNATURE_VERIFIER,
+    ).provision(request)
+
+    assert result.disposition is FreshOpeningProvisioningDisposition.BLOCKED
+    assert result.primary_reason_code == "BLOCKED_APPROVAL_EXPIRED"
+    assert result.receipt is None
+    assert result.side_effect_state == "NONE"
+
+
+def test_service_rejects_a_spliced_physical_receipt() -> None:
+    request = _provisioning_request()
+
+    class SplicedPort:
+        def provision(self, actual_request, candidate, current_authority, /):
+            del current_authority
+            return FreshOpeningProvisioningResult(
+                disposition=FreshOpeningProvisioningDisposition.REPLAYED,
+                primary_reason_code="EXACT_DURABLE_REPLAY",
+                receipt=_provisioning_receipt(
+                    actual_request,
+                    candidate,
+                    target=_target(expected_system_identifier=987654321),
+                ),
+                current_authority_evaluated=False,
+            )
+
+    with pytest.raises(ValueError, match="targets another database"):
+        FreshOpeningProvisioningService(
+            SplicedPort(),
+            OPENING_CODEC,
+            SIGNATURE_VERIFIER,
+        ).provision(request)
 
 
 def test_golden_documents_are_frozen() -> None:

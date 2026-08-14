@@ -32,6 +32,7 @@ from trading.persistence.paper_account_journal import (
 _ACCOUNT_KEY_MAX_LENGTH = 255
 _POSITION_KEY_MAX_LENGTH = 255
 _CLIENT_ORDER_ID_MAX_LENGTH = 255
+_LOWER_HEX = frozenset("0123456789abcdef")
 _SCHEMA_MIGRATION_RELATION = "np.schema_migrations"
 _LEGACY_RELATIONS = (
     "np.account_balances",
@@ -48,6 +49,12 @@ _RUNTIME_CONTROL_FUNCTION = "enforce_legacy_paper_runtime_fence"
 _RUNTIME_CONTROL_TRIGGER_PREFIX = "legacy_paper_runtime_fence_"
 _RUNTIME_GENERATION_FUNCTION = "reject_paper_runtime_generation_mutation"
 _RUNTIME_GENERATION_TRIGGER = "paper_runtime_generations_append_only"
+_CURRENT_OPENING_PROVENANCE_FUNCTION = "require_current_paper_fresh_opening_provenance"
+_CURRENT_OPENING_PROVENANCE_TRIGGER = (
+    "paper_runtime_generations_require_fresh_opening_provenance"
+)
+_FRESH_OPENING_MUTATION_FUNCTION = "reject_paper_fresh_opening_mutation"
+_ACCOUNT_OPENING_IDENTITY_FUNCTION = "protect_paper_account_opening_identity"
 _RUNTIME_ACTIVATION_FENCE_FUNCTION = "acquire_paper_runtime_activation_fence"
 _RUNTIME_ACTIVATION_MUTATION_FUNCTION = "activate_paper_runtime_generation"
 _RUNTIME_CONTROL_MODES = frozenset({"LEGACY", "SHADOW", "PAUSED", "ACTIVE"})
@@ -221,6 +228,9 @@ _DURABLE_BUSINESS_RELATIONS = tuple(
             "np.paper_account_postings",
             "np.paper_account_settlements",
             "np.paper_account_streams",
+            "np.paper_fresh_opening_admissions",
+            "np.paper_fresh_opening_nonces",
+            "np.paper_fresh_opening_provisionings",
             "np.paper_margin_reservations",
             _RUNTIME_CONTROL_RELATION,
             _RUNTIME_GENERATION_RELATION,
@@ -234,6 +244,7 @@ _SCHEMA_DRIFT_SQLSTATES = frozenset(
         "42704",  # undefined_object
         "42804",  # datatype_mismatch
         "42809",  # wrong_object_type
+        "42883",  # undefined_function
         "42P01",  # undefined_table
     }
 )
@@ -535,7 +546,7 @@ SELECT
     routine_row.prosrc,
     routine_row.proowner,
     (
-        SELECT COUNT(*) = 19
+        SELECT COUNT(*) = 22
            AND BOOL_AND(
                has_table_privilege(
                    routine_row.proowner,
@@ -672,6 +683,50 @@ WHERE namespace_row.nspname = 'np'
   AND NOT trigger_row.tgisinternal
 ORDER BY trigger_row.tgname
 """
+_SELECT_CURRENT_OPENING_PROVENANCE_FUNCTIONS_SQL = """
+SELECT
+    routine_row.proname,
+    pg_get_function_identity_arguments(routine_row.oid),
+    pg_get_function_result(routine_row.oid),
+    routine_row.prosecdef,
+    routine_row.provolatile,
+    routine_row.proleakproof,
+    routine_row.proisstrict,
+    routine_row.proretset,
+    routine_row.prokind,
+    routine_row.proparallel,
+    language_row.lanname,
+    routine_row.proconfig,
+    encode(sha256(convert_to(routine_row.prosrc, 'UTF8')), 'hex'),
+    routine_row.proowner = provisioning_row.relowner,
+    NOT EXISTS (
+        SELECT 1
+        FROM aclexplode(
+            COALESCE(
+                routine_row.proacl,
+                acldefault('f', routine_row.proowner)
+            )
+        ) function_acl
+        WHERE function_acl.grantee = 0
+          AND function_acl.privilege_type = 'EXECUTE'
+    )
+FROM pg_proc routine_row
+JOIN pg_namespace namespace_row
+  ON namespace_row.oid = routine_row.pronamespace
+JOIN pg_language language_row
+  ON language_row.oid = routine_row.prolang
+JOIN pg_class provisioning_row
+  ON provisioning_row.relname = 'paper_fresh_opening_provisionings'
+JOIN pg_namespace provisioning_namespace
+  ON provisioning_namespace.oid = provisioning_row.relnamespace
+ AND provisioning_namespace.nspname = 'np'
+WHERE namespace_row.nspname = 'np'
+  AND routine_row.proname IN (
+      'paper_fresh_opening_target_is_current',
+      'require_current_paper_fresh_opening_provenance'
+  )
+ORDER BY routine_row.proname, routine_row.oid
+"""
 _SELECT_RUNTIME_MANIFEST_COLUMN_SQL = """
 SELECT
     ordinal_position,
@@ -755,6 +810,57 @@ SELECT account_key, execution_scope
 FROM np.paper_account_streams
 ORDER BY account_key
 """
+_SELECT_FRESH_OPENING_PROVENANCE_SQL = """
+SELECT
+    provisioning_row.control_key,
+    provisioning_row.execution_scope,
+    provisioning_row.account_key,
+    provisioning_row.owner_generation,
+    provisioning_row.opening_version,
+    provisioning_row.opening_payload_sha256,
+    provisioning_row.candidate_payload_sha256,
+    provisioning_row.pin_authority_record_sha256,
+    provisioning_row.deployment_incarnation_id,
+    provisioning_row.database_incarnation_id,
+    provisioning_row.migration_version,
+    provisioning_row.migration_name,
+    provisioning_row.migration_checksum,
+    provisioning_row.terminal_catalog_sha256,
+    provisioning_row.runtime_mode,
+    provisioning_row.runtime_generation,
+    provisioning_row.authority_transition_sequence,
+    provisioning_row.writer_fence,
+    provisioning_row.runtime_activation_authorized,
+    provisioning_row.trading_authorized,
+    provisioning_row.stale_on_return,
+    provisioning_row.provisioning_receipt_payload_sha256,
+    admission_row.control_key,
+    admission_row.candidate_payload_sha256,
+    admission_row.pin_authority_record_sha256,
+    admission_row.deployment_incarnation_id,
+    stream_row.execution_scope,
+    stream_row.account_key,
+    stream_row.owner_generation,
+    stream_row.opening_version,
+    stream_row.opening_payload_sha256,
+    np.paper_fresh_opening_target_is_current()
+FROM np.paper_fresh_opening_provisionings provisioning_row
+LEFT JOIN np.paper_fresh_opening_admissions admission_row
+  ON admission_row.candidate_payload_sha256 =
+        provisioning_row.candidate_payload_sha256
+ AND admission_row.pin_authority_record_sha256 =
+        provisioning_row.pin_authority_record_sha256
+ AND admission_row.deployment_incarnation_id =
+        provisioning_row.deployment_incarnation_id
+LEFT JOIN np.paper_account_streams stream_row
+  ON stream_row.execution_scope = provisioning_row.execution_scope
+ AND stream_row.account_key = provisioning_row.account_key
+ AND stream_row.owner_generation = provisioning_row.owner_generation
+ AND stream_row.opening_version = provisioning_row.opening_version
+ AND stream_row.opening_payload_sha256 =
+        provisioning_row.opening_payload_sha256
+ORDER BY provisioning_row.control_key
+"""
 _SELECT_POSITION_IDENTITIES_SQL = """
 SELECT position_key, execution_scope
 FROM np.position_streams
@@ -826,6 +932,16 @@ def _stored_key(value: object, field: str, maximum: int) -> str:
         0xD800 <= ord(character) <= 0xDFFF for character in value
     ):
         raise ValueError(f"stored {field} is not representable")
+    return value
+
+
+def _stored_sha256(value: object, field: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in _LOWER_HEX for character in value)
+    ):
+        raise ValueError(f"stored {field} is not a lowercase SHA-256")
     return value
 
 
@@ -945,7 +1061,15 @@ def _durable_business_relations_are_authoritative(cursor: object) -> bool:
             False,
             False,
             False,
-            relation in _LEGACY_RELATIONS or relation == _RUNTIME_GENERATION_RELATION,
+            relation in _LEGACY_RELATIONS
+            or relation
+            in {
+                "np.paper_account_streams",
+                "np.paper_fresh_opening_admissions",
+                "np.paper_fresh_opening_nonces",
+                "np.paper_fresh_opening_provisionings",
+                _RUNTIME_GENERATION_RELATION,
+            },
             False,
             False,
         )
@@ -1021,7 +1145,7 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
             0,
             True,
             "plpgsql",
-            ["search_path=pg_catalog"],
+            ["search_path=pg_catalog, pg_temp"],
         ):
             return False
         if type(function[8]) is not str:
@@ -1056,12 +1180,108 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
                 )
                 + (
                     (
+                        "paper_account_streams",
+                        "paper_account_streams_opening_identity_immutable",
+                        "A",
+                        27,
+                        "np",
+                        _ACCOUNT_OPENING_IDENTITY_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
+                        "paper_account_streams",
+                        "paper_account_streams_opening_identity_truncate",
+                        "A",
+                        34,
+                        "np",
+                        _ACCOUNT_OPENING_IDENTITY_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
+                        "paper_fresh_opening_admissions",
+                        "paper_fresh_opening_admissions_append_only",
+                        "A",
+                        58,
+                        "np",
+                        _FRESH_OPENING_MUTATION_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
+                        "paper_fresh_opening_nonces",
+                        "paper_fresh_opening_nonces_append_only",
+                        "A",
+                        58,
+                        "np",
+                        _FRESH_OPENING_MUTATION_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
+                        "paper_fresh_opening_provisionings",
+                        "paper_fresh_opening_provisionings_append_only",
+                        "A",
+                        58,
+                        "np",
+                        _FRESH_OPENING_MUTATION_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
                         _RUNTIME_GENERATION_RELATION.removeprefix("np."),
                         _RUNTIME_GENERATION_TRIGGER,
                         "A",
                         58,
                         "np",
                         _RUNTIME_GENERATION_FUNCTION,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                        True,
+                    ),
+                    (
+                        _RUNTIME_GENERATION_RELATION.removeprefix("np."),
+                        _CURRENT_OPENING_PROVENANCE_TRIGGER,
+                        "A",
+                        7,
+                        "np",
+                        _CURRENT_OPENING_PROVENANCE_FUNCTION,
                         True,
                         True,
                         True,
@@ -1081,6 +1301,45 @@ def _runtime_control_catalog_is_exact(cursor: object) -> bool:
 
 def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
     try:
+        cursor.execute(_SELECT_CURRENT_OPENING_PROVENANCE_FUNCTIONS_SQL)
+        if tuple(tuple(row) for row in cursor.fetchall()) != (
+            (
+                "paper_fresh_opening_target_is_current",
+                "",
+                "boolean",
+                True,
+                "v",
+                False,
+                False,
+                False,
+                "f",
+                "u",
+                "plpgsql",
+                ["search_path=pg_catalog, pg_temp"],
+                "68c05eeedb12d92795adc39652e80b52055afcd76e3fd9d4fbc57d373bf2abf1",
+                True,
+                True,
+            ),
+            (
+                "require_current_paper_fresh_opening_provenance",
+                "",
+                "trigger",
+                True,
+                "v",
+                False,
+                False,
+                False,
+                "f",
+                "u",
+                "plpgsql",
+                ["search_path=pg_catalog, pg_temp"],
+                "34b067d3fdaedb59b4afef3a60413f9a7b57c27bfcf9a628d865c7f37df7a747",
+                True,
+                True,
+            ),
+        ):
+            return False
+
         cursor.execute(_SELECT_RUNTIME_GENERATION_COLUMNS_SQL)
         if tuple(tuple(row) for row in cursor.fetchall()) != (
             (1, "runtime_generation", "int8", "NO", "none", None),
@@ -1144,6 +1403,15 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
                 True,
                 "(((execution_scope)::text = btrim((execution_scope)::text)) AND "
                 "((execution_scope)::text <> ''::text))",
+            ),
+            (
+                "paper_runtime_generations_fresh_opening_provisioning_fk",
+                "f",
+                [3, 4, 5, 6, 7],
+                False,
+                False,
+                True,
+                None,
             ),
             (
                 "paper_runtime_generations_generation_positive",
@@ -1214,6 +1482,14 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
         cursor.execute(_SELECT_RUNTIME_GENERATION_FKS_SQL)
         if tuple(tuple(row) for row in cursor.fetchall()) != (
             (
+                "paper_runtime_generations_fresh_opening_provisioning_fk",
+                "np.paper_fresh_opening_provisionings",
+                [6, 7, 8, 10, 20],
+                "a",
+                "r",
+                "f",
+            ),
+            (
                 "paper_runtime_generations_opening_fk",
                 "np.paper_account_streams",
                 [2, 1, 3, 7, 9],
@@ -1237,7 +1513,7 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
             0,
             True,
             "plpgsql",
-            ["search_path=pg_catalog"],
+            ["search_path=pg_catalog, pg_temp"],
         ):
             return False
         if type(function[8]) is not str:
@@ -1256,6 +1532,22 @@ def _runtime_generation_catalog_is_exact(cursor: object) -> bool:
                 58,
                 "np",
                 _RUNTIME_GENERATION_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            (
+                "paper_runtime_generations",
+                _CURRENT_OPENING_PROVENANCE_TRIGGER,
+                "A",
+                7,
+                "np",
+                _CURRENT_OPENING_PROVENANCE_FUNCTION,
                 True,
                 True,
                 True,
@@ -1354,7 +1646,7 @@ def _runtime_activation_capabilities_catalog_is_exact(cursor: object) -> bool:
             "f",
             "u",
             "plpgsql",
-            ["search_path=pg_catalog"],
+            ["search_path=pg_catalog, pg_temp"],
         ):
             return False
         if type(fence_function[12]) is not str or (
@@ -1382,7 +1674,7 @@ def _runtime_activation_capabilities_catalog_is_exact(cursor: object) -> bool:
             "f",
             "u",
             "plpgsql",
-            ["search_path=pg_catalog"],
+            ["search_path=pg_catalog, pg_temp"],
         ):
             return False
         if type(mutation_function[12]) is not str or (
@@ -1608,6 +1900,105 @@ def _read_legacy_watermarks(cursor: object) -> tuple[LegacyRelationWatermark, ..
     return tuple(result)
 
 
+def _fresh_opening_provenance_finding(
+    cursor: object,
+    *,
+    context: PaperAccountReadinessContext,
+    terminal_migration: MigrationIdentity,
+) -> PaperAccountReadinessFinding | None:
+    cursor.execute(_SELECT_FRESH_OPENING_PROVENANCE_SQL)
+    rows = tuple(cursor.fetchall())
+    if not rows:
+        return _finding(
+            PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT,
+            "fresh_opening_provisioning",
+            "np.paper_fresh_opening_provisionings",
+        )
+
+    try:
+        if len(rows) != 1:
+            raise ValueError("fresh opening provisioning is not a singleton")
+        row = _one_row(rows[0], "paper fresh opening provenance", 32)
+        execution_scope = _stored_key(row[1], "execution scope", 128)
+        account_key = _stored_key(row[2], "account key", _ACCOUNT_KEY_MAX_LENGTH)
+        opening_sha256 = _stored_sha256(row[5], "opening payload digest")
+        candidate_sha256 = _stored_sha256(row[6], "candidate payload digest")
+        pin_sha256 = _stored_sha256(row[7], "pin authority record digest")
+        deployment_incarnation = _stored_key(
+            row[8], "deployment incarnation", _ACCOUNT_KEY_MAX_LENGTH
+        )
+        database_incarnation_sha256 = _stored_sha256(
+            row[9], "database incarnation digest"
+        )
+        migration_name = _stored_key(row[11], "migration name", 255)
+        migration_checksum = _stored_sha256(row[12], "migration checksum")
+        terminal_catalog_sha256 = _stored_sha256(row[13], "terminal catalog digest")
+        provisioning_receipt_sha256 = _stored_sha256(
+            row[21], "provisioning receipt digest"
+        )
+        admission_candidate_sha256 = _stored_sha256(
+            row[23], "admission candidate digest"
+        )
+        admission_pin_sha256 = _stored_sha256(row[24], "admission pin authority digest")
+        admission_deployment_incarnation = _stored_key(
+            row[25], "admission deployment incarnation", _ACCOUNT_KEY_MAX_LENGTH
+        )
+        stream_execution_scope = _stored_key(row[26], "stream execution scope", 128)
+        stream_account_key = _stored_key(
+            row[27], "stream account key", _ACCOUNT_KEY_MAX_LENGTH
+        )
+        stream_opening_sha256 = _stored_sha256(row[30], "stream opening payload digest")
+        if (
+            row[0] is not True
+            or execution_scope != context.execution_scope
+            or account_key != context.account_key
+            or type(row[3]) is not int
+            or row[3] != context.owner_generation
+            or type(row[4]) is not int
+            or row[4] != 1
+            or opening_sha256 != context.opening_payload_sha256
+            or candidate_sha256 == "0" * 64
+            or pin_sha256 == "0" * 64
+            or database_incarnation_sha256 == "0" * 64
+            or type(row[10]) is not int
+            or row[10] != terminal_migration.version
+            or migration_name != terminal_migration.name
+            or migration_checksum != terminal_migration.checksum
+            or terminal_catalog_sha256 == "0" * 64
+            or row[14] != "LEGACY"
+            or type(row[15]) is not int
+            or row[15] != 0
+            or type(row[16]) is not int
+            or row[16] != 0
+            or type(row[17]) is not int
+            or row[17] != 0
+            or row[18] is not False
+            or row[19] is not False
+            or row[20] is not True
+            or provisioning_receipt_sha256 == "0" * 64
+            or row[22] is not True
+            or admission_candidate_sha256 != candidate_sha256
+            or admission_pin_sha256 != pin_sha256
+            or admission_deployment_incarnation != deployment_incarnation
+            or stream_execution_scope != execution_scope
+            or stream_account_key != account_key
+            or type(row[28]) is not int
+            or row[28] != context.owner_generation
+            or type(row[29]) is not int
+            or row[29] != 1
+            or stream_opening_sha256 != opening_sha256
+            or row[31] is not True
+        ):
+            raise ValueError("paper fresh opening provenance is not exact")
+    except PaperAccountReadinessStorageError, TypeError, ValueError:
+        return _finding(
+            PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH,
+            "fresh_opening_provisioning",
+            "np.paper_fresh_opening_provisionings",
+        )
+    return None
+
+
 def _assess_exact_schema(
     cursor: object,
     *,
@@ -1621,6 +2012,14 @@ def _assess_exact_schema(
 ) -> PaperAccountReadinessAssessment:
     findings = []
     account_version = None
+
+    provisioning_finding = _fresh_opening_provenance_finding(
+        cursor,
+        context=context,
+        terminal_migration=expected[-1],
+    )
+    if provisioning_finding is not None:
+        findings.append(provisioning_finding)
 
     if runtime_mode != required_runtime_mode:
         findings.append(

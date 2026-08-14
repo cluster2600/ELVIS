@@ -180,7 +180,9 @@ jobs:
     - name: Install rehearsal test dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install "pytest==9.0.2" "psycopg2-binary==2.9.12"
+        pip install \
+          "pytest==9.0.2" "psycopg2-binary==2.9.12" \
+          "cryptography==50.0.0"
 
     - name: Run isolated fresh-cluster rehearsal
       run: pytest -q -ra tests/postgres/test_v2_fresh_rehearsal_postgres.py

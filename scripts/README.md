@@ -22,13 +22,14 @@ the repo root to keep the top level clean.
 | Module | Purpose |
 |---|---|
 | `python3.14 -m scripts.v2_opening_plan` | Prepare and verify one signed trajectory-B fresh-opening intent from bounded local files. It never contacts PostgreSQL, reserves a nonce, opens/provisions an account, or grants runtime authority. |
+| `python3.14 -m scripts.v2_opening_apply` | PR3 source-only apply-or-exact-replay command. A committed opening remains `LEGACY/0/S0`; it never retires V1, activates a runtime, or authorises trading. It is absent from the alpha.2 image and dispatcher. |
 | `python -m scripts.postgres_bootstrap` | Reconcile the dormant V2 PostgreSQL roles/catalog from a strict non-secret JSON manifest and external libpq services. It is one-shot, operator-confirmed, and never runs at application startup. |
 | `python -m scripts.postgres_cutover_preflight` | Inspect one stopped V1 clone and one separately bootstrapped, empty V2 target. It is read-only, emits stale evidence, and never copies data or authorises cut-over. |
 | `python -m scripts.postgres_legacy_snapshot_import` | Bind a strict secret-free c3c2 `READY` receipt as stale expected evidence, revalidate both databases, then copy only the seven raw V1 relations with bounded batches, atomic row commit, and post-commit sequence recovery. It never synthesizes V2 history or authorises activation. |
 | `python -m scripts.postgres_legacy_snapshot_reconciliation` | Canonically bind a c3c3a import document, sequentially revalidate the target read-only, and compare the complete imported opening candidate with a deterministic but explicitly non-runtime operator hypothesis. It authenticates no source provenance, has no match outcome, and never opens, provisions, or activates an account. |
 
 See the [V2 PostgreSQL bootstrap runbook](../docs/V2_POSTGRES_BOOTSTRAP.md) for
-the exact flags, version-1 configuration schema, external `PGSERVICEFILE` and
+the exact flags, version-2 configuration schema, external `PGSERVICEFILE` and
 `PGPASSFILE` contract, receipts, exit codes, and commit-unknown recovery. A
 `COMPLETE` receipt does not deploy or activate V2.
 
@@ -36,6 +37,13 @@ See the [fresh-opening plan](../docs/V2_FRESH_OPENING_PLAN.md) for the source-on
 Python 3.14 command, three strict local documents, externally pinned trust/key
 fingerprints, result and exit-code contract, and explicit PR3 nonce/database
 boundary. `PREPARED` is read-only evidence, never an opening or activation.
+
+See the [durable fresh-opening apply
+runbook](../docs/V2_FRESH_OPENING_APPLY.md) for the PR3 source-only command,
+three non-authenticating confirmations, exact replay and conflict behavior,
+target-local nonce scope, exit codes, and `COMMIT_UNKNOWN` recovery. Even
+`CREATED` or `REPLAYED` remains `LEGACY/0/S0` with no activation or trading
+authority.
 
 See the [fresh-target cut-over preflight](../docs/V2_FRESH_TARGET_CUTOVER.md)
 for its three mandatory confirmations, closed version-1 intent document,

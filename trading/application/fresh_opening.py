@@ -757,6 +757,67 @@ def encode_detached_fresh_opening_approval(
     return CanonicalFreshOpeningDocument(payload, _sha256_payload(payload))
 
 
+def _candidate_from_documents(
+    *,
+    intent_document: CanonicalFreshOpeningDocument,
+    trust_policy_document: CanonicalFreshOpeningDocument,
+    approval_document: CanonicalFreshOpeningDocument,
+    opening: FreshOpeningEncodedOpening,
+) -> ProspectiveFreshOpeningCandidate:
+    candidate_payload = _canonical_json(
+        {
+            "approval_sha256": approval_document.sha256,
+            "intent_sha256": intent_document.sha256,
+            "opening_codec": _OPENING_CODEC,
+            "opening_payload_sha256": opening.opening_payload_sha256,
+            "opening_version": opening.opening_version,
+            "schema_version": _SCHEMA_VERSION,
+            "trust_policy_sha256": trust_policy_document.sha256,
+        }
+    )
+    return ProspectiveFreshOpeningCandidate(
+        intent_document=intent_document,
+        trust_policy_document=trust_policy_document,
+        approval_document=approval_document,
+        opening=opening,
+        candidate_document=CanonicalFreshOpeningDocument(
+            candidate_payload,
+            _sha256_payload(candidate_payload),
+        ),
+    )
+
+
+def derive_prospective_fresh_opening_candidate(
+    intent: FreshOpeningIntent,
+    approval: DetachedFreshOpeningApproval,
+    trust_policy: FreshOpeningTrustPolicy,
+    /,
+    *,
+    opening_codec: FreshOpeningCodecPort,
+) -> ProspectiveFreshOpeningCandidate:
+    """Rebuild exact prospective bytes for durable readback comparison only.
+
+    This function intentionally does not verify current signature, pin,
+    freshness, or revocation state.  Its result is not a capability and must
+    never authorise an absent mutation.  PR3 uses it only to compare an exact
+    target-local durable replay before current authority is evaluated.
+    """
+
+    if type(intent) is not FreshOpeningIntent:
+        raise TypeError("intent must be a FreshOpeningIntent")
+    if type(approval) is not DetachedFreshOpeningApproval:
+        raise TypeError("approval must be a DetachedFreshOpeningApproval")
+    if type(trust_policy) is not FreshOpeningTrustPolicy:
+        raise TypeError("trust_policy must be a FreshOpeningTrustPolicy")
+    codec = _require_opening_codec(opening_codec)
+    return _candidate_from_documents(
+        intent_document=encode_fresh_opening_intent(intent),
+        trust_policy_document=encode_fresh_opening_trust_policy(trust_policy),
+        approval_document=encode_detached_fresh_opening_approval(approval),
+        opening=_derive_prospective_opening(intent, codec),
+    )
+
+
 def _derive_prospective_opening(
     intent: FreshOpeningIntent,
     opening_codec: FreshOpeningCodecPort,
@@ -935,28 +996,11 @@ def prepare_fresh_opening(
             prospective_opening,
         )
 
-    approval_document = encode_detached_fresh_opening_approval(approval)
-    candidate_payload = _canonical_json(
-        {
-            "approval_sha256": approval_document.sha256,
-            "intent_sha256": intent_document.sha256,
-            "opening_codec": intent.opening_codec,
-            "opening_payload_sha256": prospective_opening.opening_payload_sha256,
-            "opening_version": prospective_opening.opening_version,
-            "schema_version": _SCHEMA_VERSION,
-            "trust_policy_sha256": policy_document.sha256,
-        }
-    )
-    candidate_document = CanonicalFreshOpeningDocument(
-        candidate_payload,
-        _sha256_payload(candidate_payload),
-    )
-    candidate = ProspectiveFreshOpeningCandidate(
+    candidate = _candidate_from_documents(
         intent_document=intent_document,
         trust_policy_document=policy_document,
-        approval_document=approval_document,
+        approval_document=encode_detached_fresh_opening_approval(approval),
         opening=prospective_opening,
-        candidate_document=candidate_document,
     )
     return FreshOpeningPreparation(
         disposition=FreshOpeningPreparationDisposition.PREPARED,
@@ -982,6 +1026,7 @@ __all__ = [
     "encode_detached_fresh_opening_approval",
     "encode_fresh_opening_intent",
     "encode_fresh_opening_trust_policy",
+    "derive_prospective_fresh_opening_candidate",
     "fresh_opening_signing_bytes",
     "prepare_fresh_opening",
 ]

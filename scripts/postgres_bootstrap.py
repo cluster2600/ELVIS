@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import re
 import sys
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NoReturn, TextIO
 
 import psycopg2
 
+from scripts import v2_opening_plan as opening_plan_cli
+from trading.application.fresh_opening import (
+    FreshOpeningPreparationDisposition,
+    derive_prospective_fresh_opening_candidate,
+    prepare_fresh_opening,
+)
 from trading.persistence.postgres_bootstrap import (
     PostgresBootstrap,
     PostgresBootstrapAdoption,
@@ -24,9 +33,10 @@ from trading.persistence.postgres_bootstrap import (
     PostgresBootstrapRoles,
     PostgresBootstrapStatus,
     PostgresBootstrapStorageError,
+    PostgresFreshOpeningAdmission,
 )
 
-_APPLICATION_NAME = "elvis-postgres-bootstrap-v1"
+_APPLICATION_NAME = "elvis-postgres-bootstrap-v2"
 _CONNECT_TIMEOUT_SECONDS = 5
 _MAX_CONFIG_BYTES = 65_536
 _SERVICE_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}")
@@ -34,13 +44,18 @@ _SERVICE_IDENTIFIER = re.compile(r"[a-z][a-z0-9_]{0,62}")
 _ROLE_KEYS = (
     "schema_owner",
     "migrator",
+    "opening",
     "legacy_runtime",
     "atomic_runtime",
     "activation",
     "readiness",
     "trainer",
 )
-_LOGIN_ROLE_KEYS = _ROLE_KEYS[1:]
+_CREDENTIAL_ROLE_KEYS = (
+    "migrator",
+    "readiness",
+    "trainer",
+)
 _TOP_LEVEL_KEYS = {
     "schema_version",
     "expected_database",
@@ -48,12 +63,18 @@ _TOP_LEVEL_KEYS = {
     "roles",
     "services",
     "adoption",
+    "opening_admission",
 }
 _ADOPTION_KEYS = {
     "migration_authority_role",
     "allowed_historical_owner_roles",
     "old_shared_runtime_role",
     "demote_old_shared_runtime",
+}
+_OPENING_ADMISSION_KEYS = {
+    "candidate_sha256",
+    "pin_authority_record_sha256",
+    "deployment_incarnation_id",
 }
 
 _EXIT_COMPLETE = 0
@@ -99,22 +120,23 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _read_config(path: Path) -> dict[str, Any]:
     try:
-        with path.open("rb") as config_file:
-            payload = config_file.read(_MAX_CONFIG_BYTES + 1)
-        if len(payload) > _MAX_CONFIG_BYTES:
-            raise _CliInputError("invalid configuration")
-        document = json.loads(
-            payload.decode("utf-8"),
-            object_pairs_hook=_strict_object,
-            parse_constant=_reject_json_constant,
-        )
-    except _CliInputError:
-        raise
-    except (OSError, UnicodeError, ValueError, RecursionError) as error:
+        document = opening_plan_cli._read_json(path)
+    except opening_plan_cli._CliInputError as error:
         raise _CliInputError("invalid configuration") from error
     if type(document) is not dict:
         raise _CliInputError("invalid configuration")
     return document
+
+
+def _canonical_sha256(document: dict[str, Any]) -> str:
+    payload = json.dumps(
+        document,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _require_exact_keys(
@@ -170,17 +192,40 @@ def _parse_adoption(value: object) -> PostgresBootstrapAdoption | None:
     )
 
 
+def _parse_opening_admission(value: object) -> PostgresFreshOpeningAdmission:
+    if type(value) is not dict:
+        raise _CliInputError("invalid configuration")
+    _require_exact_keys(value, _OPENING_ADMISSION_KEYS)
+    if any(type(value[key]) is not str for key in _OPENING_ADMISSION_KEYS):
+        raise _CliInputError("invalid configuration")
+    try:
+        return PostgresFreshOpeningAdmission(
+            candidate_sha256=value["candidate_sha256"],
+            pin_authority_record_sha256=value["pin_authority_record_sha256"],
+            deployment_incarnation_id=value["deployment_incarnation_id"],
+        )
+    except PostgresBootstrapInputError as exc:
+        raise _CliInputError("invalid configuration") from exc
+
+
 def _parse_services(value: object) -> dict[str, str | None]:
     if type(value) is not dict:
         raise _CliInputError("invalid configuration")
     allowed_keys = {"admin", *_ROLE_KEYS}
     _require_exact_keys(value, allowed_keys)
 
-    services: dict[str, str | None] = {key: None for key in _LOGIN_ROLE_KEYS}
+    services: dict[str, str | None] = {key: None for key in _ROLE_KEYS[1:]}
     services["admin"] = _require_service_identifier(value["admin"])
     if value["schema_owner"] is not None:
         raise _CliInputError("invalid configuration")
-    for key in _LOGIN_ROLE_KEYS:
+    if (
+        value["activation"] is not None
+        or value["opening"] is not None
+        or value["legacy_runtime"] is not None
+        or value["atomic_runtime"] is not None
+    ):
+        raise _CliInputError("invalid configuration")
+    for key in _CREDENTIAL_ROLE_KEYS:
         candidate = value.get(key)
         if candidate is not None:
             services[key] = _require_service_identifier(candidate)
@@ -191,7 +236,7 @@ def _parse_config(
     document: dict[str, Any],
 ) -> tuple[PostgresBootstrapContext, dict[str, str | None]]:
     _require_exact_keys(document, _TOP_LEVEL_KEYS)
-    if type(document["schema_version"]) is not int or document["schema_version"] != 1:
+    if type(document["schema_version"]) is not int or document["schema_version"] != 2:
         raise _CliInputError("invalid configuration")
     if type(document["expected_database"]) is not str:
         raise _CliInputError("invalid configuration")
@@ -203,6 +248,7 @@ def _parse_config(
         admin_role=document["admin_role"],
         roles=_parse_roles(document["roles"]),
         adoption=_parse_adoption(document["adoption"]),
+        opening_admission=_parse_opening_admission(document["opening_admission"]),
     )
     return context, _parse_services(document["services"])
 
@@ -231,9 +277,7 @@ def _build_bootstrap(
     return PostgresBootstrap(
         service_connection_factory(services["admin"]),
         migrator_connection_factory=optional_factory("migrator"),
-        legacy_runtime_connection_factory=optional_factory("legacy_runtime"),
-        atomic_runtime_connection_factory=optional_factory("atomic_runtime"),
-        activation_connection_factory=optional_factory("activation"),
+        activation_connection_factory=None,
         readiness_connection_factory=optional_factory("readiness"),
         trainer_connection_factory=optional_factory("trainer"),
     )
@@ -244,8 +288,16 @@ def _write_json(stream: TextIO, payload: dict[str, object]) -> None:
     stream.write("\n")
 
 
-def _write_receipt(receipt: PostgresBootstrapReceipt) -> None:
-    _write_json(
+def _emit_json(stream: TextIO, payload: dict[str, object]) -> bool:
+    try:
+        _write_json(stream, payload)
+    except BrokenPipeError, OSError:
+        return False
+    return True
+
+
+def _write_receipt(receipt: PostgresBootstrapReceipt) -> bool:
+    return _emit_json(
         sys.stdout,
         {
             "status": receipt.status.value,
@@ -257,19 +309,25 @@ def _write_receipt(receipt: PostgresBootstrapReceipt) -> None:
     )
 
 
-def _write_error(code: str, *, phase: str | None = None) -> None:
+def _write_error(code: str, *, phase: str | None = None) -> bool:
     payload: dict[str, object] = {"status": "ERROR", "code": code}
     if phase is not None:
         payload["phase"] = phase
-    _write_json(sys.stdout, payload)
+    return _emit_json(sys.stdout, payload)
 
 
 def _argument_parser() -> _StrictArgumentParser:
     parser = _StrictArgumentParser(
-        prog="python -m scripts.postgres_bootstrap",
+        prog="python3.14 -m scripts.postgres_bootstrap",
         allow_abbrev=False,
     )
     parser.add_argument("--config", required=True)
+    parser.add_argument("--pinned-config-sha256", required=True)
+    parser.add_argument("--opening-intent", required=True)
+    parser.add_argument("--opening-approval", required=True)
+    parser.add_argument("--opening-trust-policy", required=True)
+    parser.add_argument("--pinned-trust-policy-sha256", required=True)
+    parser.add_argument("--pinned-signer-public-key-sha256", required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
         "--confirm-exclusive-ddl-role-window",
@@ -290,7 +348,58 @@ def _run(
     if not arguments.apply or not arguments.confirm_exclusive_ddl_role_window:
         raise _CliInputError("invalid invocation")
 
-    context, services = _parse_config(_read_config(Path(arguments.config)))
+    config_document = _read_config(Path(arguments.config))
+    expected_config_sha256 = opening_plan_cli._sha256(arguments.pinned_config_sha256)
+    if not hmac.compare_digest(
+        _canonical_sha256(config_document),
+        expected_config_sha256,
+    ):
+        raise _CliInputError("bootstrap configuration pin mismatch")
+    context, services = _parse_config(config_document)
+    intent = opening_plan_cli._parse_intent(
+        opening_plan_cli._read_json(Path(arguments.opening_intent))
+    )
+    approval = opening_plan_cli._parse_approval(
+        opening_plan_cli._read_json(Path(arguments.opening_approval))
+    )
+    trust_policy = opening_plan_cli._parse_trust_policy(
+        opening_plan_cli._read_json(Path(arguments.opening_trust_policy))
+    )
+    expected_policy = opening_plan_cli._sha256(arguments.pinned_trust_policy_sha256)
+    expected_key = opening_plan_cli._sha256(arguments.pinned_signer_public_key_sha256)
+    candidate = derive_prospective_fresh_opening_candidate(
+        intent,
+        approval,
+        trust_policy,
+        opening_codec=opening_plan_cli._OPENING_CODEC,
+    )
+    admission = context.opening_admission
+    if (
+        admission is None
+        or candidate.candidate_document.sha256 != admission.candidate_sha256
+    ):
+        raise _CliInputError("opening admission is not an authenticated candidate")
+
+    def authorize_opening(evaluated_at: datetime) -> str:
+        preparation = prepare_fresh_opening(
+            intent,
+            approval,
+            opening_codec=opening_plan_cli._OPENING_CODEC,
+            signature_verifier=opening_plan_cli._SIGNATURE_VERIFIER,
+            trust_policy=trust_policy,
+            expected_trust_policy_sha256=expected_policy,
+            expected_signer_public_key_sha256=expected_key,
+            evaluated_at=evaluated_at,
+        )
+        if (
+            preparation.disposition is not FreshOpeningPreparationDisposition.PREPARED
+            or preparation.candidate is None
+            or preparation.candidate.candidate_document.sha256
+            != candidate.candidate_document.sha256
+        ):
+            raise _CliInputError("opening admission is not currently authorized")
+        return admission.document_sha256
+
     demotion_requested = bool(
         context.adoption is not None and context.adoption.demote_old_shared_runtime
     )
@@ -298,7 +407,10 @@ def _run(
         raise _CliInputError("invalid invocation")
 
     bootstrap = _build_bootstrap(services, service_connection_factory)
-    return bootstrap.reconcile(context)
+    return bootstrap.reconcile(
+        context,
+        admission_authorizer=authorize_opening,
+    )
 
 
 def main(
@@ -314,26 +426,24 @@ def main(
         )
         exit_code = _STATUS_EXIT_CODES[receipt.status]
     except PostgresBootstrapInputError, _CliInputError:
-        _write_error("INPUT")
-        return _EXIT_INPUT
+        return _EXIT_INPUT if _write_error("INPUT") else _EXIT_INTERNAL
     except PostgresBootstrapStorageError:
-        _write_error("STORAGE")
-        return _EXIT_STORAGE
+        return _EXIT_STORAGE if _write_error("STORAGE") else _EXIT_INTERNAL
     except PostgresBootstrapDriftError:
-        _write_error("DRIFT")
-        return _EXIT_DRIFT
+        return _EXIT_DRIFT if _write_error("DRIFT") else _EXIT_INTERNAL
     except PostgresBootstrapMigrationError:
-        _write_error("MIGRATION")
-        return _EXIT_MIGRATION
+        return _EXIT_MIGRATION if _write_error("MIGRATION") else _EXIT_INTERNAL
     except PostgresBootstrapCommitUnknownError as error:
-        _write_error("COMMIT_UNKNOWN", phase=error.phase.value)
-        return _EXIT_COMMIT_UNKNOWN
+        return (
+            _EXIT_COMMIT_UNKNOWN
+            if _write_error("COMMIT_UNKNOWN", phase=error.phase.value)
+            else _EXIT_INTERNAL
+        )
     except Exception:
         _write_error("INTERNAL")
         return _EXIT_INTERNAL
 
-    _write_receipt(receipt)
-    return exit_code
+    return exit_code if _write_receipt(receipt) else _EXIT_INTERNAL
 
 
 if __name__ == "__main__":

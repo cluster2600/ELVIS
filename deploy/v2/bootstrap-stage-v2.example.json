@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "expected_database": "elvis_paper_v2_rehearsal",
+  "admin_role": "elvis_bootstrap_admin",
+  "roles": {
+    "schema_owner": "elvis_v2_schema_owner",
+    "migrator": "elvis_v2_migrator",
+    "opening": "elvis_v2_opening",
+    "legacy_runtime": "elvis_v2_legacy_runtime",
+    "atomic_runtime": "elvis_v2_atomic_runtime",
+    "activation": "elvis_v2_activation",
+    "readiness": "elvis_v2_readiness",
+    "trainer": "elvis_v2_trainer"
+  },
+  "services": {
+    "admin": "elvis_v2_admin",
+    "schema_owner": null,
+    "migrator": null,
+    "opening": null,
+    "legacy_runtime": null,
+    "atomic_runtime": null,
+    "activation": null,
+    "readiness": null,
+    "trainer": null
+  },
+  "opening_admission": {
+    "candidate_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "pin_authority_record_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "deployment_incarnation_id": "EXAMPLE_INVALID_REPLACE_WITH_APPROVED_VALUE"
+  },
+  "adoption": null
+}

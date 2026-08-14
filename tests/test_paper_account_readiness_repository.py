@@ -59,7 +59,14 @@ DURABLE_RELATION_ROWS = tuple(
         False,
         False,
         relation in readiness_module._LEGACY_RELATIONS
-        or relation == readiness_module._RUNTIME_GENERATION_RELATION,
+        or relation
+        in {
+            "np.paper_account_streams",
+            "np.paper_fresh_opening_admissions",
+            "np.paper_fresh_opening_nonces",
+            "np.paper_fresh_opening_provisionings",
+            readiness_module._RUNTIME_GENERATION_RELATION,
+        },
         False,
         False,
     )
@@ -118,7 +125,7 @@ RUNTIME_CONTROL_FUNCTION = (
     0,
     True,
     "plpgsql",
-    ["search_path=pg_catalog"],
+    ["search_path=pg_catalog, pg_temp"],
     readiness_module._EXPECTED_RUNTIME_CONTROL_FUNCTION_SOURCE,
     True,
 )
@@ -130,7 +137,7 @@ RUNTIME_GENERATION_FUNCTION = (
     0,
     True,
     "plpgsql",
-    ["search_path=pg_catalog"],
+    ["search_path=pg_catalog, pg_temp"],
     readiness_module._EXPECTED_RUNTIME_GENERATION_FUNCTION_SOURCE,
     True,
 )
@@ -147,7 +154,7 @@ RUNTIME_ACTIVATION_FUNCTIONS = (
         "f",
         "u",
         "plpgsql",
-        ["search_path=pg_catalog"],
+        ["search_path=pg_catalog, pg_temp"],
         readiness_module._EXPECTED_RUNTIME_ACTIVATION_FENCE_FUNCTION_SOURCE,
         700001,
         True,
@@ -169,7 +176,7 @@ RUNTIME_ACTIVATION_FUNCTIONS = (
         "f",
         "u",
         "plpgsql",
-        ["search_path=pg_catalog"],
+        ["search_path=pg_catalog, pg_temp"],
         readiness_module._EXPECTED_RUNTIME_ACTIVATION_MUTATION_FUNCTION_SOURCE,
         700001,
         True,
@@ -193,6 +200,58 @@ RUNTIME_GENERATION_TRIGGER = (
     True,
     True,
 )
+CURRENT_OPENING_PROVENANCE_TRIGGER = (
+    "paper_runtime_generations",
+    readiness_module._CURRENT_OPENING_PROVENANCE_TRIGGER,
+    "A",
+    7,
+    "np",
+    readiness_module._CURRENT_OPENING_PROVENANCE_FUNCTION,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
+    True,
+)
+CURRENT_OPENING_PROVENANCE_FUNCTIONS = (
+    (
+        "paper_fresh_opening_target_is_current",
+        "",
+        "boolean",
+        True,
+        "v",
+        False,
+        False,
+        False,
+        "f",
+        "u",
+        "plpgsql",
+        ["search_path=pg_catalog, pg_temp"],
+        "68c05eeedb12d92795adc39652e80b52055afcd76e3fd9d4fbc57d373bf2abf1",
+        True,
+        True,
+    ),
+    (
+        "require_current_paper_fresh_opening_provenance",
+        "",
+        "trigger",
+        True,
+        "v",
+        False,
+        False,
+        False,
+        "f",
+        "u",
+        "plpgsql",
+        ["search_path=pg_catalog, pg_temp"],
+        "34b067d3fdaedb59b4afef3a60413f9a7b57c27bfcf9a628d865c7f37df7a747",
+        True,
+        True,
+    ),
+)
 RUNTIME_CONTROL_TRIGGERS = tuple(
     sorted(
         tuple(
@@ -215,7 +274,90 @@ RUNTIME_CONTROL_TRIGGERS = tuple(
             )
             for relation in readiness_module._LEGACY_RELATIONS
         )
-        + (RUNTIME_GENERATION_TRIGGER,)
+        + (
+            (
+                "paper_account_streams",
+                "paper_account_streams_opening_identity_immutable",
+                "A",
+                27,
+                "np",
+                readiness_module._ACCOUNT_OPENING_IDENTITY_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            (
+                "paper_account_streams",
+                "paper_account_streams_opening_identity_truncate",
+                "A",
+                34,
+                "np",
+                readiness_module._ACCOUNT_OPENING_IDENTITY_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            (
+                "paper_fresh_opening_admissions",
+                "paper_fresh_opening_admissions_append_only",
+                "A",
+                58,
+                "np",
+                readiness_module._FRESH_OPENING_MUTATION_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            (
+                "paper_fresh_opening_nonces",
+                "paper_fresh_opening_nonces_append_only",
+                "A",
+                58,
+                "np",
+                readiness_module._FRESH_OPENING_MUTATION_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            (
+                "paper_fresh_opening_provisionings",
+                "paper_fresh_opening_provisionings_append_only",
+                "A",
+                58,
+                "np",
+                readiness_module._FRESH_OPENING_MUTATION_FUNCTION,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ),
+            RUNTIME_GENERATION_TRIGGER,
+            CURRENT_OPENING_PROVENANCE_TRIGGER,
+        )
     )
 )
 RUNTIME_GENERATION_COLUMNS = (
@@ -276,6 +418,15 @@ RUNTIME_GENERATION_CONSTRAINTS = (
         True,
         "(((execution_scope)::text = btrim((execution_scope)::text)) AND "
         "((execution_scope)::text <> ''::text))",
+    ),
+    (
+        "paper_runtime_generations_fresh_opening_provisioning_fk",
+        "f",
+        [3, 4, 5, 6, 7],
+        False,
+        False,
+        True,
+        None,
     ),
     (
         "paper_runtime_generations_generation_positive",
@@ -342,6 +493,14 @@ RUNTIME_GENERATION_CONSTRAINTS = (
     ),
 )
 RUNTIME_GENERATION_FKS = (
+    (
+        "paper_runtime_generations_fresh_opening_provisioning_fk",
+        "np.paper_fresh_opening_provisionings",
+        [6, 7, 8, 10, 20],
+        "a",
+        "r",
+        "f",
+    ),
     (
         "paper_runtime_generations_opening_fk",
         "np.paper_account_streams",
@@ -550,6 +709,54 @@ def replayed_position(
     )
 
 
+def fresh_opening_provenance_row(
+    *,
+    execution_scope=SCOPE,
+    account_key=ACCOUNT_KEY,
+    owner_generation=GENERATION,
+    opening_sha256=OPENING_SHA256,
+    target_current=True,
+):
+    terminal_migration = migration_rows()[-1]
+    candidate_sha256 = "b" * 64
+    pin_sha256 = "c" * 64
+    deployment_incarnation = "readiness-test-deployment"
+    return (
+        True,
+        execution_scope,
+        account_key,
+        owner_generation,
+        1,
+        opening_sha256,
+        candidate_sha256,
+        pin_sha256,
+        deployment_incarnation,
+        "d" * 64,
+        terminal_migration[0],
+        terminal_migration[1],
+        terminal_migration[2],
+        "e" * 64,
+        "LEGACY",
+        0,
+        0,
+        0,
+        False,
+        False,
+        True,
+        "f" * 64,
+        True,
+        candidate_sha256,
+        pin_sha256,
+        deployment_incarnation,
+        execution_scope,
+        account_key,
+        owner_generation,
+        1,
+        opening_sha256,
+        target_current,
+    )
+
+
 def snapshot_responder(
     *,
     relation="np.schema_migrations",
@@ -573,16 +780,27 @@ def snapshot_responder(
     runtime_generation_constraints=RUNTIME_GENERATION_CONSTRAINTS,
     runtime_generation_fks=RUNTIME_GENERATION_FKS,
     runtime_generation_function=(RUNTIME_GENERATION_FUNCTION,),
+    current_opening_provenance_functions=CURRENT_OPENING_PROVENANCE_FUNCTIONS,
     runtime_activation_functions=RUNTIME_ACTIVATION_FUNCTIONS,
-    runtime_generation_trigger=(RUNTIME_GENERATION_TRIGGER,),
+    runtime_generation_trigger=(
+        RUNTIME_GENERATION_TRIGGER,
+        CURRENT_OPENING_PROVENANCE_TRIGGER,
+    ),
     runtime_manifest_column=RUNTIME_MANIFEST_COLUMN,
     runtime_manifest_constraints=RUNTIME_MANIFEST_CONSTRAINTS,
     runtime_manifest_fks=RUNTIME_MANIFEST_FKS,
     runtime_generation_rows=(),
     runtime_manifest_generation_rows=(),
+    fresh_opening_provenance_rows=None,
 ):
     applied_rows = migration_rows() if applied is None else tuple(applied)
     watermarks = {} if legacy_rows is None else dict(legacy_rows)
+    default_fresh_opening_provenance_rows = (fresh_opening_provenance_row(),)
+    provenance_rows = (
+        default_fresh_opening_provenance_rows
+        if fresh_opening_provenance_rows is None
+        else fresh_opening_provenance_rows
+    )
 
     def identity_rows(values):
         return [
@@ -625,6 +843,8 @@ def snapshot_responder(
         if sql.startswith("SELECT version, name, checksum"):
             return applied_rows
         if "FROM pg_proc routine_row" in sql:
+            if "paper_fresh_opening_target_is_current" in sql:
+                return current_opening_provenance_functions
             if "acquire_paper_runtime_activation_fence" in sql:
                 return runtime_activation_functions
             if "reject_paper_runtime_generation_mutation" in sql:
@@ -638,6 +858,8 @@ def snapshot_responder(
             return runtime_control_triggers
         if "FROM np.paper_runtime_control" in sql:
             return runtime_control_rows
+        if "FROM np.paper_fresh_opening_provisionings provisioning_row" in sql:
+            return provenance_rows
         if "FROM np.paper_runtime_generations" in sql:
             return runtime_generation_rows
         if "FROM np.orders" in sql:
@@ -773,6 +995,43 @@ def test_exact_empty_account_is_prepared_from_one_read_only_snapshot(
     assert_read_only_snapshot(connection)
     assert account_calls == [(account_calls[0][0], SCOPE, ACCOUNT_KEY, False)]
     assert position_calls == []
+
+
+@pytest.mark.parametrize(
+    ("provenance_rows", "expected_kind"),
+    (
+        ((), PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT),
+        (
+            (fresh_opening_provenance_row(target_current=False),),
+            PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH,
+        ),
+        (
+            (
+                (
+                    *fresh_opening_provenance_row()[:6],
+                    "0" * 64,
+                    *fresh_opening_provenance_row()[7:],
+                ),
+            ),
+            PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH,
+        ),
+    ),
+    ids=("missing", "physical-target-drift", "candidate-digest-sentinel"),
+)
+def test_missing_or_noncurrent_fresh_opening_provenance_is_explicitly_blocked(
+    monkeypatch,
+    provenance_rows,
+    expected_kind,
+) -> None:
+    _database, _calls, result = assess_snapshot(
+        monkeypatch,
+        responder=snapshot_responder(
+            fresh_opening_provenance_rows=provenance_rows,
+        ),
+    )
+
+    assert finding_kinds(result) == (expected_kind,)
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
 
 
 @pytest.mark.parametrize(
@@ -1122,6 +1381,21 @@ def test_future_generation_gap_extra_or_provenance_drift_fails_closed(
                     "BEGIN RETURN NULL; END",
                     True,
                 ),
+            )
+        },
+        {
+            "current_opening_provenance_functions": (
+                CURRENT_OPENING_PROVENANCE_FUNCTIONS[0],
+            )
+        },
+        {
+            "current_opening_provenance_functions": (
+                (
+                    *CURRENT_OPENING_PROVENANCE_FUNCTIONS[0][:12],
+                    "0" * 64,
+                    *CURRENT_OPENING_PROVENANCE_FUNCTIONS[0][13:],
+                ),
+                CURRENT_OPENING_PROVENANCE_FUNCTIONS[1],
             )
         },
         {
@@ -1809,6 +2083,12 @@ def test_storage_boundary_accepts_exact_identifier_limits(monkeypatch) -> None:
     responder = snapshot_responder(
         account_keys=((maximum_account_key, maximum_scope),),
         position_keys=((maximum_position_key, maximum_scope),),
+        fresh_opening_provenance_rows=(
+            fresh_opening_provenance_row(
+                execution_scope=maximum_scope,
+                account_key=maximum_account_key,
+            ),
+        ),
         raw_order_references=(
             order_reference(
                 maximum_position_key,

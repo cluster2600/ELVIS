@@ -1,11 +1,14 @@
 """PostgreSQL 15 proofs for the dormant paper-account readiness snapshot."""
 
+import hashlib
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import psycopg2
 import pytest
+from psycopg2 import sql
 
 from trading.application.paper_account_readiness import (
     PaperAccountReadinessContext,
@@ -65,6 +68,34 @@ def _connect(dsn):
     return connection
 
 
+def _readiness_opening_role(database_name):
+    return f"{database_name}_opening"
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_readiness_opening_role(postgres_database_dsn):
+    yield
+    connection = _connect(postgres_database_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = _readiness_opening_role(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (role_name,),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name))
+                )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def _apply(dsn, count=None):
     migrations = load_migrations()
     selected = migrations if count is None else migrations[:count]
@@ -89,6 +120,7 @@ def _provision(
     account_key=ACCOUNT_KEY,
     scope=SCOPE,
     generation=GENERATION,
+    with_provenance=True,
 ):
     account = _opening(account_key)
     encoded = encode_paper_account_opening(scope, generation, account)
@@ -97,7 +129,225 @@ def _provision(
         owner_generation=generation,
         account=account,
     )
+    if with_provenance:
+        _seed_fresh_opening_provenance(dsn, encoded)
     return encoded
+
+
+def _canonical_json(value):
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
+def _sha256(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _seed_fresh_opening_provenance(dsn, encoded):
+    candidate_payload = _canonical_json({"schema_version": 1})
+    candidate_sha256 = _sha256(candidate_payload)
+    pin_sha256 = _sha256("readiness-test-pin")
+    deployment_incarnation = "readiness-test-deployment"
+    admission_payload = _canonical_json(
+        {
+            "candidate_sha256": candidate_sha256,
+            "deployment_incarnation_id": deployment_incarnation,
+            "pin_authority_record_sha256": pin_sha256,
+            "schema_version": 1,
+        }
+    )
+    empty_payload = _canonical_json({})
+    receipt_payload = _canonical_json({"schema_version": 1})
+    plain_sha256 = _sha256(empty_payload)
+    intent_sha256 = hashlib.sha256(
+        b"ELVIS\x00fresh-opening-intent\x00v1\x00" + empty_payload.encode("utf-8")
+    ).hexdigest()
+    migration = load_migrations()[-1]
+    connection = _connect(dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            database_name = cursor.fetchone()[0]
+            opening_anchor_role = _readiness_opening_role(database_name)
+            cursor.execute(
+                """
+                INSERT INTO np.paper_fresh_opening_admissions (
+                    candidate_payload_sha256,
+                    pin_authority_record_sha256,
+                    deployment_incarnation_id,
+                    admission_payload,
+                    admission_payload_sha256
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (control_key) DO NOTHING
+                """,
+                (
+                    candidate_sha256,
+                    pin_sha256,
+                    deployment_incarnation,
+                    admission_payload,
+                    _sha256(admission_payload),
+                ),
+            )
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (opening_anchor_role,),
+            )
+            if not cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOINHERIT NOSUPERUSER "
+                        "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS "
+                        "CONNECTION LIMIT -1 PASSWORD NULL"
+                    ).format(sql.Identifier(opening_anchor_role))
+                )
+            cursor.execute(
+                sql.SQL("COMMENT ON ROLE {} IS %s").format(
+                    sql.Identifier(opening_anchor_role)
+                ),
+                (
+                    "elvis-postgres-bootstrap:v2:"
+                    f"{database_name}:opening:{_sha256(admission_payload)}",
+                ),
+            )
+            cursor.execute("SELECT np.paper_terminal_catalog_fingerprint()")
+            terminal_catalog_sha256 = cursor.fetchone()[0]
+            cursor.execute(
+                "COMMENT ON SCHEMA np IS %s",
+                (
+                    "elvis-postgres-bootstrap-schema:v2:"
+                    f"{database_name}:{terminal_catalog_sha256}",
+                ),
+            )
+            cursor.execute(
+                """
+                SELECT np.paper_fresh_opening_database_incarnation(
+                    current_database(),
+                    (SELECT system_identifier::numeric FROM pg_control_system()),
+                    %s, %s, %s, %s, current_user, %s, %s
+                )
+                """,
+                (
+                    migration.version,
+                    migration.name,
+                    migration.checksum,
+                    terminal_catalog_sha256,
+                    opening_anchor_role,
+                    deployment_incarnation,
+                ),
+            )
+            database_incarnation_sha256 = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                INSERT INTO np.paper_fresh_opening_nonces (
+                    trust_domain,
+                    signer_key_id,
+                    nonce,
+                    candidate_payload_sha256
+                ) VALUES ('readiness-test', 'readiness-key', repeat('1', 64), %s)
+                ON CONFLICT (trust_domain, signer_key_id, nonce) DO NOTHING
+                """,
+                (candidate_sha256,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO np.paper_fresh_opening_provisionings (
+                    trust_domain,
+                    signer_key_id,
+                    nonce,
+                    logical_target,
+                    execution_scope,
+                    account_key,
+                    owner_generation,
+                    collateral_asset,
+                    opening_version,
+                    intent_payload,
+                    intent_payload_sha256,
+                    approval_payload,
+                    approval_payload_sha256,
+                    trust_policy_payload,
+                    trust_policy_payload_sha256,
+                    candidate_payload,
+                    candidate_payload_sha256,
+                    opening_payload,
+                    opening_payload_sha256,
+                    opening_receipt_payload,
+                    opening_receipt_payload_sha256,
+                    provisioning_receipt_payload,
+                    provisioning_receipt_payload_sha256,
+                    database_name,
+                    system_identifier,
+                    control_plane_role,
+                    opening_anchor_role,
+                    migration_version,
+                    migration_name,
+                    migration_checksum,
+                    terminal_catalog_sha256,
+                    deployment_incarnation_id,
+                    database_incarnation_id,
+                    pin_authority_record_sha256,
+                    runtime_mode,
+                    runtime_generation,
+                    authority_transition_sequence,
+                    writer_fence,
+                    runtime_activation_authorized,
+                    trading_authorized,
+                    stale_on_return,
+                    authority_evaluated_at
+                ) VALUES (
+                    'readiness-test',
+                    'readiness-key',
+                    repeat('1', 64),
+                    'readiness-logical-target',
+                    %s, %s, %s, %s, 1,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    current_database(),
+                    (SELECT system_identifier::numeric FROM pg_control_system()),
+                    current_user,
+                    %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    'LEGACY', 0, 0, 0, FALSE, FALSE, TRUE,
+                    transaction_timestamp()
+                )
+                ON CONFLICT (control_key) DO NOTHING
+                """,
+                (
+                    encoded.execution_scope,
+                    encoded.account_key,
+                    encoded.owner_generation,
+                    encoded.collateral_asset,
+                    empty_payload,
+                    intent_sha256,
+                    empty_payload,
+                    plain_sha256,
+                    empty_payload,
+                    plain_sha256,
+                    candidate_payload,
+                    candidate_sha256,
+                    encoded.opening_payload,
+                    encoded.opening_payload_sha256,
+                    empty_payload,
+                    plain_sha256,
+                    receipt_payload,
+                    _sha256(receipt_payload),
+                    opening_anchor_role,
+                    migration.version,
+                    migration.name,
+                    migration.checksum,
+                    terminal_catalog_sha256,
+                    deployment_incarnation,
+                    database_incarnation_sha256,
+                    pin_sha256,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _context(encoded, **changes):
@@ -233,6 +483,11 @@ class _TracingConnection:
         return self._connection.close()
 
 
+class _RetainedTracingConnection(_TracingConnection):
+    def close(self):
+        return None
+
+
 class _TracingCursor:
     def __init__(self, connection, cursor):
         self._connection = connection
@@ -277,6 +532,144 @@ def test_exact_empty_account_is_prepared_with_all_legacy_watermarks(
     )
     assert all(
         (item.row_count, item.max_id) == (0, None) for item in result.legacy_watermarks
+    )
+
+
+def test_readiness_ignores_pg_temp_catalog_relation_shadow(
+    migrated_postgres_dsn,
+):
+    encoded = _provision(migrated_postgres_dsn)
+    raw_connection = _connect(migrated_postgres_dsn)
+    try:
+        with raw_connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TEMP SEQUENCE fresh_opening_temp_shadow_probe START WITH 1"
+            )
+            cursor.execute("""
+                CREATE FUNCTION pg_temp.bump_fresh_opening_shadow_probe(
+                    requested_name name
+                )
+                RETURNS name
+                LANGUAGE plpgsql
+                VOLATILE
+                AS $function$
+                BEGIN
+                    PERFORM pg_catalog.nextval(
+                        'pg_temp.fresh_opening_temp_shadow_probe'
+                    );
+                    RETURN requested_name;
+                END
+                $function$
+                """)
+            cursor.execute("""
+                CREATE TEMP VIEW pg_roles AS
+                SELECT
+                    role_row.oid,
+                    pg_temp.bump_fresh_opening_shadow_probe(role_row.rolname)
+                        AS rolname,
+                    role_row.rolsuper,
+                    role_row.rolinherit,
+                    role_row.rolcreaterole,
+                    role_row.rolcreatedb,
+                    role_row.rolcanlogin,
+                    role_row.rolreplication,
+                    role_row.rolconnlimit,
+                    role_row.rolbypassrls,
+                    role_row.rolconfig
+                FROM pg_catalog.pg_roles role_row
+                """)
+        raw_connection.commit()
+
+        retained = _RetainedTracingConnection(raw_connection)
+        result = _assess(
+            migrated_postgres_dsn,
+            _context(encoded),
+            factory=lambda: retained,
+        )
+
+        with raw_connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT last_value, is_called "
+                "FROM pg_temp.fresh_opening_temp_shadow_probe"
+            )
+            assert cursor.fetchone() == (1, False)
+        raw_connection.rollback()
+    finally:
+        raw_connection.close()
+
+    assert result.disposition is PaperAccountReadinessDisposition.PREPARED_FOR_FENCE
+    assert result.findings == ()
+    assert any(
+        "np.paper_fresh_opening_target_is_current()" in statement
+        for statement, _ in retained.commands
+    )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ("schema_marker", "opening_anchor", "candidate_payload", "catalog"),
+)
+def test_current_fresh_opening_physical_or_candidate_drift_is_blocking(
+    migrated_postgres_dsn,
+    drift,
+):
+    encoded = _provision(migrated_postgres_dsn)
+    connection = _connect(migrated_postgres_dsn)
+    try:
+        with connection.cursor() as cursor:
+            if drift == "schema_marker":
+                cursor.execute("COMMENT ON SCHEMA np IS 'drifted'")
+            elif drift == "opening_anchor":
+                cursor.execute("SELECT current_database()")
+                role_name = _readiness_opening_role(cursor.fetchone()[0])
+                cursor.execute(
+                    sql.SQL("COMMENT ON ROLE {} IS 'drifted'").format(
+                        sql.Identifier(role_name)
+                    )
+                )
+            elif drift == "candidate_payload":
+                cursor.execute(
+                    "ALTER TABLE np.paper_fresh_opening_provisionings DISABLE TRIGGER "
+                    "paper_fresh_opening_provisionings_append_only"
+                )
+                cursor.execute(
+                    "UPDATE np.paper_fresh_opening_provisionings "
+                    "SET candidate_payload = '{\"schema_version\":2}'"
+                )
+                cursor.execute(
+                    "ALTER TABLE np.paper_fresh_opening_provisionings ENABLE ALWAYS "
+                    "TRIGGER paper_fresh_opening_provisionings_append_only"
+                )
+            else:
+                cursor.execute("CREATE TABLE np.unexpected_readiness_object (id int)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    result = _assess(migrated_postgres_dsn, _context(encoded))
+
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert _finding_kinds(result) == {
+        PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH
+    }
+
+
+def test_head_six_account_migrates_but_is_blocked_without_opening_provenance(
+    postgres_database_dsn,
+):
+    _apply(postgres_database_dsn, 6)
+    encoded = _provision(postgres_database_dsn, with_provenance=False)
+    _apply(postgres_database_dsn)
+
+    result = _assess(postgres_database_dsn, _context(encoded))
+
+    assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert _finding_kinds(result) == {
+        PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT
+    }
+    assert result.account_version == 0
+    assert tuple(item.version for item in result.applied_migrations) == tuple(
+        range(1, 8)
     )
 
 
@@ -609,6 +1002,7 @@ def test_account_provenance_and_foreign_scope_are_global_blockers(
 
     assert _finding_kinds(result) == {
         PaperAccountReadinessFindingKind.ACCOUNT_PROVENANCE_MISMATCH,
+        PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH,
         PaperAccountReadinessFindingKind.UNEXPECTED_ACCOUNT,
     }
     unexpected = tuple(
@@ -627,7 +1021,8 @@ def test_missing_expected_account_is_a_blocker_with_no_guessed_version(
     assert result.disposition is PaperAccountReadinessDisposition.BLOCKED
     assert result.account_version is None
     assert _finding_kinds(result) == {
-        PaperAccountReadinessFindingKind.ACCOUNT_NOT_PROVISIONED
+        PaperAccountReadinessFindingKind.ACCOUNT_NOT_PROVISIONED,
+        PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT,
     }
 
 
@@ -660,9 +1055,7 @@ def test_orphan_order_outside_any_stream_is_not_hidden_by_replay_inventory(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            cursor.execute(
-                "ALTER TABLE np.orders " "DROP CONSTRAINT orders_position_stream_fk"
-            )
+            cursor.execute("SET LOCAL session_replication_role = replica")
             _insert_encoded_order(cursor, instruction)
         connection.commit()
     finally:
@@ -820,7 +1213,7 @@ def test_strict_replay_corruption_becomes_a_stable_finding(
             if corruption == "account":
                 cursor.execute(
                     "UPDATE np.paper_account_streams "
-                    "SET opening_payload_sha256 = repeat('f', 64) "
+                    "SET account_version = account_version + 1 "
                     "WHERE account_key = %s",
                     (ACCOUNT_KEY,),
                 )

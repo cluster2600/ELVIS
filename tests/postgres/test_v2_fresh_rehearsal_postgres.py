@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -9,10 +10,22 @@ import secrets
 import stat
 import subprocess
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+from scripts import postgres_bootstrap as bootstrap_cli
+from tests.test_fresh_opening import _approval as build_opening_approval
+from tests.test_fresh_opening import _intent as build_opening_intent
+from tests.test_fresh_opening import _policy as build_opening_policy
+from trading.application.fresh_opening import (
+    derive_prospective_fresh_opening_candidate,
+    encode_detached_fresh_opening_approval,
+    encode_fresh_opening_intent,
+    encode_fresh_opening_trust_policy,
+)
 
 _REPOSITORY = Path(__file__).resolve().parents[2]
 _DEPLOYMENT = _REPOSITORY / "deploy" / "v2"
@@ -24,13 +37,34 @@ _POSTGRES_IMAGE = (
 _DATABASE = "elvis_paper_v2_rehearsal"
 _ADMIN_ROLE = "elvis_bootstrap_admin"
 _POSTGRES_ADDRESS = "10.254.90.2"
-_LOGIN_ROLE_KEYS = (
+_ROLE_KEYS = (
+    "schema_owner",
     "migrator",
+    "opening",
     "legacy_runtime",
     "atomic_runtime",
     "activation",
     "readiness",
     "trainer",
+)
+_BOOTSTRAP_CREDENTIAL_ROLE_KEYS = (
+    "migrator",
+    "readiness",
+    "trainer",
+)
+_TERMINAL_LOGIN_ROLE_KEYS = (
+    "readiness",
+    "trainer",
+)
+_TERMINAL_NOLOGIN_ROLE_KEYS = tuple(
+    role_key for role_key in _ROLE_KEYS if role_key not in _TERMINAL_LOGIN_ROLE_KEYS
+)
+_SERVICELESS_ROLE_KEYS = (
+    "schema_owner",
+    "opening",
+    "legacy_runtime",
+    "atomic_runtime",
+    "activation",
 )
 _REQUIRED_ENV = "ELVIS_TEST_V2_FRESH_REHEARSAL_REQUIRED"
 
@@ -100,6 +134,58 @@ def _write_private(path: Path, contents: str) -> None:
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def _canonical_sha256(document: dict[str, object]) -> str:
+    payload = json.dumps(
+        document,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _opening_authority_documents() -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, str],
+    str,
+    str,
+]:
+    policy = build_opening_policy()
+    now = datetime.now(timezone.utc)
+    intent = build_opening_intent(
+        policy,
+        approval_id=f"opening-approval-rehearsal-{uuid4().hex}",
+        approval_issued_at=now - timedelta(minutes=5),
+        approval_expires_at=now + timedelta(minutes=55),
+        nonce=uuid4().hex * 2,
+    )
+    approval = build_opening_approval(intent)
+    policy_document = encode_fresh_opening_trust_policy(policy)
+    intent_document = encode_fresh_opening_intent(intent)
+    approval_document = encode_detached_fresh_opening_approval(approval)
+    candidate = derive_prospective_fresh_opening_candidate(
+        intent,
+        approval,
+        policy,
+        opening_codec=bootstrap_cli.opening_plan_cli._OPENING_CODEC,
+    )
+    return (
+        json.loads(intent_document.payload),
+        json.loads(approval_document.payload),
+        json.loads(policy_document.payload),
+        {
+            "candidate_sha256": candidate.candidate_document.sha256,
+            "pin_authority_record_sha256": "b" * 64,
+            "deployment_incarnation_id": f"deployment-rehearsal-{uuid4().hex}",
+        },
+        policy_document.sha256,
+        policy.anchors[0].public_key_sha256,
+    )
+
+
 @dataclass(frozen=True)
 class Rehearsal:
     compose: list[str]
@@ -108,6 +194,8 @@ class Rehearsal:
     admin_password: str = field(repr=False)
     roles: dict[str, str]
     role_passwords: dict[str, str] = field(repr=False)
+    trust_policy_sha256: str
+    signer_public_key_sha256: str
 
     def run_compose(
         self,
@@ -135,6 +223,9 @@ class Rehearsal:
         *,
         expected_exit_code: int,
     ) -> dict[str, object]:
+        manifest_document = json.loads(
+            (self.operator_directory / manifest_name).read_text(encoding="utf-8")
+        )
         result = self.run_compose(
             "run",
             "--rm",
@@ -142,6 +233,18 @@ class Rehearsal:
             "bootstrap",
             "--config",
             f"/run/operator/{manifest_name}",
+            "--pinned-config-sha256",
+            _canonical_sha256(manifest_document),
+            "--opening-intent",
+            "/run/operator/opening-intent.json",
+            "--opening-approval",
+            "/run/operator/opening-approval.json",
+            "--opening-trust-policy",
+            "/run/operator/opening-policy.json",
+            "--pinned-trust-policy-sha256",
+            self.trust_policy_sha256,
+            "--pinned-signer-public-key-sha256",
+            self.signer_public_key_sha256,
             "--apply",
             "--confirm-exclusive-ddl-role-window",
             expected_exit_codes=(expected_exit_code,),
@@ -158,8 +261,11 @@ class Rehearsal:
             "import json, os, stat\n"
             "import psycopg2\n"
             "paths = ('/run/operator/pgpass', '/run/operator/pg_service.conf', "
-            "'/run/operator/bootstrap-stage-v1.json', "
-            "'/run/operator/bootstrap-complete-v1.json')\n"
+            "'/run/operator/bootstrap-stage-v2.json', "
+            "'/run/operator/bootstrap-complete-v2.json', "
+            "'/run/operator/opening-intent.json', "
+            "'/run/operator/opening-approval.json', "
+            "'/run/operator/opening-policy.json')\n"
             "assert all(stat.S_IMODE(os.stat(path).st_mode) == 0o600 for path in paths)\n"
             "connection = psycopg2.connect(service='elvis_v2_admin', "
             "application_name='elvis-v2-rehearsal-boundary-test', connect_timeout=5)\n"
@@ -323,35 +429,71 @@ def fresh_rehearsal(tmp_path: Path) -> Rehearsal:
     operator_directory.mkdir(mode=0o700)
     admin_password = secrets.token_hex(24)
     stage = json.loads(
-        (_DEPLOYMENT / "bootstrap-stage-v1.example.json").read_text(encoding="utf-8")
+        (_DEPLOYMENT / "bootstrap-stage-v2.example.json").read_text(encoding="utf-8")
     )
     complete = json.loads(
-        (_DEPLOYMENT / "bootstrap-complete-v1.example.json").read_text(encoding="utf-8")
+        (_DEPLOYMENT / "bootstrap-complete-v2.example.json").read_text(encoding="utf-8")
     )
-    roles = {key: complete["roles"][key] for key in _LOGIN_ROLE_KEYS}
-    role_passwords = {key: secrets.token_hex(24) for key in _LOGIN_ROLE_KEYS}
+    (
+        intent_document,
+        approval_document,
+        policy_document,
+        opening_admission,
+        trust_policy_sha256,
+        signer_public_key_sha256,
+    ) = _opening_authority_documents()
+    stage["opening_admission"] = opening_admission
+    complete["opening_admission"] = opening_admission
+    roles = {key: complete["roles"][key] for key in _ROLE_KEYS}
+    role_passwords = {
+        key: secrets.token_hex(24) for key in _BOOTSTRAP_CREDENTIAL_ROLE_KEYS
+    }
+
+    service_configuration = (_DEPLOYMENT / "pg_service.conf.example").read_text(
+        encoding="utf-8"
+    )
+    hba_configuration = (_DEPLOYMENT / "postgres" / "pg_hba.conf").read_text(
+        encoding="utf-8"
+    )
+    for key in _SERVICELESS_ROLE_KEYS:
+        assert stage["services"][key] is None
+        assert complete["services"][key] is None
+        assert roles[key] not in service_configuration
+        assert roles[key] not in hba_configuration
+    for key in _BOOTSTRAP_CREDENTIAL_ROLE_KEYS:
+        assert stage["services"][key] is None
+        assert complete["services"][key] is not None
 
     _write_private(operator_directory / "postgres_admin_password", admin_password)
     passfile_lines = [
         f"postgres:5432:{_DATABASE}:{_ADMIN_ROLE}:{admin_password}",
         *(
             f"postgres:5432:{_DATABASE}:{roles[key]}:{role_passwords[key]}"
-            for key in _LOGIN_ROLE_KEYS
+            for key in _BOOTSTRAP_CREDENTIAL_ROLE_KEYS
         ),
     ]
     _write_private(operator_directory / "pgpass", "\n".join(passfile_lines) + "\n")
     _write_private(
         operator_directory / "pg_service.conf",
-        (_DEPLOYMENT / "pg_service.conf.example").read_text(encoding="utf-8"),
+        service_configuration,
     )
     _write_private(
-        operator_directory / "bootstrap-stage-v1.json",
+        operator_directory / "bootstrap-stage-v2.json",
         json.dumps(stage, separators=(",", ":")),
     )
     _write_private(
-        operator_directory / "bootstrap-complete-v1.json",
+        operator_directory / "bootstrap-complete-v2.json",
         json.dumps(complete, separators=(",", ":")),
     )
+    for name, document in (
+        ("opening-intent.json", intent_document),
+        ("opening-approval.json", approval_document),
+        ("opening-policy.json", policy_document),
+    ):
+        _write_private(
+            operator_directory / name,
+            json.dumps(document, separators=(",", ":")),
+        )
 
     environment = dict(os.environ)
     environment["ELVIS_V2_OPERATOR_DIR"] = str(operator_directory)
@@ -365,6 +507,8 @@ def fresh_rehearsal(tmp_path: Path) -> Rehearsal:
         admin_password=admin_password,
         roles=roles,
         role_passwords=role_passwords,
+        trust_policy_sha256=trust_policy_sha256,
+        signer_public_key_sha256=signer_public_key_sha256,
     )
 
     try:
@@ -394,7 +538,7 @@ def fresh_rehearsal(tmp_path: Path) -> Rehearsal:
 def _provision_roles(rehearsal: Rehearsal) -> None:
     variables = ["\\set ON_ERROR_STOP on", "\\set QUIET on"]
     value_rows = []
-    for index, key in enumerate(_LOGIN_ROLE_KEYS):
+    for index, key in enumerate(_BOOTSTRAP_CREDENTIAL_ROLE_KEYS):
         role = rehearsal.roles[key]
         password = rehearsal.role_passwords[key]
         assert re.fullmatch(r"[a-z][a-z0-9_]{0,62}", role)
@@ -425,33 +569,37 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
     assert "role_passwords=" not in fixture_representation
     rehearsal.prove_operator_file_boundary_and_admin_connection()
     first = rehearsal.run_bootstrap(
-        "bootstrap-stage-v1.json",
+        "bootstrap-stage-v2.json",
         expected_exit_code=10,
     )
     assert first == {
         "status": "CREDENTIALS_REQUIRED",
         "migration_versions": [],
         "verified_role_probes": [],
-        "pending_role_credentials": [rehearsal.roles[key] for key in _LOGIN_ROLE_KEYS],
+        "pending_role_credentials": [
+            rehearsal.roles[key] for key in _BOOTSTRAP_CREDENTIAL_ROLE_KEYS
+        ],
         "old_shared_runtime_demoted": False,
     }
 
     _provision_roles(rehearsal)
 
     completed = rehearsal.run_bootstrap(
-        "bootstrap-complete-v1.json",
+        "bootstrap-complete-v2.json",
         expected_exit_code=0,
     )
     assert completed == {
         "status": "COMPLETE",
-        "migration_versions": [1, 2, 3, 4, 5, 6],
-        "verified_role_probes": [rehearsal.roles[key] for key in _LOGIN_ROLE_KEYS],
+        "migration_versions": [1, 2, 3, 4, 5, 6, 7],
+        "verified_role_probes": [
+            rehearsal.roles[key] for key in _TERMINAL_LOGIN_ROLE_KEYS
+        ],
         "pending_role_credentials": [],
         "old_shared_runtime_demoted": False,
     }
     assert (
         rehearsal.run_bootstrap(
-            "bootstrap-complete-v1.json",
+            "bootstrap-complete-v2.json",
             expected_exit_code=0,
         )
         == completed
@@ -462,18 +610,37 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
         "COALESCE(bool_and(rolpassword LIKE 'SCRAM-SHA-256$%'), false)::text "
         "FROM pg_authid "
         "WHERE rolname IN ("
-        + ",".join(f"'{rehearsal.roles[key]}'" for key in _LOGIN_ROLE_KEYS)
+        + ",".join(f"'{rehearsal.roles[key]}'" for key in _TERMINAL_LOGIN_ROLE_KEYS)
         + ");\n"
     )
-    assert scram_check.stdout.strip() == "6:true"
+    assert scram_check.stdout.strip() == "2:true"
+
+    role_attribute_check = rehearsal.admin_psql(
+        "SELECT rolname || ':' || rolcanlogin::text || ':' || "
+        "(rolpassword IS NULL)::text "
+        "FROM pg_authid WHERE rolname IN ("
+        + ",".join(f"'{rehearsal.roles[key]}'" for key in _ROLE_KEYS)
+        + ") ORDER BY rolname;\n"
+    )
+    assert role_attribute_check.stdout.splitlines() == sorted(
+        f"{rehearsal.roles[key]}:"
+        f"{'true' if key in _TERMINAL_LOGIN_ROLE_KEYS else 'false'}:"
+        f"{'true' if key not in _TERMINAL_LOGIN_ROLE_KEYS else 'false'}"
+        for key in _ROLE_KEYS
+    )
+    assert len(_TERMINAL_LOGIN_ROLE_KEYS) == 2
+    assert len(_TERMINAL_NOLOGIN_ROLE_KEYS) == 6
 
     server_policy = rehearsal.admin_psql(
         "SHOW password_encryption;\n"
         "SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL;\n"
+        "SELECT count(*) FROM pg_hba_file_rules WHERE "
+        f"'{rehearsal.roles['legacy_runtime']}' = ANY(user_name) OR "
+        f"'{rehearsal.roles['atomic_runtime']}' = ANY(user_name);\n"
     )
-    assert server_policy.stdout.splitlines() == ["scram-sha-256", "0"]
+    assert server_policy.stdout.splitlines() == ["scram-sha-256", "0", "0"]
 
-    for key in _LOGIN_ROLE_KEYS:
+    for key in _TERMINAL_LOGIN_ROLE_KEYS:
         role = rehearsal.roles[key]
         own_credential = rehearsal.role_psql(
             role,
@@ -481,12 +648,21 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
         )
         assert own_credential.stdout.strip() == f"{role}:{role}"
 
+    rejected_migrator = rehearsal.role_psql(
+        rehearsal.roles["migrator"],
+        rehearsal.role_passwords["migrator"],
+        expected_exit_code=2,
+    )
+    assert "password authentication failed" in rejected_migrator.stderr.lower()
+
     rehearsal.assert_rehearsal_marker()
     rehearsal.restart_postgres_and_wait()
     rehearsal.assert_rehearsal_marker()
 
-    for index, key in enumerate(_LOGIN_ROLE_KEYS):
-        crossed_key = _LOGIN_ROLE_KEYS[(index + 1) % len(_LOGIN_ROLE_KEYS)]
+    for index, key in enumerate(_TERMINAL_LOGIN_ROLE_KEYS):
+        crossed_key = _TERMINAL_LOGIN_ROLE_KEYS[
+            (index + 1) % len(_TERMINAL_LOGIN_ROLE_KEYS)
+        ]
         crossed = rehearsal.role_psql(
             rehearsal.roles[key],
             rehearsal.role_passwords[crossed_key],
@@ -514,8 +690,9 @@ def test_fresh_compose_rehearsal_stages_provisions_and_completes(
     expected_fatal_fragments = [
         *(
             f'password authentication failed for user "{rehearsal.roles[key]}"'
-            for key in _LOGIN_ROLE_KEYS
+            for key in _TERMINAL_LOGIN_ROLE_KEYS
         ),
+        ("password authentication failed for user " f'"{rehearsal.roles["migrator"]}"'),
         (
             "pg_hba.conf rejects connection for host "
             f'"10.254.90.2", user "{_ADMIN_ROLE}", database "postgres"'
@@ -559,6 +736,8 @@ def test_rehearsal_refuses_an_unmarked_nonempty_volume_without_modifying_it(
         admin_password=admin_password,
         roles={},
         role_passwords={},
+        trust_policy_sha256="0" * 64,
+        signer_public_key_sha256="0" * 64,
     )
 
     try:

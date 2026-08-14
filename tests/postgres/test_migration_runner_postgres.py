@@ -13,6 +13,7 @@ from trading.persistence import (
     apply_migrations,
     load_migrations,
 )
+from trading.persistence.migration_runner import MigrationLockUnavailableError
 
 
 def _connect(dsn):
@@ -38,7 +39,7 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
     migrations = load_migrations()
     connection = _connect(postgres_database_dsn)
     try:
-        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6, 7)
         assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -60,6 +61,9 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                 "paper_account_postings",
                 "paper_account_settlements",
                 "paper_account_streams",
+                "paper_fresh_opening_admissions",
+                "paper_fresh_opening_nonces",
+                "paper_fresh_opening_provisionings",
                 "paper_margin_reservations",
                 "paper_runtime_control",
                 "paper_runtime_generations",
@@ -90,9 +94,11 @@ def test_fresh_database_migrates_once_without_business_seed(postgres_database_ds
                     (SELECT COUNT(*) FROM np.paper_account_batch_manifests),
                     (SELECT COUNT(*) FROM np.paper_account_settlements),
                     (SELECT COUNT(*) FROM np.paper_account_postings),
+                    (SELECT COUNT(*) FROM np.paper_fresh_opening_nonces),
+                    (SELECT COUNT(*) FROM np.paper_fresh_opening_provisionings),
                     (SELECT COUNT(*) FROM np.paper_runtime_generations)
                 """)
-            assert cursor.fetchone() == (0, 0, 0, 0, 0, 0, 0)
+            assert cursor.fetchone() == (0, 0, 0, 0, 0, 0, 0, 0, 0)
     finally:
         connection.close()
 
@@ -112,7 +118,7 @@ def test_exact_unversioned_legacy_schema_is_adopted_without_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6)
+        assert apply_migrations(connection, migrations) == (1, 2, 3, 4, 5, 6, 7)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -144,7 +150,7 @@ def test_versioned_baseline_upgrades_to_journal_without_legacy_data_loss(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (2, 3, 4, 5, 6)
+        assert apply_migrations(connection, migrations) == (2, 3, 4, 5, 6, 7)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT symbol, side, entry_price, quantity, leverage
@@ -180,7 +186,7 @@ def test_versioned_journal_upgrades_to_dormant_account_ledger(
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (3, 4, 5, 6)
+        assert apply_migrations(connection, migrations) == (3, 4, 5, 6, 7)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT position_key, execution_scope
@@ -223,7 +229,7 @@ def test_versioned_account_ledger_upgrades_to_dormant_runtime_fence_without_loss
                 """)
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (4, 5, 6)
+        assert apply_migrations(connection, migrations) == (4, 5, 6, 7)
         with connection.cursor() as cursor:
             for relation in (
                 "account_balances",
@@ -317,7 +323,7 @@ def test_runtime_fence_upgrade_allows_legacy_table_owner_to_differ(
             )
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (4, 5, 6)
+        assert apply_migrations(connection, migrations) == (4, 5, 6, 7)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT
@@ -501,18 +507,25 @@ def test_concurrent_runners_apply_packaged_migrations_once(postgres_database_dsn
         connection = _connect(postgres_database_dsn)
         try:
             barrier.wait(timeout=10)
-            return apply_migrations(connection, migrations)
+            try:
+                return "APPLIED", apply_migrations(connection, migrations)
+            except MigrationLockUnavailableError:
+                return "BUSY", ()
         finally:
             connection.close()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = tuple(executor.map(lambda _: migrate(), range(2)))
 
-    assert sorted(results) == [(), (1, 2, 3, 4, 5, 6)]
+    assert sorted(results) == [
+        ("APPLIED", (1, 2, 3, 4, 5, 6, 7)),
+        ("BUSY", ()),
+    ]
     connection = _connect(postgres_database_dsn)
     try:
+        assert apply_migrations(connection, migrations) == ()
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM np.schema_migrations")
-            assert cursor.fetchone() == (6,)
+            assert cursor.fetchone() == (7,)
     finally:
         connection.close()

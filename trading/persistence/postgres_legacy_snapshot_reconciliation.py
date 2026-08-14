@@ -26,7 +26,8 @@ from trading.application.legacy_snapshot_reconciliation import (
 )
 from trading.domain.paper_accounting import PaperAccountBalance
 from trading.persistence.postgres_bootstrap import (
-    _EXPECTED_ROLE_ATTRIBUTES,
+    _HISTORICAL_EXPECTED_ROLE_ATTRIBUTES,
+    _HISTORICAL_ROLE_MARKER_PREFIX,
     _SELECT_ADMIN_IDENTITY_SQL,
     _SELECT_CREDENTIAL_IDENTITY_SQL,
     PostgresBootstrap,
@@ -348,10 +349,13 @@ class PostgresLegacySnapshotReconciliation:
             cluster = tuple(_one_row(cursor.fetchone(), 5))
         if (
             identity[:4] != (intent.expected_database, role, role, role)
-            or identity[4:12] != _EXPECTED_ROLE_ATTRIBUTES["readiness"]
+            or identity[4:12] != _HISTORICAL_EXPECTED_ROLE_ATTRIBUTES["readiness"]
             or identity[12] is not None
             or identity[13]
-            != PostgresBootstrap._role_marker(bootstrap_context, "readiness")
+            != (
+                f"{_HISTORICAL_ROLE_MARKER_PREFIX}"
+                f"{bootstrap_context.expected_database}:readiness"
+            )
             or cluster
             != (
                 intent.expected_database,
@@ -381,7 +385,7 @@ class PostgresLegacySnapshotReconciliation:
         try:
             inspection = PostgresBootstrap(
                 self._target_admin_connection_factory
-            ).inspect_terminal(bootstrap_context)
+            ).inspect_historical_terminal(bootstrap_context)
         except PostgresBootstrapDriftError:
             return (
                 False,

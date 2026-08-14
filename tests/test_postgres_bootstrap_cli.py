@@ -1,8 +1,9 @@
-"""Offline contract checks for ``python -m scripts.postgres_bootstrap``."""
+"""Offline contract checks for ``python3.14 -m scripts.postgres_bootstrap``."""
 
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import subprocess
 import sys
@@ -12,6 +13,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from scripts import postgres_bootstrap as cli
+from tests.test_v2_opening_apply import (
+    EVALUATED_AT,
+    POLICY_SHA256,
+    PUBLIC_KEY_SHA256,
+)
+from tests.test_v2_opening_apply import _documents as opening_documents
 from trading.persistence.postgres_bootstrap import (
     PostgresBootstrapCommitUnknownError,
     PostgresBootstrapDriftError,
@@ -26,13 +33,19 @@ from trading.persistence.postgres_bootstrap import (
 _ROLE_KEYS = (
     "schema_owner",
     "migrator",
+    "opening",
     "legacy_runtime",
     "atomic_runtime",
     "activation",
     "readiness",
     "trainer",
 )
-_LOGIN_ROLE_KEYS = _ROLE_KEYS[1:]
+_CREDENTIAL_ROLE_KEYS = (
+    "migrator",
+    "readiness",
+    "trainer",
+)
+_CANDIDATE_SHA256 = "0731060ef1b8b4af47cc93dd213cf66e7d59b55c93a8d801c757e05efc888d09"
 _NO_RESOLUTION = AssertionError("must not resolve a service")
 
 
@@ -46,12 +59,13 @@ def _config(*, demote: bool = False) -> dict[str, object]:
             "demote_old_shared_runtime": True,
         }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "expected_database": "elvis_cli_database",
         "admin_role": "elvis_cli_admin",
         "roles": {
             "schema_owner": "elvis_cli_owner",
             "migrator": "elvis_cli_migrator",
+            "opening": "elvis_cli_opening",
             "legacy_runtime": "elvis_cli_legacy",
             "atomic_runtime": "elvis_cli_atomic",
             "activation": "elvis_cli_activation",
@@ -62,11 +76,17 @@ def _config(*, demote: bool = False) -> dict[str, object]:
             "admin": "elvis_admin_service",
             "schema_owner": None,
             "migrator": "elvis_migrator_service",
-            "legacy_runtime": "elvis_legacy_service",
-            "atomic_runtime": "elvis_atomic_service",
-            "activation": "elvis_activation_service",
+            "opening": None,
+            "legacy_runtime": None,
+            "atomic_runtime": None,
+            "activation": None,
             "readiness": "elvis_readiness_service",
             "trainer": "elvis_trainer_service",
+        },
+        "opening_admission": {
+            "candidate_sha256": _CANDIDATE_SHA256,
+            "pin_authority_record_sha256": "b" * 64,
+            "deployment_incarnation_id": "deployment-test-001",
         },
         "adoption": adoption,
     }
@@ -79,9 +99,46 @@ def _write_config(tmp_path: Path, document: object) -> Path:
 
 
 def _apply_args(path: Path, *extra: str) -> list[str]:
+    intent, approval, policy, _target = opening_documents()
+    document_paths = []
+    for name, document in (
+        ("bootstrap-intent.json", intent),
+        ("bootstrap-approval.json", approval),
+        ("bootstrap-policy.json", policy),
+    ):
+        document_path = path.parent / name
+        document_path.write_text(json.dumps(document), encoding="utf-8")
+        document_paths.append(document_path)
+    try:
+        config_document = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        config_payload = path.read_bytes()
+    else:
+        if type(config_document) is dict:
+            config_payload = json.dumps(
+                config_document,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        else:
+            config_payload = path.read_bytes()
     return [
         "--config",
         str(path),
+        "--pinned-config-sha256",
+        hashlib.sha256(config_payload).hexdigest(),
+        "--opening-intent",
+        str(document_paths[0]),
+        "--opening-approval",
+        str(document_paths[1]),
+        "--opening-trust-policy",
+        str(document_paths[2]),
+        "--pinned-trust-policy-sha256",
+        POLICY_SHA256,
+        "--pinned-signer-public-key-sha256",
+        PUBLIC_KEY_SHA256,
         "--apply",
         "--confirm-exclusive-ddl-role-window",
         *extra,
@@ -93,7 +150,7 @@ def _receipt(
 ) -> PostgresBootstrapReceipt:
     return PostgresBootstrapReceipt(
         status=status,
-        migration_versions=(1, 2, 3, 4, 5, 6),
+        migration_versions=(1, 2, 3, 4, 5, 6, 7),
         verified_role_probes=("activation", "trainer"),
         pending_role_credentials=(
             ("migrator",)
@@ -174,6 +231,7 @@ def test_help_subprocess_is_offline_and_successful() -> None:
 
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout.startswith("usage: python3.14 -m scripts.postgres_bootstrap")
     assert "--confirm-exclusive-ddl-role-window" in result.stdout
     assert "--confirm-old-runtime-demotion" in result.stdout
 
@@ -200,6 +258,10 @@ def test_config_schema_is_closed_and_rejected_before_service_resolution(
     invalid_documents.append(document)
 
     document = _config()
+    del document["roles"]["opening"]
+    invalid_documents.append(document)
+
+    document = _config()
     document["roles"]["password"] = "secret-value"
     invalid_documents.append(document)
 
@@ -208,11 +270,23 @@ def test_config_schema_is_closed_and_rejected_before_service_resolution(
     invalid_documents.append(document)
 
     document = _config()
+    del document["services"]["opening"]
+    invalid_documents.append(document)
+
+    document = _config()
     document["services"]["password"] = "secret-value"
     invalid_documents.append(document)
 
     document = _config()
     document["services"]["schema_owner"] = "forbidden_service"
+    invalid_documents.append(document)
+
+    document = _config()
+    document["services"]["atomic_runtime"] = "forbidden_service"
+    invalid_documents.append(document)
+
+    document = _config()
+    document["services"]["legacy_runtime"] = "forbidden_service"
     invalid_documents.append(document)
 
     adoption = _config(demote=True)
@@ -280,22 +354,30 @@ def test_exact_factory_mapping_and_one_reconcile(tmp_path, capsys) -> None:
     }
     constructor_args, constructor_kwargs = bootstrap_type.call_args
     assert constructor_args == (tokens[document["services"]["admin"]],)
-    for role_key in _LOGIN_ROLE_KEYS:
+    for role_key in _CREDENTIAL_ROLE_KEYS:
         service_name = document["services"][role_key]
         factory = constructor_kwargs[f"{role_key}_connection_factory"]
         assert factory is tokens[service_name]
+    assert "atomic_runtime_connection_factory" not in constructor_kwargs
+    assert "legacy_runtime_connection_factory" not in constructor_kwargs
+    assert constructor_kwargs["activation_connection_factory"] is None
     context = bootstrap.reconcile.call_args.args[0]
     assert context.expected_database == document["expected_database"]
     assert context.admin_role == document["admin_role"]
     expected_roles = tuple(document["roles"][key] for key in _ROLE_KEYS)
     assert context.roles.all == expected_roles
-    bootstrap.reconcile.assert_called_once_with(context)
+    authorizer = bootstrap.reconcile.call_args.kwargs["admission_authorizer"]
+    assert authorizer(EVALUATED_AT) == context.opening_admission.document_sha256
+    bootstrap.reconcile.assert_called_once_with(
+        context,
+        admission_authorizer=authorizer,
+    )
     assert json.loads(capsys.readouterr().out)["status"] == "COMPLETE"
 
 
 def test_null_login_services_are_not_resolved(tmp_path, capsys) -> None:
     document = _config()
-    for role_key in _LOGIN_ROLE_KEYS:
+    for role_key in _CREDENTIAL_ROLE_KEYS:
         document["services"][role_key] = None
     path = _write_config(tmp_path, document)
     resolved = []
@@ -324,7 +406,7 @@ def test_default_factory_passes_only_libpq_service_name(monkeypatch) -> None:
     assert connection is connect.return_value
     connect.assert_called_once_with(
         service="elvis_admin_service",
-        application_name="elvis-postgres-bootstrap-v1",
+        application_name="elvis-postgres-bootstrap-v2",
         connect_timeout=5,
     )
 
@@ -361,7 +443,7 @@ def test_receipt_json_and_status_exit_codes(
         == json.dumps(
             {
                 "status": status.value,
-                "migration_versions": [1, 2, 3, 4, 5, 6],
+                "migration_versions": [1, 2, 3, 4, 5, 6, 7],
                 "verified_role_probes": ["activation", "trainer"],
                 "pending_role_credentials": (
                     ["migrator"]
@@ -374,6 +456,56 @@ def test_receipt_json_and_status_exit_codes(
         )
         + "\n"
     )
+
+
+def test_committed_receipt_with_broken_stdout_returns_internal_without_rewrite(
+    tmp_path, monkeypatch
+) -> None:
+    path = _write_config(tmp_path, _config())
+    bootstrap = MagicMock()
+    bootstrap.reconcile.return_value = _receipt(PostgresBootstrapStatus.COMPLETE)
+
+    class BrokenOutput:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def write(self, value: str) -> int:
+            del value
+            self.calls += 1
+            raise BrokenPipeError
+
+    output = BrokenOutput()
+    monkeypatch.setattr(cli.sys, "stdout", output)
+    with patch.object(cli, "PostgresBootstrap", return_value=bootstrap):
+        assert (
+            cli.main(
+                _apply_args(path),
+                service_connection_factory=lambda _name: MagicMock(),
+            )
+            == 70
+        )
+
+    assert output.calls == 1
+    bootstrap.reconcile.assert_called_once()
+
+
+def test_input_error_with_broken_stdout_returns_internal_without_rewrite(
+    monkeypatch,
+) -> None:
+    class BrokenOutput:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def write(self, value: str) -> int:
+            del value
+            self.calls += 1
+            raise OSError("stdout unavailable")
+
+    output = BrokenOutput()
+    monkeypatch.setattr(cli.sys, "stdout", output)
+
+    assert cli.main([]) == 70
+    assert output.calls == 1
 
 
 @pytest.mark.parametrize(
@@ -434,7 +566,7 @@ def test_error_exit_mapping_redacts_exception_graph(
 def test_malformed_config_does_not_echo_payload(tmp_path, capsys) -> None:
     secret = "postgresql://admin:never-print@database/elvis"
     path = tmp_path / "malformed.json"
-    payload = '{"schema_version":1,"secret":"' + secret
+    payload = '{"schema_version":2,"secret":"' + secret
     path.write_text(payload, encoding="utf-8")
 
     assert cli.main(_apply_args(path)) == 2

@@ -117,6 +117,9 @@ def test_ci_uses_single_python314_jobs() -> None:
     workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(
         encoding="utf-8"
     )
+    rehearsal_job = workflow.split("  v2-postgres-rehearsal:\n", 1)[1].split(
+        "  v2-cutover-preflight:\n", 1
+    )[0]
 
     assert "PYTHON_VERSION: '3.14'" in workflow
     assert "name: Run Tests (3.14)" in workflow
@@ -131,6 +134,7 @@ def test_ci_uses_single_python314_jobs() -> None:
     assert "name: Build V2 Operator Image (3.14, amd64/arm64)" in workflow
     assert "file: deploy/v2/operator.Dockerfile" in workflow
     assert "platforms: linux/amd64,linux/arm64" in workflow
+    assert '"cryptography==50.0.0"' in rehearsal_job
     assert "ghcr.io/cluster2600/elvis" not in workflow
     assert "push: ${{" not in workflow
 

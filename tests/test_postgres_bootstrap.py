@@ -1,6 +1,7 @@
 """Unit contract checks for the dormant PostgreSQL authority bootstrap."""
 
 from dataclasses import fields
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -26,6 +27,13 @@ from trading.persistence.postgres_bootstrap import (
     PostgresBootstrapRoles,
     PostgresBootstrapStatus,
     PostgresBootstrapStorageError,
+    PostgresFreshOpeningAdmission,
+)
+
+_OPENING_ADMISSION = PostgresFreshOpeningAdmission(
+    candidate_sha256="a" * 64,
+    pin_authority_record_sha256="b" * 64,
+    deployment_incarnation_id="deployment-test-001",
 )
 
 
@@ -33,6 +41,7 @@ def make_roles(prefix: str = "elvis_test") -> PostgresBootstrapRoles:
     return PostgresBootstrapRoles(
         schema_owner=f"{prefix}_owner",
         migrator=f"{prefix}_migrator",
+        opening=f"{prefix}_opening",
         legacy_runtime=f"{prefix}_legacy",
         atomic_runtime=f"{prefix}_atomic",
         activation=f"{prefix}_activation",
@@ -55,6 +64,7 @@ def make_context(**overrides) -> PostgresBootstrapContext:
         "expected_database": "elvis_test_database",
         "admin_role": "elvis_admin",
         "roles": make_roles(),
+        "opening_admission": _OPENING_ADMISSION,
     }
     values.update(overrides)
     return PostgresBootstrapContext(**values)
@@ -66,6 +76,15 @@ def make_connection() -> MagicMock:
     connection.status = STATUS_READY
     connection.get_transaction_status.return_value = TRANSACTION_STATUS_IDLE
     connection.cursor.return_value.__exit__.return_value = False
+    cursor = connection.cursor.return_value.__enter__.return_value
+
+    def fetchone():
+        command = str(cursor.execute.call_args.args[0])
+        if "pg_try_advisory_xact_lock" in command:
+            return (True,)
+        return cursor.fetchone.return_value
+
+    cursor.fetchone.side_effect = fetchone
     return connection
 
 
@@ -104,6 +123,7 @@ def managed_role_rows(
     purposes = (
         "schema_owner",
         "migrator",
+        "opening",
         "legacy_runtime",
         "atomic_runtime",
         "activation",
@@ -112,10 +132,15 @@ def managed_role_rows(
     )
     rows = []
     for purpose, role in zip(purposes, context.roles.all):
+        can_login = login_roles_enabled and purpose in {
+            "migrator",
+            "readiness",
+            "trainer",
+        }
         rows.append(
             (
                 role,
-                login_roles_enabled and purpose != "schema_owner",
+                can_login,
                 False,
                 False,
                 False,
@@ -124,7 +149,10 @@ def managed_role_rows(
                 False,
                 -1,
                 None,
-                f"elvis-postgres-bootstrap:v1:{context.expected_database}:{purpose}",
+                postgres_bootstrap_module.PostgresBootstrap._role_marker(
+                    context,
+                    purpose,
+                ),
             )
         )
     return tuple(sorted(rows))
@@ -134,6 +162,14 @@ def admissible_database_catalog_rows(
     context: PostgresBootstrapContext,
     command: str,
 ):
+    if "pg_catalog.lo_from_bytea" in command:
+        return (
+            ("lo_creat", "integer", False, []),
+            ("lo_create", "oid", False, []),
+            ("lo_from_bytea", "oid, bytea", False, []),
+            ("pg_logical_emit_message", "boolean, text, bytea", False, []),
+            ("pg_logical_emit_message", "boolean, text, text", False, []),
+        )
     if "WITH plpgsql_extension AS" in command:
         return postgres_bootstrap_module._EXPECTED_PLPGSQL_DEPENDENCY_EVIDENCE
     if "FROM pg_extension extension_row" in command:
@@ -172,11 +208,18 @@ def admissible_database_catalog_rows(
         and "AS object_kind" in command
     ):
         return ()
+    if (
+        "namespace_row.nspname = 'pg_catalog'" in command
+        and "function_acl.privilege_type = 'EXECUTE'" in command
+    ):
+        return ()
     if "FROM pg_event_trigger trigger_row" in command:
         return ()
     if "FROM pg_shseclabel label_row" in command:
         return ()
     if "FROM pg_parameter_acl parameter_acl" in command:
+        return ()
+    if "FROM pg_catalog.pg_prepared_xacts prepared_row" in command:
         return ()
     return None
 
@@ -195,6 +238,10 @@ def scripted_admin_connection(
 
     def fetchone():
         command = str(cursor.execute.call_args.args[0])
+        if "pg_try_advisory_xact_lock" in command:
+            return (True,)
+        if "clock_timestamp()" in command:
+            return (datetime(2030, 1, 1, tzinfo=timezone.utc),)
         if "FROM pg_largeobject_metadata" in command:
             return (0,)
         if "FROM pg_database database_row" in command:
@@ -211,6 +258,8 @@ def scripted_admin_connection(
     def fetchall():
         nonlocal last_role_rows
         command = str(cursor.execute.call_args.args[0])
+        if "FROM np.paper_fresh_opening_admissions" in command:
+            return (PostgresBootstrap._expected_opening_admission_row(context),)
         database_catalog_rows = admissible_database_catalog_rows(context, command)
         if database_catalog_rows is not None:
             return database_catalog_rows
@@ -240,17 +289,12 @@ def scripted_admin_connection(
         if "FROM pg_authid role_row" in command:
             if password_states is not None:
                 return password_states
-            login_enabled = {
-                row[1] for row in last_role_rows if row[0] != context.roles.schema_owner
-            }
-            assert len(login_enabled) == 1
-            credentials_provisioned = next(iter(login_enabled))
+            login_by_role = {row[0]: row[1] for row in last_role_rows}
             return tuple(
                 sorted(
                     (
                         role,
-                        role == context.roles.schema_owner
-                        or not credentials_provisioned,
+                        not login_by_role[role],
                         True,
                     )
                     for role in context.roles.all
@@ -265,6 +309,119 @@ def scripted_admin_connection(
     cursor.fetchone.side_effect = fetchone
     cursor.fetchall.side_effect = fetchall
     return connection
+
+
+@pytest.mark.parametrize("lock_row", [None, (), (False,), (True, False), [1]])
+def test_bootstrap_bounded_lock_fails_closed(lock_row) -> None:
+    cursor = MagicMock()
+    cursor.fetchone.return_value = lock_row
+
+    with pytest.raises(
+        PostgresBootstrapStorageError,
+        match="bootstrap lock is unavailable",
+    ):
+        postgres_bootstrap_module._require_bootstrap_advisory_lock(cursor)
+
+    assert cursor.execute.call_args_list == [
+        call("SET LOCAL lock_timeout = '1s'"),
+        call(
+            "SELECT pg_catalog.pg_try_advisory_xact_lock(%s)",
+            (4_544_865_376_849_464,),
+        ),
+    ]
+
+
+def test_bootstrap_bounded_lock_accepts_only_true() -> None:
+    cursor = MagicMock()
+    cursor.fetchone.return_value = (True,)
+
+    postgres_bootstrap_module._require_bootstrap_advisory_lock(cursor)
+
+    assert cursor.execute.call_count == 2
+
+
+def test_persistent_mutation_authority_is_revoked_before_logins_activate() -> None:
+    context = make_context()
+    cursor = MagicMock()
+    public_rows = (
+        ("lo_creat", "integer", True, list(sorted(context.roles.all))),
+        ("lo_create", "oid", True, list(sorted(context.roles.all))),
+        ("lo_from_bytea", "oid, bytea", True, list(sorted(context.roles.all))),
+        (
+            "pg_logical_emit_message",
+            "boolean, text, bytea",
+            True,
+            list(sorted(context.roles.all)),
+        ),
+        (
+            "pg_logical_emit_message",
+            "boolean, text, text",
+            True,
+            list(sorted(context.roles.all)),
+        ),
+    )
+    exact_rows = (
+        ("lo_creat", "integer", False, []),
+        ("lo_create", "oid", False, []),
+        ("lo_from_bytea", "oid, bytea", False, []),
+        ("pg_logical_emit_message", "boolean, text, bytea", False, []),
+        ("pg_logical_emit_message", "boolean, text, text", False, []),
+    )
+    cursor.fetchall.side_effect = (
+        public_rows,
+        public_rows,
+        managed_role_rows(context),
+        exact_rows,
+    )
+
+    assert (
+        PostgresBootstrap._reconcile_public_persistent_mutation_authority(
+            cursor,
+            context,
+        )
+        is True
+    )
+
+    commands = tuple(str(call.args[0]) for call in cursor.execute.call_args_list)
+    assert sum("REVOKE ALL ON FUNCTION" in command for command in commands) == 45
+
+
+def test_persistent_mutation_authority_is_not_repaired_after_login() -> None:
+    context = make_context()
+    cursor = MagicMock()
+    public_rows = (
+        ("lo_creat", "integer", True, list(sorted(context.roles.all))),
+        ("lo_create", "oid", True, list(sorted(context.roles.all))),
+        ("lo_from_bytea", "oid, bytea", True, list(sorted(context.roles.all))),
+        (
+            "pg_logical_emit_message",
+            "boolean, text, bytea",
+            True,
+            list(sorted(context.roles.all)),
+        ),
+        (
+            "pg_logical_emit_message",
+            "boolean, text, text",
+            True,
+            list(sorted(context.roles.all)),
+        ),
+    )
+    cursor.fetchall.side_effect = (
+        public_rows,
+        public_rows,
+        managed_role_rows(context, login_roles_enabled=True),
+    )
+
+    with pytest.raises(PostgresBootstrapDriftError, match="managed login"):
+        PostgresBootstrap._reconcile_public_persistent_mutation_authority(
+            cursor,
+            context,
+        )
+
+    assert not any(
+        "REVOKE ALL ON FUNCTION" in str(call.args[0])
+        for call in cursor.execute.call_args_list
+    )
 
 
 def scripted_credential_connection(
@@ -288,7 +445,7 @@ def scripted_credential_connection(
         False,
         -1,
         None,
-        f"elvis-postgres-bootstrap:v1:{context.expected_database}:{purpose}",
+        f"elvis-postgres-bootstrap:v2:{context.expected_database}:{purpose}",
     )
     return connection
 
@@ -299,13 +456,75 @@ def test_role_manifest_has_exact_ordered_authorities() -> None:
     assert roles.all == (
         "elvis_test_owner",
         "elvis_test_migrator",
+        "elvis_test_opening",
         "elvis_test_legacy",
         "elvis_test_atomic",
         "elvis_test_activation",
         "elvis_test_readiness",
         "elvis_test_trainer",
     )
-    assert roles.login_roles == roles.all[1:]
+    assert roles.login_roles == (
+        "elvis_test_readiness",
+        "elvis_test_trainer",
+    )
+    assert roles.bootstrap_login_roles == (
+        "elvis_test_migrator",
+        *roles.login_roles,
+    )
+
+
+def test_seven_role_historical_manifest_remains_inertly_representable() -> None:
+    roles = PostgresBootstrapRoles(
+        "historical_owner",
+        "historical_migrator",
+        "historical_legacy",
+        "historical_atomic",
+        "historical_activation",
+        "historical_readiness",
+        "historical_trainer",
+    )
+
+    assert roles.opening is None
+    assert roles.login_roles == (
+        "historical_legacy",
+        "historical_atomic",
+        "historical_readiness",
+        "historical_trainer",
+    )
+    assert roles.bootstrap_login_roles == (
+        "historical_migrator",
+        *roles.login_roles,
+    )
+    assert roles.all == (
+        "historical_owner",
+        "historical_migrator",
+        "historical_legacy",
+        "historical_atomic",
+        "historical_activation",
+        "historical_readiness",
+        "historical_trainer",
+    )
+
+
+@pytest.mark.parametrize("operation", ["reconcile", "inspect_terminal"])
+def test_historical_manifest_cannot_contact_v2_terminal(operation: str) -> None:
+    roles = PostgresBootstrapRoles(
+        schema_owner="historical_owner",
+        migrator="historical_migrator",
+        legacy_runtime="historical_legacy",
+        atomic_runtime="historical_atomic",
+        activation="historical_activation",
+        readiness="historical_readiness",
+        trainer="historical_trainer",
+    )
+    context = make_context(roles=roles, opening_admission=None)
+    admin_factory = MagicMock(side_effect=AssertionError("must remain offline"))
+    bootstrap = PostgresBootstrap(admin_factory)
+
+    with pytest.raises(PostgresBootstrapInputError, match="opening role.*version 2"):
+        getattr(bootstrap, operation)(context)
+
+    admin_factory.assert_not_called()
 
 
 def test_role_markers_bind_cluster_global_names_to_database_and_purpose() -> None:
@@ -314,13 +533,77 @@ def test_role_markers_bind_cluster_global_names_to_database_and_purpose() -> Non
     second = make_context(expected_database="elvis_database_b", roles=roles)
 
     assert PostgresBootstrap._role_marker(first, "atomic_runtime") == (
-        "elvis-postgres-bootstrap:v1:elvis_database_a:atomic_runtime"
+        "elvis-postgres-bootstrap:v2:elvis_database_a:atomic_runtime"
     )
     assert PostgresBootstrap._role_marker(second, "atomic_runtime") != (
         PostgresBootstrap._role_marker(first, "atomic_runtime")
     )
     assert PostgresBootstrap._role_marker(first, "readiness") != (
         PostgresBootstrap._role_marker(first, "atomic_runtime")
+    )
+
+
+def test_schema_v2_marker_binds_database_to_live_catalog_digest() -> None:
+    context = make_context()
+    digest = "a" * 64
+
+    assert PostgresBootstrap._schema_staging_marker(context) == (
+        "elvis-postgres-bootstrap-schema:v2:elvis_test_database:pending"
+    )
+    marker = PostgresBootstrap._schema_marker(context, digest)
+    assert marker == (
+        "elvis-postgres-bootstrap-schema:v2:elvis_test_database:" + digest
+    )
+    assert PostgresBootstrap._schema_marker_digest(context, marker) == digest
+    assert (
+        PostgresBootstrap._schema_marker_digest(
+            context,
+            PostgresBootstrap._schema_staging_marker(context),
+        )
+        is None
+    )
+    assert (
+        PostgresBootstrap._schema_marker_digest(
+            context,
+            "elvis-postgres-bootstrap-schema:v2:other_database:" + digest,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("digest", ["A" * 64, "0" * 63, "g" * 64, "pending"])
+def test_schema_v2_marker_rejects_noncanonical_digest(digest: str) -> None:
+    with pytest.raises(PostgresBootstrapDriftError, match="fingerprint"):
+        PostgresBootstrap._schema_marker(make_context(), digest)
+
+
+def test_terminal_marker_requires_same_database_fingerprint_readback() -> None:
+    context = make_context()
+    cursor = MagicMock()
+    cursor.fetchone.return_value = ("b" * 64,)
+    marker = PostgresBootstrap._schema_marker(context, "b" * 64)
+
+    assert (
+        PostgresBootstrap._schema_marker_matches_catalog(
+            cursor,
+            context,
+            marker,
+        )
+        is True
+    )
+    cursor.execute.assert_called_once_with(
+        postgres_bootstrap_module._SELECT_TERMINAL_CATALOG_FINGERPRINT_SQL
+    )
+
+    cursor.reset_mock()
+    cursor.fetchone.return_value = ("c" * 64,)
+    assert (
+        PostgresBootstrap._schema_marker_matches_catalog(
+            cursor,
+            context,
+            marker,
+        )
+        is False
     )
 
 
@@ -343,6 +626,7 @@ def test_role_manifest_rejects_unsafe_identifiers(invalid_role) -> None:
     values = {
         "schema_owner": "valid_owner",
         "migrator": "valid_migrator",
+        "opening": "valid_opening",
         "legacy_runtime": "valid_legacy",
         "atomic_runtime": "valid_atomic",
         "activation": "valid_activation",
@@ -352,6 +636,25 @@ def test_role_manifest_rejects_unsafe_identifiers(invalid_role) -> None:
 
     with pytest.raises(PostgresBootstrapInputError, match="lowercase"):
         PostgresBootstrapRoles(**values)
+
+
+@pytest.mark.parametrize("invalid_opening", ["", "Uppercase", True])
+def test_optional_historical_slot_accepts_only_none_or_safe_opening_role(
+    invalid_opening,
+) -> None:
+    roles = make_roles()
+
+    with pytest.raises(PostgresBootstrapInputError, match="lowercase"):
+        PostgresBootstrapRoles(
+            schema_owner=roles.schema_owner,
+            migrator=roles.migrator,
+            opening=invalid_opening,
+            legacy_runtime=roles.legacy_runtime,
+            atomic_runtime=roles.atomic_runtime,
+            activation=roles.activation,
+            readiness=roles.readiness,
+            trainer=roles.trainer,
+        )
 
 
 def test_role_manifest_accepts_maximum_postgresql_identifier_length() -> None:
@@ -367,6 +670,7 @@ def test_role_manifest_rejects_aliasing_between_authorities() -> None:
         PostgresBootstrapRoles(
             schema_owner=roles.schema_owner,
             migrator=roles.migrator,
+            opening=roles.opening,
             legacy_runtime=roles.legacy_runtime,
             atomic_runtime=roles.atomic_runtime,
             activation=roles.activation,
@@ -500,6 +804,38 @@ def test_bootstrap_rejects_non_callable_optional_factory() -> None:
         PostgresBootstrap(lambda: object(), readiness_connection_factory=object())
 
 
+def test_bootstrap_rejects_opening_anchor_connection_factory() -> None:
+    with pytest.raises(TypeError, match="inert NOLOGIN admission anchor"):
+        PostgresBootstrap(
+            lambda: object(),
+            opening_connection_factory=lambda: object(),
+        )
+
+
+def test_bootstrap_rejects_atomic_runtime_connection_factory() -> None:
+    with pytest.raises(TypeError, match="inert NOLOGIN future capability"):
+        PostgresBootstrap(
+            lambda: object(),
+            atomic_runtime_connection_factory=lambda: object(),
+        )
+
+
+def test_bootstrap_rejects_legacy_runtime_connection_factory() -> None:
+    with pytest.raises(TypeError, match="inert NOLOGIN target label"):
+        PostgresBootstrap(
+            lambda: object(),
+            legacy_runtime_connection_factory=lambda: object(),
+        )
+
+
+def test_bootstrap_rejects_activation_connection_factory() -> None:
+    with pytest.raises(TypeError, match="inert NOLOGIN future capability"):
+        PostgresBootstrap(
+            lambda: object(),
+            activation_connection_factory=lambda: object(),
+        )
+
+
 def test_connection_factory_representations_cannot_leak_credentials() -> None:
     secret = "postgresql://operator:never-print-this@example.invalid/elvis"
 
@@ -514,9 +850,6 @@ def test_connection_factory_representations_cannot_leak_credentials() -> None:
     bootstrap = PostgresBootstrap(
         factory,
         migrator_connection_factory=factory,
-        legacy_runtime_connection_factory=factory,
-        atomic_runtime_connection_factory=factory,
-        activation_connection_factory=factory,
         readiness_connection_factory=factory,
         trainer_connection_factory=factory,
     )
@@ -535,7 +868,7 @@ def test_receipt_schema_is_exactly_secret_free() -> None:
     )
     receipt = PostgresBootstrapReceipt(
         status=PostgresBootstrapStatus.CREDENTIALS_REQUIRED,
-        migration_versions=(1, 2, 3, 4, 5, 6),
+        migration_versions=(1, 2, 3, 4, 5, 6, 7),
         verified_role_probes=(),
         pending_role_credentials=("elvis_test_migrator",),
         old_shared_runtime_demoted=False,
@@ -577,6 +910,11 @@ def test_pre_role_catalog_admission_runs_after_role_read_before_creation() -> No
             bootstrap,
             "_create_managed_roles",
         ) as create,
+        patch.object(
+            bootstrap,
+            "_reconcile_public_persistent_mutation_authority",
+            return_value=False,
+        ),
     ):
         ordered.attach_mock(identity, "identity")
         ordered.attach_mock(roles, "roles")
@@ -592,6 +930,9 @@ def test_pre_role_catalog_admission_runs_after_role_read_before_creation() -> No
             context,
             allow_absent=True,
             allow_staged_no_login=True,
+            allow_active_migrator=True,
+            allow_staged_membership=True,
+            allow_staged_opening_marker=True,
         ),
         call.admission(cursor, context),
         call.create(cursor, context),
@@ -600,6 +941,9 @@ def test_pre_role_catalog_admission_runs_after_role_read_before_creation() -> No
             context,
             allow_absent=False,
             allow_staged_no_login=True,
+            allow_active_migrator=True,
+            allow_staged_membership=True,
+            allow_staged_opening_marker=True,
         ),
     ]
     connection.commit.assert_called_once_with()
@@ -663,6 +1007,11 @@ def test_exact_role_rerun_still_requires_pre_role_catalog_admission() -> None:
             "_require_pre_role_catalog_admissible",
         ) as admission,
         patch.object(bootstrap, "_create_managed_roles") as create,
+        patch.object(
+            bootstrap,
+            "_reconcile_public_persistent_mutation_authority",
+            return_value=False,
+        ),
     ):
         bootstrap._reconcile_roles(context)
 
@@ -709,6 +1058,53 @@ def test_database_catalog_rejection_is_the_first_pre_role_admission_gate() -> No
 
     database_catalog.assert_called_once_with(cursor, context)
     cursor.execute.assert_not_called()
+
+
+def test_database_catalog_rejects_prepared_transaction_authority() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+
+    def fetchall():
+        command = str(cursor.execute.call_args.args[0])
+        rows = admissible_database_catalog_rows(context, command)
+        if rows is not None:
+            if "FROM pg_catalog.pg_prepared_xacts prepared_row" in command:
+                return ((1, 0),)
+            return rows
+        return ()
+
+    cursor.fetchall.side_effect = fetchall
+
+    assert PostgresBootstrap._database_catalog_is_admissible(cursor, context) is False
+    assert any(
+        "FROM pg_catalog.pg_prepared_xacts prepared_row" in str(call.args[0])
+        for call in cursor.execute.call_args_list
+    )
+
+
+def test_database_catalog_rejects_explicit_pg_catalog_execute_acl() -> None:
+    context = make_context(adoption=make_adoption())
+    cursor = MagicMock()
+
+    def fetchall():
+        command = str(cursor.execute.call_args.args[0])
+        rows = admissible_database_catalog_rows(context, command)
+        if rows is not None:
+            if (
+                "namespace_row.nspname = 'pg_catalog'" in command
+                and "function_acl.privilege_type = 'EXECUTE'" in command
+            ):
+                return (("pg_read_file", "text", context.roles.readiness, False),)
+            return rows
+        return ()
+
+    cursor.fetchall.side_effect = fetchall
+
+    assert PostgresBootstrap._database_catalog_is_admissible(cursor, context) is False
+    assert any(
+        "function_acl.privilege_type = 'EXECUTE'" in str(call.args[0])
+        for call in cursor.execute.call_args_list
+    )
 
 
 def test_database_catalog_query_failure_preserves_storage_taxonomy() -> None:
@@ -836,7 +1232,6 @@ def test_phase_a_rejects_partial_or_drifted_role_catalog(mutation, message) -> N
 @pytest.mark.parametrize(
     "memberships",
     [
-        (),
         (("elvis_test_owner", "elvis_test_migrator", True),),
         (
             ("elvis_test_owner", "elvis_test_migrator", False),
@@ -859,17 +1254,17 @@ def test_phase_a_rejects_membership_drift(memberships) -> None:
     connection.commit.assert_not_called()
 
 
-def test_phase_a_rejects_partially_enabled_login_roles() -> None:
+def test_phase_a_rejects_activation_login_enablement() -> None:
     context = make_context()
     dormant_rows = managed_role_rows(context)
     mixed_rows = tuple(
-        row[:1] + (role == context.roles.migrator,) + row[2:]
+        row[:1] + (role == context.roles.activation,) + row[2:]
         for row in dormant_rows
         for role in (row[0],)
     )
     connection = scripted_admin_connection(context, role_row_sets=(mixed_rows,))
 
-    with pytest.raises(PostgresBootstrapDriftError, match="partially provisioned"):
+    with pytest.raises(PostgresBootstrapDriftError, match="unsafe attributes"):
         PostgresBootstrap(lambda: connection)._reconcile_roles(context)
 
 
@@ -879,9 +1274,7 @@ def test_phase_a_rejects_absent_or_expired_login_role_credentials(
 ) -> None:
     context = make_context()
     rows = managed_role_rows(context, login_roles_enabled=True)
-    password_states = [
-        (role, role == context.roles.schema_owner, True) for role in context.roles.all
-    ]
+    password_states = [(row[0], not row[1], True) for row in rows]
     readiness_index = context.roles.all.index(context.roles.readiness)
     role, _password_null, _valid = password_states[readiness_index]
     password_states[readiness_index] = (
@@ -1054,30 +1447,36 @@ def test_mixed_factories_preserve_manifest_probe_and_pending_order() -> None:
     migrator = scripted_credential_connection(
         context, "migrator", context.roles.migrator
     )
-    activation = scripted_credential_connection(
-        context, "activation", context.roles.activation
-    )
     trainer = scripted_credential_connection(context, "trainer", context.roles.trainer)
     bootstrap = PostgresBootstrap(
         lambda: admin,
         migrator_connection_factory=lambda: migrator,
-        activation_connection_factory=lambda: activation,
         trainer_connection_factory=lambda: trainer,
     )
 
-    receipt = bootstrap.reconcile(context)
+    with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
+        patch.object(bootstrap, "_preflight_database"),
+        patch.object(bootstrap, "_reconcile_roles"),
+        patch.object(bootstrap, "_catalog_readback_is_exact", return_value=False),
+        patch.object(
+            bootstrap,
+            "_privileged_managed_roles_are_disabled",
+            return_value=False,
+        ),
+    ):
+        receipt = bootstrap.reconcile(context)
 
     assert receipt.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
     assert receipt.verified_role_probes == (
         context.roles.migrator,
-        context.roles.activation,
         context.roles.trainer,
     )
-    assert receipt.pending_role_credentials == (
-        context.roles.legacy_runtime,
-        context.roles.atomic_runtime,
-        context.roles.readiness,
-    )
+    assert receipt.pending_role_credentials == (context.roles.readiness,)
 
 
 def test_credential_factory_wrong_identity_fails_closed() -> None:
@@ -1093,11 +1492,27 @@ def test_credential_factory_wrong_identity_fails_closed() -> None:
     evidence[2] = context.admin_role
     credential_cursor.fetchone.return_value = tuple(evidence)
 
-    with pytest.raises(PostgresBootstrapDriftError, match="another identity"):
-        PostgresBootstrap(
-            lambda: admin,
-            migrator_connection_factory=lambda: wrong_identity,
-        ).reconcile(context)
+    bootstrap = PostgresBootstrap(
+        lambda: admin,
+        migrator_connection_factory=lambda: wrong_identity,
+    )
+    with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
+        patch.object(bootstrap, "_preflight_database"),
+        patch.object(bootstrap, "_reconcile_roles"),
+        patch.object(bootstrap, "_catalog_readback_is_exact", return_value=False),
+        patch.object(
+            bootstrap,
+            "_privileged_managed_roles_are_disabled",
+            return_value=False,
+        ),
+        pytest.raises(PostgresBootstrapDriftError, match="another identity"),
+    ):
+        bootstrap.reconcile(context)
 
     wrong_identity.rollback.assert_called_once_with()
     wrong_identity.close.assert_called_once_with()
@@ -1112,11 +1527,27 @@ def test_credential_factory_exception_is_redacted_without_a_cause() -> None:
     def leaking_factory():
         raise RuntimeError(f"could not connect with {sentinel}")
 
-    with pytest.raises(PostgresBootstrapStorageError) as caught:
-        PostgresBootstrap(
-            lambda: admin,
-            migrator_connection_factory=leaking_factory,
-        ).reconcile(context)
+    bootstrap = PostgresBootstrap(
+        lambda: admin,
+        migrator_connection_factory=leaking_factory,
+    )
+    with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
+        patch.object(bootstrap, "_preflight_database"),
+        patch.object(bootstrap, "_reconcile_roles"),
+        patch.object(bootstrap, "_catalog_readback_is_exact", return_value=False),
+        patch.object(
+            bootstrap,
+            "_privileged_managed_roles_are_disabled",
+            return_value=False,
+        ),
+        pytest.raises(PostgresBootstrapStorageError) as caught,
+    ):
+        bootstrap.reconcile(context)
 
     assert sentinel not in str(caught.value)
     assert sentinel not in repr(caught.value)
@@ -1150,8 +1581,19 @@ def test_pending_credentials_stop_before_migrations_and_catalog() -> None:
     context = make_context()
 
     with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
         patch.object(bootstrap, "_preflight_database"),
         patch.object(bootstrap, "_reconcile_roles") as roles,
+        patch.object(bootstrap, "_catalog_readback_is_exact", return_value=False),
+        patch.object(
+            bootstrap,
+            "_privileged_managed_roles_are_disabled",
+            return_value=False,
+        ),
         patch.object(
             bootstrap,
             "_probe_credentials",
@@ -1174,6 +1616,11 @@ def test_exact_terminal_readback_skips_migrations_and_catalog_writes() -> None:
     context = make_context()
 
     with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
         patch.object(bootstrap, "_preflight_database"),
         patch.object(bootstrap, "_reconcile_roles"),
         patch.object(
@@ -1191,11 +1638,11 @@ def test_exact_terminal_readback_skips_migrations_and_catalog_writes() -> None:
     ):
         receipt = bootstrap.reconcile(context)
 
-    readback.assert_called_once_with(context)
+    assert readback.call_args_list == [call(context), call(context)]
     migrations.assert_not_called()
     catalog.assert_not_called()
     assert receipt.status is PostgresBootstrapStatus.COMPLETE
-    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6)
+    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6, 7)
     assert receipt.old_shared_runtime_demoted is False
 
 
@@ -1209,8 +1656,18 @@ def test_existing_adoption_without_demotion_stops_before_catalog_cutover() -> No
     context = make_context(adoption=adoption)
 
     with (
+        patch.object(
+            bootstrap,
+            "_inspect_opening_admission",
+            return_value=("EXACT", datetime(2030, 1, 1, tzinfo=timezone.utc)),
+        ),
         patch.object(bootstrap, "_preflight_database"),
         patch.object(bootstrap, "_reconcile_roles"),
+        patch.object(
+            bootstrap,
+            "_privileged_managed_roles_are_disabled",
+            return_value=False,
+        ),
         patch.object(
             bootstrap,
             "_probe_credentials",
@@ -1228,7 +1685,7 @@ def test_existing_adoption_without_demotion_stops_before_catalog_cutover() -> No
         patch.object(
             bootstrap,
             "_reconcile_migrations",
-            return_value=(1, 2, 3, 4, 5, 6),
+            return_value=(1, 2, 3, 4, 5, 6, 7),
         ) as migrations,
         patch.object(
             bootstrap,
@@ -1238,7 +1695,7 @@ def test_existing_adoption_without_demotion_stops_before_catalog_cutover() -> No
     ):
         receipt = bootstrap.reconcile(context)
 
-    migrations.assert_called_once_with(context)
+    migrations.assert_called_once_with(context, admission_authorizer=None)
     role_recheck.assert_called_once_with(context)
     demotion_preflight.assert_called_once_with(context)
     catalog.assert_not_called()
