@@ -63,8 +63,10 @@ entièrement séparé.
   DSN, certificat, historique shell, `docker inspect` complet ou infrastructure
   privée.
 - Ne pas utiliser `images/dashboard.png` comme preuve d'une interface V2.
-  `images/elvis.png` est une illustration de projet générée par le propriétaire
-  du dépôt et réautorisée pour la page d'accueil le 14 août 2026. Elle reste un
-  élément de marque, jamais une preuve d'interface ou de runtime V2.
+  `images/elvis.png` est une illustration générative fournie par le propriétaire
+  du dépôt, qui a demandé explicitement son rétablissement sur la page d'accueil
+  le 14 août 2026. Cette demande ne vaut pas licence ni revue juridique pour le
+  cours ou le marketing ; l'image reste sans valeur de preuve d'interface ou de
+  runtime V2.
 - Aucun rendu final et aucune publication ne sont autorisés avant que
   l'utilisateur ait examiné et approuvé explicitement la preview Studio.

@@ -74,13 +74,16 @@ Ces éléments doivent être exclus du cadre ou couverts lors de la revue.
 
 ## Éléments interdits ou non prouvés
 
-- `images/elvis.png` : illustration générée et fournie par le propriétaire du
+- `images/elvis.png` : illustration générative fournie par le propriétaire du
   dépôt, initialement ajoutée par le commit
-  `6926f49fb43a7468457202ac151e2b430b748e70`, puis explicitement réautorisée
-  pour la page d'accueil le 14 août 2026. Le fichier restauré conserve le
-  SHA-256 `e01bfa3c866e701fb2805f99251761dbda2b90345f057ba7cc4083fc08200141`.
-  Cette provenance autorise son usage comme illustration de projet ; elle ne
-  la transforme pas en capture, preuve d'interface ou preuve de runtime V2.
+  `6926f49fb43a7468457202ac151e2b430b748e70`. Le propriétaire a explicitement
+  demandé son rétablissement sur la page d'accueil le 14 août 2026. Le fichier
+  restauré conserve le SHA-256
+  `e01bfa3c866e701fb2805f99251761dbda2b90345f057ba7cc4083fc08200141`.
+  Cette déclaration documente son origine et la demande de restauration sur le
+  README ; elle ne vaut ni licence ni revue juridique indépendante. Tout usage
+  distinct dans un cours ou une campagne marketing reste soumis à une revue
+  séparée. L'image n'est pas une preuve d'interface ou de runtime V2.
 - `images/dashboard.png` : ne constitue pas une preuve de l'interface ou du
   runtime V2 ; usage comme preuve bloqué.
 - Images générées de terminal ou sorties recomposées : ne peuvent pas être
