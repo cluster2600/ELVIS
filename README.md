@@ -1,7 +1,5 @@
 # ELVIS V2 operator preview
 
-![Project image](./images/elvis.png)
-
 [![Release](https://img.shields.io/github/v/release/cluster2600/ELVIS?include_prereleases)](https://github.com/cluster2600/ELVIS/releases)
 [![CI](https://github.com/cluster2600/ELVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/cluster2600/ELVIS/actions)
 [![Python](https://img.shields.io/badge/python-3.14-blue)](INSTALL_V2.md)
@@ -25,8 +23,11 @@ uninstall steps are in [INSTALL_V2.md](INSTALL_V2.md). No Python wheel is
 published for this preview.
 
 Do not treat installation, a `COMPLETE` bootstrap receipt, or a healthy
-PostgreSQL rehearsal as a production cut-over. The remaining authority gates
-are listed in the [V2 roadmap](docs/architecture_migration/04-migration-roadmap.md).
+PostgreSQL rehearsal as a production cut-over. The authoritative
+paper-production programme is the trajectory-B/1B
+[production plan](docs/architecture_migration/05-v2-production-plan.md),
+[failure register](docs/architecture_migration/06-v2-production-failure-register.md),
+and [E2E matrix](docs/architecture_migration/07-v2-production-e2e-matrix.md).
 
 ## What is included
 
@@ -46,7 +47,8 @@ rollback rehearsal, soak, and explicit operator approval remain open.
 ## Compatibility paper runtime
 
 The repository still contains the paper-only compatibility runtime because it
-is the rollback authority until V2 cut-over is proven. For local source work:
+is the current writer until the separately approved one-way V2 cut-over. It is
+never a rollback authority after retirement. For local source work:
 
 ```bash
 git clone https://github.com/cluster2600/ELVIS.git
@@ -69,8 +71,9 @@ checkout; tag `v0.3.0` preserves those files for forensic recovery.
 | Need | Canonical document |
 |---|---|
 | Install or remove the V2 preview | [INSTALL_V2.md](INSTALL_V2.md) |
-| V2 approach and safety boundary | [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md) |
-| Current gates and status | [V2 migration roadmap](docs/architecture_migration/04-migration-roadmap.md) |
+| Historical preview architecture and safety background | [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md) |
+| Authoritative production design | [production plan](docs/architecture_migration/05-v2-production-plan.md) |
+| Current blockers and acceptance gates | [failure register](docs/architecture_migration/06-v2-production-failure-register.md) and [E2E matrix](docs/architecture_migration/07-v2-production-e2e-matrix.md) |
 | Operator runbooks | [docs/README.md](docs/README.md) |
 | Compatibility paper setup | [docs/PAPER_TRADING_SETUP.md](docs/PAPER_TRADING_SETUP.md) |
 | Security | [SECURITY.md](SECURITY.md) |

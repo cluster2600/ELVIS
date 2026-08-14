@@ -1,4 +1,4 @@
-# ELVIS V2 architecture
+# ELVIS V2 preview architecture (historical alpha.2 baseline)
 
 ELVIS V2 is an architecture programme in progress with an installable operator
 preview. It replaces implicit,
@@ -6,11 +6,15 @@ coupled paper-trading state changes with deterministic decisions, durable
 journals, single-owner transactions, and an explicit database-enforced
 activation boundary.
 
-> **The preview is not a deployed runtime.** The compatibility paper runtime
+> **Historical background, not production authority.** The preview is not a
+> deployed runtime. The compatibility paper runtime
 > remains authoritative. Implemented V2 persistence and activation components
 > are dormant unless the migration ledger says otherwise. `ACTIVE` remains a
-> **NO-GO** until every cut-over gate in the
-> [migration roadmap](architecture_migration/04-migration-roadmap.md) is closed.
+> **NO-GO** until every cut-over gate in the authoritative trajectory-B/1B
+> [production plan](architecture_migration/05-v2-production-plan.md),
+> [failure register](architecture_migration/06-v2-production-failure-register.md),
+> and [E2E matrix](architecture_migration/07-v2-production-e2e-matrix.md) is
+> closed.
 > Live trading is not an executable capability.
 
 ## Why V2
@@ -54,14 +58,14 @@ flowchart LR
       SIGNAL["typed signal"]
       POLICY["fail-closed signal policy"]
       RISK["pre-trade risk decision"]
-      PLAN["terminal submission plan"]
+      PLAN["candidate + capacity hold + command outbox"]
     end
 
     subgraph "Single transactional owner"
       FENCE["runtime generation check"]
-      OWNER["atomic paper owner"]
-      JOURNAL["order and fill journal"]
-      LEDGER["position and account ledger"]
+      OWNER["ordered virtual venue + atomic event projector"]
+      JOURNAL["command/event/order journal"]
+      LEDGER["position, account and hold ledger"]
     end
 
     subgraph "Post-commit consumers"
@@ -82,9 +86,11 @@ flowchart LR
     READ --> OBS
 ```
 
-The synchronous decision path stays direct. Events describe completed state
-transitions for observability; they do not decide whether an order is safe to
-submit. A submission acknowledgement is not treated as a fill. Ambiguous or
+The pure decision path stays direct, but trajectory 1B does not use the old
+terminal full-fill submission batch. Admission atomically writes a bounded
+capacity hold and ordered command; the deterministic virtual venue then emits
+acknowledgement, rejection, cancellation and zero/partial/multiple-fill events.
+Every event is applied exactly once by contiguous causal prefix. Ambiguous or
 unreadable state is reconciled or quarantined, never guessed.
 
 The database control plane is separate from that hot path:
@@ -92,16 +98,19 @@ The database control plane is separate from that hot path:
 ```mermaid
 stateDiagram-v2
     [*] --> LEGACY
-    LEGACY --> PAUSED: operator fence and readiness proof
+    LEGACY --> PAUSED: signed V1 retirement and sole-writer fence
     PAUSED --> ACTIVE: locked activation and new generation
-    ACTIVE --> PAUSED: stop or unresolved transition
-    PAUSED --> LEGACY: reconciled rollback
-    ACTIVE --> LEGACY: forbidden direct transition
+    ACTIVE --> PAUSED: kill, drain to finality, zero work
+    note right of LEGACY
+      One-way retirement: LEGACY cannot be re-entered.
+    end note
 ```
 
-Each entry into `ACTIVE` receives a new durable runtime generation. Rollback
-must pass through `PAUSED`, reconcile the current owner, and deliberately select
-one writer. Legacy and V2 writers must never be authoritative together.
+Each entry into `ACTIVE` receives a new durable runtime generation. A one-way
+signed retirement moves `LEGACY/0` to `PAUSED/0`; V1 can never regain authority.
+V2 rollback sets kill, drains accepted work, passes through `PAUSED`, and
+redeploys a compatible V2 candidate before the next activation. Legacy and V2
+writers must never be authoritative together.
 
 ## Current state
 
@@ -118,7 +127,7 @@ one writer. Legacy and V2 writers must never be authoritative together.
 | Bounded legacy snapshot importer | Implemented as a dormant offline operator capability | Revalidates the c3c2 pair, copies only the seven raw V1 tables in one transaction, preserves explicit IDs, requires `open_positions` to remain empty, and normalizes sequences after row commit; it synthesizes no V2 journal or ledger |
 | Legacy snapshot reconciliation review | Implemented as a dormant read-only operator capability | Sequentially revalidates the imported target and compares its complete opening candidate with an explicitly non-runtime operator hypothesis; every usable result is `DECISION_REQUIRED`, source provenance and a coherent database snapshot remain unproven, and no account is opened or provisioned |
 | Dedicated runtime identities and fail-closed composition | Pending | Current shared-credential/runtime-DDL paths still block V2 authority |
-| Opening-provenance selection, V2 replay of imported history, shadow comparison, rollback rehearsal, and soak | Pending evidence | `ACTIVE` remains **NO-GO** |
+| Signed fresh opening, one-way V1 retirement, async virtual venue, V2-only rollback, soak and course evidence | Pending evidence | `ACTIVE` remains **NO-GO** |
 
 “Implemented” means present on this branch with the checks recorded in the
 roadmap. “Dormant” means there is no production composition or authority.
@@ -132,12 +141,14 @@ Neither word means deployed.
 | Progressive runtime extraction | Signal policy, risk, execution, and position ownership moved in small reversible slices | In progress |
 | Durable authority | Versioned migrations, journals, replay, account ledger, fence, generations, activation, and role/catalog bootstrap | Implemented but dormant |
 | Deployment composition | Offline bootstrap, read-only fresh-target preflight and reconciliation review, and dormant bounded raw importer available; dedicated credentials, restrictive database/network policy, removal of runtime DDL, and fail-closed health remain | In progress; not deployed |
-| Cut-over evidence | Raw V1 snapshot preservation and a non-authoritative two-candidate opening review implemented; source/runtime provenance, a coherent enforced review window, provenance selection, account opening, V2 replay, side-effect-free shadowing, rollback rehearsal, soak, and explicit operator approval remain | In progress; no authority change |
+| Cut-over evidence | Historical raw V1 snapshot preservation and non-authoritative candidate review exist only as read-only evidence; trajectory B instead requires a signed fresh opening with zero V1 continuity, one-way retirement, deterministic async-venue proof, V2-only recovery, soak, and explicit per-epoch approval | In progress; no authority change |
 | Cleanup | Redundant V1 prose and unverified deployment helpers are removed; runtime owners retire only after parity and cut-over proof | In progress; no authority change |
 
-The [roadmap](architecture_migration/04-migration-roadmap.md) is the
-authoritative slice-by-slice status ledger. This summary intentionally does not
-duplicate its test counts or acceptance evidence.
+The [production plan](architecture_migration/05-v2-production-plan.md),
+[failure register](architecture_migration/06-v2-production-failure-register.md),
+and [E2E matrix](architecture_migration/07-v2-production-e2e-matrix.md) are the
+authoritative production records. This historical summary intentionally does
+not duplicate their status or acceptance evidence.
 
 Python 3.14 is the only supported interpreter. Optional ML integrations without
 compatible wheels are skipped; they do not create a second supported runtime.
@@ -216,19 +227,20 @@ Graph artefacts: [Mermaid source](../diagrams/v2-delivery-gates.mmd),
 
 | Need | Canonical document |
 |---|---|
-| V2 overview, approach, data flow, and safety | This page |
-| Detailed V2 contracts | [Target architecture](architecture_migration/03-target-architecture.md) |
-| Current implementation status and verification | [Migration roadmap](architecture_migration/04-migration-roadmap.md) |
+| Historical preview approach, data flow, and safety | This page |
+| Historical detailed contracts | [Target architecture](architecture_migration/03-target-architecture.md) |
+| Authoritative production design | [Production plan](architecture_migration/05-v2-production-plan.md) |
+| Open blockers and acceptance | [Failure register](architecture_migration/06-v2-production-failure-register.md) and [E2E matrix](architecture_migration/07-v2-production-e2e-matrix.md) |
 | Offline PostgreSQL bootstrap contract and recovery | [Bootstrap runbook](V2_POSTGRES_BOOTSTRAP.md) |
 | Fresh PostgreSQL 15 SCRAM/HBA rehearsal | [Rehearsal runbook](V2_POSTGRES_REHEARSAL.md) |
-| Stopped-clone/fresh-target admission and rollback phases | [Fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) |
-| Bounded raw V1 copy, resume, sequence recovery, and rollback | [Legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) |
+| Historical stopped-clone/fresh-target admission and pre-retirement recovery phases | [Fresh-target cut-over preflight](V2_FRESH_TARGET_CUTOVER.md) |
+| Historical bounded raw V1 copy, resume, and pre-retirement recovery | [Legacy snapshot import](V2_LEGACY_SNAPSHOT_IMPORT.md) |
 | Read-only opening-candidate comparison and no-opening boundary | [Legacy snapshot reconciliation](V2_LEGACY_SNAPSHOT_RECONCILIATION.md) |
 | Audited compatibility-runtime baseline | [Repository analysis](architecture_migration/01-elvis-repository-analysis.md) |
 | Current legacy runtime topology | [Runtime architecture](architecture.md) |
 | Installation and deployment boundary | [V2 install](../INSTALL_V2.md) and [deployment status](DEPLOYMENT.md) |
 | Historical or superseded claims | [V1 restore manifest](archive/v1/README.md) and Git tags |
 
-When documents disagree, source code and the roadmap's latest committed
-implementation record win. A generated artefact, successful test, or dormant
-database capability is not proof that a deployment or cut-over happened.
+When documents disagree, source code and documents 05–07 win for production
+planning. A generated artefact, successful test, or dormant database capability
+is not proof that a deployment or cut-over happened.

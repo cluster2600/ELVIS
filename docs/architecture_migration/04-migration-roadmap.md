@@ -1,9 +1,12 @@
-# ELVIS V2 migration roadmap
+# ELVIS V2 alpha.2 migration ledger (historical)
 
-> **Status authority:** V2 operator tooling is packaged as a Python 3.14
-> preview. The compatibility paper process remains the runtime authority.
+> **Historical ledger, not production authority:** V2 operator tooling is
+> packaged as a Python 3.14 preview. The compatibility paper process remains
+> the current runtime authority.
 > Installation, a receipt, or a green test does not authorise `ACTIVE`, which
-> remains a **NO-GO**.
+> remains a **NO-GO**. Trajectory B/1B production is governed exclusively by
+> [05](05-v2-production-plan.md), [06](06-v2-production-failure-register.md),
+> and [07](07-v2-production-e2e-matrix.md).
 
 The detailed command-by-command development ledger was retired from the active
 tree because it repeated obsolete interpreter commands and stale test counts.
@@ -31,32 +34,16 @@ runtime authority. Live trading is outside this programme.
 | Source-authenticated opening provenance and V2 account opening | Pending | Blocks replay and authority |
 | Dedicated runtime composition and fail-closed health | Pending | Shared compatibility credentials/DDL still block authority |
 | Shadow parity, stale-writer proof, rollback rehearsal, and soak | Pending | Blocks operator approval |
-| V1 runtime retirement | Pending cut-over proof | Compatibility process remains rollback authority |
+| V1 runtime retirement | Pending separately approved one-way cut-over | Compatibility process is the current writer, never the post-retirement rollback authority |
 
-## Open production gates
+## Superseded production direction
 
-All gates are cumulative. None may be inferred from a later success.
-
-1. Capture and authenticate the stopped source, historical runtime
-   configuration, and opening-capital provenance inside an enforced review
-   window.
-2. Select and encode one durable opening, provision the V2 paper account, and
-   replay imported history without manufacturing missing causal facts.
-3. Compose distinct application, migration, owner, readiness, and activation
-   identities with externally provisioned SCRAM secrets, restrictive HBA, and
-   network policy.
-4. Remove runtime DDL and migration authority; startup and health must fail
-   closed on exact catalog, identity, generation, and authority evidence.
-5. Run side-effect-free shadow comparison. The V2 shadow must not submit,
-   mutate cooldowns, positions, account state, feedback, or persistence.
-6. Prove stale compatibility writers cannot commit after the fence.
-7. Rehearse `LEGACY -> PAUSED -> ACTIVE` and
-   `ACTIVE -> PAUSED -> LEGACY`, including ambiguous commits and recovery.
-8. Complete the reviewed paper soak and record explicit operator approval.
-
-Only then may a separate change compose the V2 runtime and retire compatibility
-owners. Direct `ACTIVE -> LEGACY` and simultaneous V1/V2 authority remain
-forbidden.
+This ledger ended with the alpha.2 offline toolchain. It must not be used to
+select opening data, replay V1 history into the production account, restore V1
+writer authority, or define the async venue. The approved production direction
+is a fresh signed V2 opening, a one-way V1 writer retirement, a durable 1B
+asynchronous virtual venue, V2-only rollback, and G0–G17 evidence. The exact
+open work and pass/fail rules live in documents 05–07.
 
 ## Operator path available in the preview
 
@@ -101,8 +88,9 @@ Documentation intentionally avoids copying totals that become stale.
 
 Git tag `v0.3.0` preserves retired V1 documents and deployment experiments for
 forensic inspection. Restoring files is not runtime rollback. Runtime rollback
-must reconcile the current owner, pass through `PAUSED`, verify the generation
-and database fence, and deliberately select one writer.
+must set kill, drain accepted V2 work, pass through `PAUSED`, verify generation,
+writer fence and rollback-candidate compatibility, and activate only a V2
+candidate. V1 authority is never restored after retirement.
 
 The [V1 restore manifest](../archive/v1/README.md) gives read-only inspection
 commands. No old Apple or Ansible helper is an approved deployment path.
@@ -110,6 +98,6 @@ commands. No old Apple or Ansible helper is an approved deployment path.
 ## Definition of migration complete
 
 Migration is complete only when the V2 process is the sole proven paper writer,
-all production gates above are closed, the entire release gate is green, and
+all G0–G17 production gates are closed, the entire release gate is green, and
 the operator has explicitly approved cut-over. Until then, the preview remains
 offline migration tooling and `ACTIVE` remains a **NO-GO**.

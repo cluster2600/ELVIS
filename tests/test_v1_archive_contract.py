@@ -279,7 +279,11 @@ def test_loaded_configuration_contracts_remain_active() -> None:
     assert all(path.is_file() for path in retained)
 
 
-def test_active_compatibility_architecture_remains_for_rollback_context() -> None:
+def test_active_compatibility_architecture_remains_for_pre_cutover_evidence() -> None:
+    docs_index = (_REPOSITORY / "docs" / "README.md").read_text(encoding="utf-8")
+    assert "pre-cut-over paper-runtime topology and evidence context" in docs_index
+    assert "rollback context" not in docs_index
+
     for name in ("architecture.md", "COMPONENTS.md", "ELVIS_SYSTEM_ARCHITECTURE.md"):
         path = _REPOSITORY / "docs" / name
         assert path.is_file()
