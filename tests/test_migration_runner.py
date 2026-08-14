@@ -17,6 +17,7 @@ from trading.persistence.migration_runner import (
     Migration,
     MigrationApplyError,
     MigrationDriftError,
+    MigrationLockUnavailableError,
     _statement_prefixes,
     apply_migrations,
     load_migrations,
@@ -44,6 +45,12 @@ def fake_connection(*, applied_rows=()):
         if (
             call is not None
             and call.args
+            and "pg_try_advisory_xact_lock" in str(call.args[0])
+        ):
+            return (True,)
+        if (
+            call is not None
+            and call.args
             and "INSERT INTO np.schema_migrations" in str(call.args[0])
         ):
             return tuple(call.args[1])
@@ -59,7 +66,15 @@ def fake_connection(*, applied_rows=()):
 def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
     migrations = load_migrations()
 
-    assert tuple(migration.version for migration in migrations) == (1, 2, 3, 4, 5, 6)
+    assert tuple(migration.version for migration in migrations) == (
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+    )
     assert migrations[0].name == "legacy_baseline"
     assert migrations[0].checksum == (
         "38d01ec919fa4a39ee28423c74326c6f" "5dd51d0e7e8216f9a8cffb9b11b5c9b1"
@@ -243,6 +258,50 @@ def test_packaged_migrations_are_ordered_additive_and_immutable() -> None:
         prefix[0] for prefix in _statement_prefixes(activation_capabilities.sql)
     } == {"CREATE", "REVOKE"}
 
+    fresh_opening = migrations[6]
+    assert fresh_opening.name == "fresh_opening_provenance"
+    assert fresh_opening.checksum == (
+        "a5b8c355cb69627ff1e0b83fa44fac0c" "836124f5b94d5a3dbfcded715f988fc9"
+    )
+    assert "CREATE TABLE np.paper_fresh_opening_admissions" in fresh_opening.sql
+    assert "CREATE TABLE np.paper_fresh_opening_nonces" in fresh_opening.sql
+    assert "CREATE TABLE np.paper_fresh_opening_provisionings" in fresh_opening.sql
+    assert "system_identifier NUMERIC(20, 0) NOT NULL" in fresh_opening.sql
+    assert "paper_fresh_opening_nonces_pk PRIMARY KEY" in fresh_opening.sql
+    assert "trust_domain,\n        signer_key_id,\n        nonce" in fresh_opening.sql
+    assert fresh_opening.sql.count("ENABLE ALWAYS TRIGGER") == 6
+    assert "paper fresh opening provenance is append-only" in fresh_opening.sql
+    assert "paper account opening identity is immutable" in fresh_opening.sql
+    assert "CREATE FUNCTION np.paper_terminal_catalog_fingerprint()" in (
+        fresh_opening.sql
+    )
+    assert "ALTER FUNCTION np.acquire_paper_runtime_activation_fence()" in (
+        fresh_opening.sql
+    )
+    assert (
+        "CREATE OR REPLACE FUNCTION np.acquire_paper_runtime_activation_fence()"
+        not in fresh_opening.sql
+    )
+    for signature in (
+        "CREATE FUNCTION np.acquire_paper_fresh_opening_fence(",
+        "CREATE FUNCTION np.commit_paper_fresh_opening(",
+        "CREATE FUNCTION np.read_paper_fresh_opening(",
+    ):
+        assert signature in fresh_opening.sql
+    assert fresh_opening.sql.count("SECURITY DEFINER") == 8
+    assert fresh_opening.sql.count("SET search_path = pg_catalog, pg_temp") == 16
+    assert fresh_opening.sql.count("FROM PUBLIC") == 12
+    assert "runtime_mode = 'LEGACY'" in fresh_opening.sql
+    assert "runtime_generation = 0" in fresh_opening.sql
+    assert "runtime_activation_authorized IS FALSE" in fresh_opening.sql
+    assert "trading_authorized IS FALSE" in fresh_opening.sql
+    assert "GRANT " not in fresh_opening.sql.upper()
+    assert {prefix[0] for prefix in _statement_prefixes(fresh_opening.sql)} == {
+        "ALTER",
+        "CREATE",
+        "REVOKE",
+    }
+
 
 @pytest.mark.parametrize(
     ("kwargs", "exception"),
@@ -339,8 +398,13 @@ def test_apply_migrations_commits_once_and_records_checksum() -> None:
     assert cursor.execute.call_args_list[0].args == (
         "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
     )
-    assert cursor.execute.call_args_list[1].args == (
+    assert cursor.execute.call_args_list[1].args == ("SET LOCAL lock_timeout = '1s'",)
+    assert cursor.execute.call_args_list[2].args == (
         "SET LOCAL standard_conforming_strings = on",
+    )
+    assert cursor.execute.call_args_list[3].args == (
+        "SELECT pg_catalog.pg_try_advisory_xact_lock(%s)",
+        (4_544_865_376_849_463,),
     )
     executed_sql = tuple(str(call.args[0]) for call in cursor.execute.call_args_list)
     metadata_index = next(
@@ -380,6 +444,37 @@ def test_apply_migrations_commits_once_and_records_checksum() -> None:
         call.args
         and "INSERT INTO np.schema_migrations" in str(call.args[0])
         and call.args[1] == (migration.version, migration.name, migration.checksum)
+        for call in cursor.execute.call_args_list
+    )
+
+
+@pytest.mark.parametrize("lock_row", [None, (), (False,), (True, False), [1]])
+def test_apply_migrations_fails_closed_when_bounded_lock_is_unavailable(
+    lock_row,
+) -> None:
+    connection, cursor = fake_connection()
+    migration = Migration(version=1, name="example", sql="SELECT 1")
+    normal_fetchone = cursor.fetchone.side_effect
+
+    def fetchone():
+        command = str(cursor.execute.call_args.args[0])
+        if "pg_try_advisory_xact_lock" in command:
+            return lock_row
+        return normal_fetchone()
+
+    cursor.fetchone.side_effect = fetchone
+
+    with pytest.raises(
+        MigrationLockUnavailableError,
+        match="migration lock is unavailable",
+    ):
+        apply_migrations(connection, (migration,))
+
+    connection.rollback.assert_called_once_with()
+    connection.commit.assert_not_called()
+    assert not any(
+        call.args
+        and "CREATE TABLE IF NOT EXISTS np.schema_migrations" in str(call.args[0])
         for call in cursor.execute.call_args_list
     )
 
@@ -489,8 +584,14 @@ def test_apply_migrations_rejects_an_incompatible_ledger_before_sql() -> None:
 
 def test_apply_migrations_requires_the_ledger_insert_to_return_identity() -> None:
     connection, cursor = fake_connection()
-    cursor.fetchone.side_effect = None
-    cursor.fetchone.return_value = None
+
+    def fetchone():
+        command = str(cursor.execute.call_args.args[0])
+        if "pg_try_advisory_xact_lock" in command:
+            return (True,)
+        return None
+
+    cursor.fetchone.side_effect = fetchone
     migration = Migration(version=1, name="example", sql="SELECT 1")
 
     with pytest.raises(MigrationDriftError, match="did not record migration"):
@@ -563,6 +664,10 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
     root = Path(__file__).parents[1]
     opening_plan_path = Path("scripts/v2_opening_plan.py")
     opening_plan_allowed_imports = {"trading.persistence.paper_account_journal_codec"}
+    opening_apply_path = Path("scripts/v2_opening_apply.py")
+    opening_apply_allowed_imports = {
+        "trading.persistence.postgres_fresh_opening_provisioning",
+    }
     consumers = []
     for source_path in sorted(root.rglob("*.py")):
         if (
@@ -591,6 +696,11 @@ def test_migration_runner_is_not_wired_to_production_startup() -> None:
         if (
             relative_path == opening_plan_path
             and persistence_imports == opening_plan_allowed_imports
+        ):
+            continue
+        if (
+            relative_path == opening_apply_path
+            and persistence_imports == opening_apply_allowed_imports
         ):
             continue
         if persistence_imports:

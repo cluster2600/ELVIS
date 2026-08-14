@@ -251,6 +251,8 @@ def test_replay_or_ownership_findings_require_reconciliation(kind) -> None:
     (
         PaperAccountReadinessFindingKind.ACCOUNT_NOT_PROVISIONED,
         PaperAccountReadinessFindingKind.ACCOUNT_PROVENANCE_MISMATCH,
+        PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT,
+        PaperAccountReadinessFindingKind.OPENING_PROVENANCE_MISMATCH,
         PaperAccountReadinessFindingKind.UNEXPECTED_ACCOUNT,
         PaperAccountReadinessFindingKind.ACCOUNT_INSOLVENT,
         PaperAccountReadinessFindingKind.MARGIN_RESERVATION_PRESENT,
@@ -846,3 +848,70 @@ def test_readiness_contract_is_pure_and_has_no_runtime_consumer() -> None:
                     assert node.module == "trading.domain._validation"
 
     assert imported_roots <= set(sys.stdlib_module_names) | {"trading"}
+
+
+def test_fresh_opening_json_object_keys_always_use_python_compatible_order() -> None:
+    migration = (
+        Path(__file__).parents[1]
+        / "trading"
+        / "persistence"
+        / "sql_migrations"
+        / "0007_fresh_opening_provenance.sql"
+    ).read_text(encoding="utf-8")
+
+    object_key_enumerations = migration.count("FROM jsonb_object_keys(")
+    assert object_key_enumerations > 0
+    assert (
+        migration.count('ORDER BY object_key COLLATE pg_catalog."C"')
+        == object_key_enumerations
+    )
+    assert 'ORDER BY item.key COLLATE pg_catalog."C"' in migration
+    assert "SELECT jsonb_object_keys" not in migration
+
+
+def test_fresh_opening_provenance_mechanically_guards_runtime_activation() -> None:
+    migration = (
+        Path(__file__).parents[1]
+        / "trading"
+        / "persistence"
+        / "sql_migrations"
+        / "0007_fresh_opening_provenance.sql"
+    ).read_text(encoding="utf-8")
+
+    assert migration.count("SECURITY DEFINER") == migration.count(
+        "SECURITY DEFINER\nSET search_path = pg_catalog, pg_temp"
+    )
+    assert migration.count("SET search_path = pg_catalog, pg_temp") == 16
+    assert "SET search_path = pg_catalog\n" not in migration
+    for inherited_function in (
+        "np.enforce_legacy_paper_runtime_fence()",
+        "np.reject_paper_runtime_generation_mutation()",
+        "np.acquire_paper_runtime_activation_fence()",
+        "np.activate_paper_runtime_generation(",
+    ):
+        assert f"ALTER FUNCTION {inherited_function}" in migration
+    assert (
+        "CREATE OR REPLACE FUNCTION np.acquire_paper_runtime_activation_fence"
+        not in migration
+    )
+    assert "FROM pg_roles" not in migration
+    assert "FROM pg_database" not in migration
+    assert "FROM pg_namespace" not in migration
+    assert "FROM pg_control_system()" not in migration
+    assert "current_database()" not in migration.replace(
+        "pg_catalog.current_database()", ""
+    )
+    assert "CREATE FUNCTION np.paper_fresh_opening_target_is_current()" in migration
+    assert "RETURNS BOOLEAN\nLANGUAGE plpgsql\nSECURITY DEFINER" in migration
+    assert "OR np.paper_fresh_opening_target_is_current() IS NOT TRUE" in migration
+    assert (
+        "CREATE TRIGGER "
+        "paper_runtime_generations_require_fresh_opening_provenance\n"
+        "BEFORE INSERT\nON np.paper_runtime_generations"
+    ) in migration
+    assert (
+        "ENABLE ALWAYS TRIGGER "
+        "paper_runtime_generations_require_fresh_opening_provenance" in migration
+    )
+    assert "paper_runtime_generations_fresh_opening_provisioning_fk" in migration
+    assert "MATCH FULL\nON DELETE RESTRICT" in migration

@@ -16,7 +16,9 @@ _MIGRATION_NAME = re.compile(r"[a-z][a-z0-9_]*")
 _DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 _ADVISORY_LOCK_ID = 4_544_865_376_849_463
 _SET_TRANSACTION_SQL = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+_SET_LOCK_TIMEOUT_SQL = "SET LOCAL lock_timeout = '1s'"
 _SET_STRING_SYNTAX_SQL = "SET LOCAL standard_conforming_strings = on"
+_TRY_ADVISORY_LOCK_SQL = "SELECT pg_catalog.pg_try_advisory_xact_lock(%s)"
 _FLUSH_DEFERRED_SQL = "SET CONSTRAINTS ALL IMMEDIATE"
 _RUNNER_CONTROL_COMMANDS = {
     "ABORT",
@@ -171,6 +173,10 @@ class MigrationApplyError(RuntimeError):
 
 class MigrationDriftError(MigrationApplyError):
     """Raised when recorded migration identity differs from packaged SQL."""
+
+
+class MigrationLockUnavailableError(MigrationApplyError):
+    """Raised when migration authority cannot acquire its bounded lock."""
 
 
 def _statement_prefixes(sql: str) -> tuple[tuple[str, ...], ...]:
@@ -395,11 +401,21 @@ def apply_migrations(
     try:
         with connection.cursor() as cursor:
             cursor.execute(_SET_TRANSACTION_SQL)
+            cursor.execute(_SET_LOCK_TIMEOUT_SQL)
             cursor.execute(_SET_STRING_SYNTAX_SQL)
             cursor.execute(
-                "SELECT pg_advisory_xact_lock(%s)",
+                _TRY_ADVISORY_LOCK_SQL,
                 (_ADVISORY_LOCK_ID,),
             )
+            lock_row = cursor.fetchone()
+            if (
+                not isinstance(lock_row, (tuple, list))
+                or len(lock_row) != 1
+                or lock_row[0] is not True
+            ):
+                raise MigrationLockUnavailableError(
+                    "concurrent PostgreSQL migration lock is unavailable"
+                )
             cursor.execute(_CREATE_METADATA_SQL)
             cursor.execute(_VALIDATE_METADATA_SQL)
             cursor.execute(_LOAD_APPLIED_SQL)
@@ -464,11 +480,15 @@ def apply_migrations(
                 )
 
         connection.commit()
-    except MigrationDriftError:
+    except MigrationDriftError, MigrationLockUnavailableError:
         connection.rollback()
         raise
     except Exception as exc:
         connection.rollback()
+        if getattr(exc, "pgcode", None) == "55P03":
+            raise MigrationLockUnavailableError(
+                "concurrent PostgreSQL migration lock is unavailable"
+            ) from None
         if current_migration is None:
             message = "migration metadata initialization failed"
         else:

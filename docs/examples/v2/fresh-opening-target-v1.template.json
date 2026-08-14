@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "expected_database": "example_target",
+  "expected_system_identifier": "0",
+  "control_plane_role": "example_database_owner_admin",
+  "opening_anchor_role": "example_inert_opening_anchor",
+  "deployment_incarnation_id": "EXAMPLE_INVALID_REPLACE_FROM_AUTHENTICATED_TARGET_RECORD",
+  "terminal_catalog_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "pin_authority_record_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

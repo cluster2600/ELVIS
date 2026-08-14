@@ -41,7 +41,12 @@ from trading.application.legacy_snapshot_reconciliation import (
     legacy_snapshot_relation_evidence_sha256,
 )
 from trading.domain.paper_accounting import PaperAccountBalance
+from trading.persistence.postgres_bootstrap import (
+    PostgresBootstrap,
+    PostgresBootstrapTerminalInspection,
+)
 from trading.persistence.postgres_legacy_snapshot_reconciliation import (
+    PostgresLegacySnapshotReconciliation,
     PostgresLegacySnapshotReconciliationConflict,
     PostgresLegacySnapshotReconciliationInputError,
     PostgresLegacySnapshotReconciliationStorageError,
@@ -128,6 +133,86 @@ def _context() -> LegacySnapshotReconciliationContext:
         margin_quantum=Decimal("0.01"),
         hypothesis_starting_collateral=Decimal("1000"),
     )
+
+
+def test_postgres_reconciliation_uses_only_the_historical_terminal_inspector(
+    monkeypatch,
+) -> None:
+    inspected_contexts = []
+
+    def reject_v2_inspection(*_args, **_kwargs):
+        raise AssertionError("the V2 terminal inspector must remain unreachable")
+
+    def inspect_historical(_bootstrap, bootstrap_context):
+        inspected_contexts.append(bootstrap_context)
+        return PostgresBootstrapTerminalInspection(
+            system_identifier=22,
+            exact=True,
+            migration_versions=(1, 2, 3, 4, 5, 6),
+            runtime_mode="LEGACY",
+            runtime_generation=0,
+            nonempty_relations=(),
+        )
+
+    monkeypatch.setattr(PostgresBootstrap, "inspect_terminal", reject_v2_inspection)
+    monkeypatch.setattr(
+        PostgresBootstrap,
+        "inspect_historical_terminal",
+        inspect_historical,
+    )
+    reconciler = PostgresLegacySnapshotReconciliation(
+        lambda: object(), lambda: object()
+    )
+
+    exact, finding = reconciler._terminal_is_exact(_context(), _import_receipt())
+
+    assert exact is True
+    assert finding is None
+    assert len(inspected_contexts) == 1
+    assert inspected_contexts[0].roles.opening is None
+
+
+def test_postgres_reconciliation_accepts_the_head6_readiness_marker() -> None:
+    context = _context()
+    receipt = _import_receipt()
+    intent = context.import_context.cutover_context.target_bootstrap_intent
+    readiness = intent.roles.readiness
+    cursor = MagicMock()
+    cursor.fetchone.side_effect = (
+        (
+            intent.expected_database,
+            readiness,
+            readiness,
+            readiness,
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+            -1,
+            None,
+            f"elvis-postgres-bootstrap:v1:{intent.expected_database}:readiness",
+        ),
+        (
+            intent.expected_database,
+            readiness,
+            readiness,
+            readiness,
+            receipt.target_system_identifier,
+        ),
+    )
+    connection = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+
+    PostgresLegacySnapshotReconciliation._require_readiness_identity(
+        connection,
+        context,
+        receipt,
+    )
+
+    assert cursor.execute.call_count == 2
 
 
 def _candidate(

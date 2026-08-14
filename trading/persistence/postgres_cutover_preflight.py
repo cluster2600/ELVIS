@@ -835,7 +835,7 @@ class PostgresCutoverPreflight:
         try:
             inspection = PostgresBootstrap(
                 self._target_connection_factory
-            ).inspect_terminal(bootstrap_context)
+            ).inspect_historical_terminal(bootstrap_context)
         except PostgresBootstrapStorageError:
             storage_failed = True
         else:

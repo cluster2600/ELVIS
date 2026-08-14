@@ -9,7 +9,12 @@ from threading import Barrier, Event, Lock
 
 import psycopg2
 import pytest
+from psycopg2 import sql
 
+from tests.postgres.test_paper_account_readiness_postgres import (
+    _readiness_opening_role,
+    _seed_fresh_opening_provenance,
+)
 from trading.application.durable_submission import (
     DurableSubmissionDisposition,
     PaperAccountSubmissionCommitUnknown,
@@ -44,6 +49,9 @@ from trading.persistence.atomic_paper_submission_owner import (
 from trading.persistence.paper_account_journal import (
     PaperAccountStorageError,
     PostgresPaperAccountJournal,
+)
+from trading.persistence.paper_account_journal_codec import (
+    encode_paper_account_opening,
 )
 
 SCOPE = "paper:atomic-account-owner"
@@ -80,6 +88,30 @@ def _connect(dsn):
     connection = psycopg2.connect(dsn)
     connection.autocommit = False
     return connection
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_atomic_owner_opening_role(postgres_database_dsn):
+    yield
+    connection = _connect(postgres_database_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = _readiness_opening_role(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (role_name,),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name))
+                )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _instruction(
@@ -219,6 +251,12 @@ def _opening(account_key=ACCOUNT_KEY, *, available=Decimal("100.00")):
 
 
 def _activate(dsn, opening, runtime_generation=RUNTIME_GENERATION):
+    encoded = encode_paper_account_opening(
+        opening.execution_scope,
+        opening.owner_generation,
+        opening.account,
+    )
+    _seed_fresh_opening_provenance(dsn, encoded)
     connection = _connect(dsn)
     try:
         with connection.cursor() as cursor:
@@ -351,6 +389,12 @@ class _CommitThenRaiseConnection(_TrackingConnection):
         self.commits += 1
         self._connection.commit()
         raise psycopg2.OperationalError("simulated lost commit acknowledgement")
+
+
+class _CommitRejectedConnection(_TrackingConnection):
+    def commit(self):
+        self.commits += 1
+        raise psycopg2.OperationalError("simulated rejected commit")
 
 
 class _MutationFailureCursor(_TracingCursor):
@@ -1140,19 +1184,24 @@ def test_failure_after_every_sql_mutation_rolls_back_all_snapshotted_relations(
     migrated_postgres_dsn,
 ):
     probe_key = "mutation-probe"
-    _provision(migrated_postgres_dsn, probe_key)
+    opening = _provision(migrated_postgres_dsn, probe_key)
     statements = []
-    probe_factory = _TrackingFactory(migrated_postgres_dsn, statements=statements)
-    _owner(migrated_postgres_dsn, _CountingPlanner(), probe_factory).execute(
-        _context(
-            account_key=probe_key,
-            instruction=_instruction(
-                client_order_id="mutation-probe-order",
-                decision_id="mutation-probe-decision",
-                position_key="mutation-probe-position",
-            ),
-        )
+    probe_factory = _TrackingFactory(
+        migrated_postgres_dsn,
+        statements=statements,
+        connection_type=_CommitRejectedConnection,
     )
+    with pytest.raises(PaperAccountSubmissionCommitUnknown):
+        _owner(migrated_postgres_dsn, _CountingPlanner(), probe_factory).execute(
+            _context(
+                account_key=probe_key,
+                instruction=_instruction(
+                    client_order_id="mutation-probe-order",
+                    decision_id="mutation-probe-decision",
+                    position_key="mutation-probe-position",
+                ),
+            )
+        )
     mutation_count = sum(
         statement.upper().startswith(("INSERT ", "UPDATE ", "DELETE "))
         for statement in statements
@@ -1161,14 +1210,9 @@ def test_failure_after_every_sql_mutation_rolls_back_all_snapshotted_relations(
 
     for fail_after in range(1, mutation_count + 1):
         runtime_generation = fail_after + 1
-        account_key = f"fault-account-{fail_after}"
-        _provision(
-            migrated_postgres_dsn,
-            account_key,
-            runtime_generation=runtime_generation,
-        )
+        _activate(migrated_postgres_dsn, opening, runtime_generation)
         context = _context(
-            account_key=account_key,
+            account_key=probe_key,
             runtime_generation=runtime_generation,
             instruction=_instruction(
                 client_order_id=f"fault-order-{fail_after}",

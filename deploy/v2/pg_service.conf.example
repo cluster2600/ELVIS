@@ -10,24 +10,6 @@ port=5432
 dbname=elvis_paper_v2_rehearsal
 user=elvis_v2_migrator
 
-[elvis_v2_legacy_runtime]
-host=postgres
-port=5432
-dbname=elvis_paper_v2_rehearsal
-user=elvis_v2_legacy_runtime
-
-[elvis_v2_atomic_runtime]
-host=postgres
-port=5432
-dbname=elvis_paper_v2_rehearsal
-user=elvis_v2_atomic_runtime
-
-[elvis_v2_activation]
-host=postgres
-port=5432
-dbname=elvis_paper_v2_rehearsal
-user=elvis_v2_activation
-
 [elvis_v2_readiness]
 host=postgres
 port=5432

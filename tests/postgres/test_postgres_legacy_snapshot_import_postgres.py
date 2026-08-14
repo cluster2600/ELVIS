@@ -32,6 +32,7 @@ from tests.postgres.legacy_snapshot_import_support import (
 )
 from tests.postgres.test_postgres_cutover_preflight_postgres import (
     _POSTGRES_IMAGE,
+    _bootstrap_historical_head6_target,
     _create_isolated_network,
     _database_snapshot,
     _published_port,
@@ -54,7 +55,6 @@ from trading.persistence.postgres_bootstrap import (
     PostgresBootstrap,
     PostgresBootstrapContext,
     PostgresBootstrapRoles,
-    PostgresBootstrapStatus,
 )
 from trading.persistence.postgres_cutover_preflight import PostgresCutoverPreflight
 from trading.persistence.postgres_legacy_snapshot_import import (
@@ -144,68 +144,11 @@ def _bootstrap_target(
     *,
     roles: PostgresBootstrapRoles | None = None,
 ) -> tuple[PostgresBootstrapContext, str]:
-    if roles is None:
-        roles = PostgresBootstrapRoles(
-            schema_owner=f"im_{suffix}_owner",
-            migrator=f"im_{suffix}_migrator",
-            legacy_runtime=f"im_{suffix}_legacy",
-            atomic_runtime=f"im_{suffix}_atomic",
-            activation=f"im_{suffix}_activation",
-            readiness=f"im_{suffix}_readiness",
-            trainer=f"im_{suffix}_trainer",
-        )
-    context = PostgresBootstrapContext(
-        expected_database=_TARGET_DATABASE,
-        admin_role=_ADMIN_ROLE,
-        roles=roles,
-        adoption=None,
-    )
-
-    def admin_factory():
-        return _connect(target_dsn)
-
-    first = PostgresBootstrap(admin_factory).reconcile(context)
-    assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
-    passwords = {
-        role: f"test-only-{suffix}-{index}-{secrets.token_hex(8)}"
-        for index, role in enumerate(roles.login_roles)
-    }
-    admin = admin_factory()
-    admin.autocommit = True
-    try:
-        with admin.cursor() as cursor:
-            for role, password in passwords.items():
-                cursor.execute(
-                    sql.SQL("ALTER ROLE {} LOGIN PASSWORD %s").format(
-                        sql.Identifier(role)
-                    ),
-                    (password,),
-                )
-    finally:
-        admin.close()
-
-    def role_factory(role: str):
-        role_dsn = make_dsn(target_dsn, user=role, password=passwords[role])
-
-        def connect():
-            return _connect(role_dsn)
-
-        return connect
-
-    complete = PostgresBootstrap(
-        admin_factory,
-        migrator_connection_factory=role_factory(roles.migrator),
-        legacy_runtime_connection_factory=role_factory(roles.legacy_runtime),
-        atomic_runtime_connection_factory=role_factory(roles.atomic_runtime),
-        activation_connection_factory=role_factory(roles.activation),
-        readiness_connection_factory=role_factory(roles.readiness),
-        trainer_connection_factory=role_factory(roles.trainer),
-    ).reconcile(context)
-    assert complete.status is PostgresBootstrapStatus.COMPLETE
-    return context, make_dsn(
+    return _bootstrap_historical_head6_target(
         target_dsn,
-        user=roles.migrator,
-        password=passwords[roles.migrator],
+        suffix,
+        role_prefix="im",
+        roles=roles,
     )
 
 
@@ -550,9 +493,9 @@ def _bootstrapped_decoy_target(pair: ImportPair, tmp_path: Path):
             project.rsplit("-", 1)[-1],
             roles=roles,
         )
-        inspection = PostgresBootstrap(lambda: _connect(admin_dsn)).inspect_terminal(
-            context
-        )
+        inspection = PostgresBootstrap(
+            lambda: _connect(admin_dsn)
+        ).inspect_historical_terminal(context)
         assert inspection.exact is True
         assert inspection.nonempty_relations == ()
         yield BootstrappedTarget(
@@ -1377,7 +1320,9 @@ def test_sequence_transaction_rechecks_terminal_and_rows_before_setval(
         assert not any("setval" in event for event in events)
         assert _sequence_states(pair.target_admin_dsn) == initial_sequences
         assert _relation_rows(pair.target_admin_dsn) == source_rows
-        terminal = PostgresBootstrap(pair.target_admin_factory).inspect_terminal(
+        terminal = PostgresBootstrap(
+            pair.target_admin_factory
+        ).inspect_historical_terminal(
             PostgresBootstrapContext(
                 expected_database=pair.context.target_bootstrap_intent.expected_database,
                 admin_role=pair.context.target_bootstrap_intent.admin_role,

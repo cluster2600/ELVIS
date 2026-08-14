@@ -33,6 +33,10 @@ from trading.application.legacy_snapshot_import import (
     LegacySnapshotRelationReceipt,
 )
 from trading.persistence import postgres_legacy_snapshot_import as importer_module
+from trading.persistence.postgres_bootstrap import (
+    PostgresBootstrap,
+    PostgresBootstrapTerminalInspection,
+)
 from trading.persistence.postgres_legacy_snapshot_import import (
     PostgresLegacySnapshotImport,
     PostgresLegacySnapshotImportBusyError,
@@ -52,6 +56,27 @@ _LEGACY_RELATIONS = (
     "np.open_positions",
     "np.trades",
     "np.trading_session_resets",
+)
+_HISTORICAL_HEAD6_AUTHORITY_TABLES = (
+    "account_balances",
+    "liquidations",
+    "margin_history",
+    "model_predictions",
+    "open_positions",
+    "order_events",
+    "orders",
+    "paper_account_balances",
+    "paper_account_batch_manifests",
+    "paper_account_postings",
+    "paper_account_settlements",
+    "paper_account_streams",
+    "paper_margin_reservations",
+    "paper_runtime_control",
+    "paper_runtime_generations",
+    "position_streams",
+    "schema_migrations",
+    "trades",
+    "trading_session_resets",
 )
 
 
@@ -504,7 +529,7 @@ def test_raw_migrator_identity_failure_is_redacted_and_connection_is_closed(
 
     monkeypatch.setattr(
         "trading.persistence.postgres_legacy_snapshot_import."
-        "PostgresBootstrap._require_migrator_connection_identity",
+        "PostgresBootstrap._require_historical_migrator_connection_identity",
         fail_identity,
     )
     importer = PostgresLegacySnapshotImport(
@@ -521,6 +546,79 @@ def test_raw_migrator_identity_failure_is_redacted_and_connection_is_closed(
     _assert_secret_absent_from_exception_graph(raised.value, secret)
     connection.rollback.assert_not_called()
     connection.close.assert_called_once_with()
+
+
+def test_migrator_identity_uses_the_historical_head6_boundary(monkeypatch) -> None:
+    connection = _fresh_connection_double()
+    current_identity = MagicMock(
+        side_effect=AssertionError("historical import must not claim V2 identity")
+    )
+    historical_identity = MagicMock()
+    monkeypatch.setattr(
+        PostgresBootstrap,
+        "_require_migrator_connection_identity",
+        current_identity,
+    )
+    monkeypatch.setattr(
+        PostgresBootstrap,
+        "_require_historical_migrator_connection_identity",
+        historical_identity,
+    )
+    importer = PostgresLegacySnapshotImport(
+        lambda: MagicMock(),
+        lambda: MagicMock(),
+        lambda: connection,
+    )
+
+    assert importer._open_migrator(_context()) is connection
+
+    current_identity.assert_not_called()
+    historical_identity.assert_called_once()
+    historical_context = historical_identity.call_args.args[1]
+    assert historical_context.roles.opening is None
+
+
+def test_target_revalidation_uses_the_historical_head6_boundary(monkeypatch) -> None:
+    current_terminal = MagicMock(
+        side_effect=AssertionError("historical import must not claim V2 terminal")
+    )
+    historical_terminal = MagicMock(
+        return_value=PostgresBootstrapTerminalInspection(
+            system_identifier=22,
+            exact=True,
+            migration_versions=(1, 2, 3, 4, 5, 6),
+            runtime_mode="LEGACY",
+            runtime_generation=0,
+            nonempty_relations=("np.trades",),
+        )
+    )
+    monkeypatch.setattr(PostgresBootstrap, "inspect_terminal", current_terminal)
+    monkeypatch.setattr(
+        PostgresBootstrap,
+        "inspect_historical_terminal",
+        historical_terminal,
+    )
+    importer = PostgresLegacySnapshotImport(
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    )
+
+    state = importer._inspect_target(
+        _context(),
+        _preflight_receipt(),
+        _source_relations(),
+    )
+
+    assert state == "candidate_exact"
+    current_terminal.assert_not_called()
+    historical_terminal.assert_called_once()
+    historical_context = historical_terminal.call_args.args[0]
+    assert historical_context.roles.opening is None
+    assert historical_context.roles.all == tuple(
+        getattr(_role_manifest(), field.name)
+        for field in fields(FreshTargetRoleManifest)
+    )
 
 
 @pytest.mark.parametrize(
@@ -741,6 +839,18 @@ def test_target_cluster_binding_and_locked_terminal_recheck_precede_copy() -> No
     assert import_source.index("_POSTGRES_INTEGER_MAX") < import_source.index(
         "target_state = self._inspect_target"
     )
+
+
+def test_import_locks_are_frozen_to_the_historical_head6_catalog() -> None:
+    assert importer_module._HISTORICAL_HEAD6_AUTHORITY_TABLES == (
+        _HISTORICAL_HEAD6_AUTHORITY_TABLES
+    )
+    assert importer_module._LOCK_IMPORT_TABLES_SQL == (
+        "LOCK TABLE "
+        + ", ".join(f"ONLY np.{table}" for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES)
+        + " IN SHARE MODE NOWAIT"
+    )
+    assert "paper_fresh_opening" not in importer_module._LOCK_IMPORT_TABLES_SQL
 
 
 def test_cli_requires_all_operator_confirmations_before_file_or_service_access(

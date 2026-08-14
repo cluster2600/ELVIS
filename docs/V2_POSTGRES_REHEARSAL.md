@@ -38,9 +38,11 @@ Create a directory outside Git with mode `0700`. Every file in it must use mode
 
 - `postgres_admin_password` for first initialization;
 - `pg_service.conf`, based on `deploy/v2/pg_service.conf.example`;
-- `pgpass`, containing the admin and later six role credentials;
-- `bootstrap.json`, copied first from the stage manifest and later from the
-  complete manifest.
+- `pgpass`, containing the admin and later three bootstrap-login credentials;
+- private, approved copies of the bootstrap manifest and the signed opening
+  intent, detached approval and trust policy; and
+- the independently authenticated SHA-256 pins for the canonical bootstrap
+  manifest, trust policy and signer public key.
 
 Do not place passwords, a populated pgpass, or endpoint overrides in the
 repository. The committed JSON and service files are non-secret examples only.
@@ -95,18 +97,37 @@ Graph artefacts: [Mermaid source](../diagrams/v2-c3c1-fresh-state-flow.mmd),
 1. Confirm that the project name and volume belong only to this rehearsal.
 2. Render the isolated file with `docker compose ... config --quiet`.
 3. Start only the `postgres` service under the `v2-rehearsal` profile.
-4. Verify PostgreSQL 15, `password_encryption=scram-sha-256`, and zero HBA
-   parser errors.
-5. Run the one-shot CLI with `bootstrap-stage-v1.example.json`; require exit
-   `10`, `CREDENTIALS_REQUIRED`, no `np` schema, and seven staged roles.
-6. Provision the six passwords externally using parameterized SQL over the
-   admin channel. No production credential writer is included in this slice.
-7. Add the six entries to the external libpq files and use
-   `bootstrap-complete-v1.example.json`.
-8. Run the CLI; require exit `0`, migrations 1 through 6, and `COMPLETE`.
-9. Repeat once and require the same terminal result.
-10. Prove every role with its own credential and reject crossed credentials.
-11. Preserve only secret-free receipts and test evidence, then stop the
+4. Verify PostgreSQL 15, `password_encryption=scram-sha-256`,
+   `max_prepared_transactions=0`, zero target prepared transactions, and zero
+   HBA parser errors.
+5. Copy `bootstrap-stage-v2.example.json` outside Git and replace every invalid
+   admission sentinel with the exact approved candidate, pin-authority record
+   and deployment incarnation. Authenticate the resulting canonical manifest
+   digest independently; the committed template is intentionally rejected.
+6. Run the one-shot CLI with that private manifest and the exact opening
+   documents/pins; require exit `10`, `CREDENTIALS_REQUIRED`, no `np` schema,
+   eight staged `NOLOGIN` roles, and the five persistent-mutation built-ins
+   already revoked from `PUBLIC` and every managed role.
+7. Provision only the three bootstrap credentials (`migrator`, `readiness`,
+   `trainer`) externally using
+   parameterized SQL over the admin channel. No production credential writer
+   is included in this slice.
+8. Add those three entries to the external libpq files and use a private,
+   identically admitted copy of `bootstrap-complete-v2.example.json`.
+9. Run the CLI; require exit `0`, migrations 1 through 7, and `COMPLETE`.
+10. Repeat once and require the same terminal result even if the signed
+    approval has since expired, because the durable admission is replayed
+    before freshness evaluation.
+11. Prove the two terminal managed logins with their own credentials and reject
+    crossed credentials. Prove that `schema_owner`, `migrator`, `opening`,
+    `legacy_runtime`, `atomic_runtime`, and `activation` cannot log in, and that
+    `opening`, `legacy_runtime`, and `atomic_runtime` have no ACL. From both the
+    `readiness` and `trainer` sessions, require `has_function_privilege(...,
+    'EXECUTE') = false` for `lo_create(oid)`, `lo_creat(integer)`,
+    `lo_from_bytea(oid,bytea)`, and both `pg_logical_emit_message` overloads.
+    Recheck `max_prepared_transactions=0`, zero target rows in
+    `pg_prepared_xacts`, and zero rows in `pg_largeobject_metadata`.
+12. Preserve only secret-free receipts and test evidence, then stop the
     rehearsal services.
 
 The full command syntax, receipt taxonomy, and commit-unknown recovery remain
@@ -130,6 +151,12 @@ docker compose \
   --profile v2-operator \
   run --rm --no-deps bootstrap \
   --config /run/operator/bootstrap.json \
+  --pinned-config-sha256 <authenticated-lowercase-sha256> \
+  --opening-intent /run/operator/intent.json \
+  --opening-approval /run/operator/approval.json \
+  --opening-trust-policy /run/operator/trust-policy.json \
+  --pinned-trust-policy-sha256 <authenticated-lowercase-sha256> \
+  --pinned-signer-public-key-sha256 <authenticated-lowercase-sha256> \
   --apply \
   --confirm-exclusive-ddl-role-window
 ```
@@ -201,7 +228,8 @@ docker compose \
 ## Verification requirement
 
 Acceptance requires the Python 3.14 contract, opt-in PostgreSQL 15 scenarios,
-the `10 -> 0 -> 0` flow, six separate SCRAM identities, HBA catalog,
+the `10 -> 0 -> 0` flow, three bootstrap SCRAM identities, two terminal managed
+logins, six inert `NOLOGIN` roles, exact HBA/catalog evidence,
 marker-preserving restart, non-mutating rejection, redaction, cleanup, static
 checks, Compose rendering, links, and diagrams to pass on one frozen commit.
 The pull request and release are the immutable acceptance record; none of this

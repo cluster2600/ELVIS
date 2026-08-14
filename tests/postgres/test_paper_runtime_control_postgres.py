@@ -473,7 +473,7 @@ def test_runtime_control_catalog_is_exact_and_fence_triggers_are_always_enabled(
                     0,
                     True,
                     "plpgsql",
-                    ["search_path=pg_catalog"],
+                    ["search_path=pg_catalog, pg_temp"],
                     """
 DECLARE
     current_mode TEXT;

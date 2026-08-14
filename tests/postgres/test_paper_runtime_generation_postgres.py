@@ -1,8 +1,17 @@
 """PostgreSQL 15 proofs for immutable paper-runtime generation provenance."""
 
+from types import SimpleNamespace
+
 import psycopg2
 import pytest
+from psycopg2 import sql
 
+from tests.postgres.test_paper_account_readiness_postgres import (
+    _canonical_json,
+    _readiness_opening_role,
+    _seed_fresh_opening_provenance,
+    _sha256,
+)
 from trading.persistence import apply_migrations, load_migrations
 from trading.persistence.paper_account_readiness import (
     _runtime_generation_catalog_is_exact,
@@ -11,7 +20,8 @@ from trading.persistence.paper_account_readiness import (
 SCOPE = "paper:test"
 ACCOUNT = "paper-main"
 OWNER_GENERATION = 7
-OPENING_SHA = "a" * 64
+OPENING_PAYLOAD = _canonical_json({})
+OPENING_SHA = _sha256(OPENING_PAYLOAD)
 BATCH_SHA = "b" * 64
 
 
@@ -19,6 +29,30 @@ def _connect(dsn):
     connection = psycopg2.connect(dsn)
     connection.autocommit = False
     return connection
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_generation_opening_role(postgres_database_dsn):
+    yield
+    connection = _connect(postgres_database_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = _readiness_opening_role(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (role_name,),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name))
+                )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _insert_opening(cursor, *, account=ACCOUNT, opening_sha=OPENING_SHA):
@@ -32,9 +66,25 @@ def _insert_opening(cursor, *, account=ACCOUNT, opening_sha=OPENING_SHA):
             opening_version,
             opening_payload,
             opening_payload_sha256
-        ) VALUES (%s, %s, %s, 'USDT', 1, '{}'::jsonb, %s)
+        ) VALUES (%s, %s, %s, 'USDT', 1, %s::jsonb, %s)
         """,
-        (account, SCOPE, OWNER_GENERATION, opening_sha),
+        (account, SCOPE, OWNER_GENERATION, OPENING_PAYLOAD, opening_sha),
+    )
+
+
+def _insert_current_opening(connection, cursor, dsn):
+    _insert_opening(cursor)
+    connection.commit()
+    _seed_fresh_opening_provenance(
+        dsn,
+        SimpleNamespace(
+            execution_scope=SCOPE,
+            account_key=ACCOUNT,
+            owner_generation=OWNER_GENERATION,
+            collateral_asset="USDT",
+            opening_payload=OPENING_PAYLOAD,
+            opening_payload_sha256=OPENING_SHA,
+        ),
     )
 
 
@@ -175,7 +225,7 @@ def test_generation_schema_is_exact_and_fresh_database_has_no_epoch(
         connection.close()
 
 
-def test_version_four_upgrade_preserves_v1_payload_hash_and_null_generation(
+def test_version_four_upgrade_to_historical_head_six_preserves_v1_payload(
     postgres_database_dsn,
 ):
     migrations = load_migrations()
@@ -193,7 +243,7 @@ def test_version_four_upgrade_preserves_v1_payload_hash_and_null_generation(
             before = cursor.fetchone()
         connection.commit()
 
-        assert apply_migrations(connection, migrations) == (5, 6)
+        assert apply_migrations(connection, migrations[:6]) == (5, 6)
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT batch_version, batch_payload::text,
@@ -229,7 +279,7 @@ def test_epoch_rejects_nonpositive_generation_and_unclean_activation_id(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             with pytest.raises(psycopg2.Error) as raised:
                 _insert_epoch(
                     cursor,
@@ -246,7 +296,7 @@ def test_activation_id_is_globally_unique(migrated_postgres_dsn):
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             _insert_epoch(cursor, 1, activation_id="same-activation")
             with pytest.raises(psycopg2.Error) as raised:
                 _insert_epoch(cursor, 2, activation_id="same-activation")
@@ -260,7 +310,7 @@ def test_epoch_rejects_infinite_activation_timestamp(migrated_postgres_dsn):
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             cursor.execute("SAVEPOINT before_infinite_epoch")
             with pytest.raises(psycopg2.Error) as raised:
                 cursor.execute(
@@ -314,7 +364,7 @@ def test_generation_registry_is_append_only_and_failed_mutations_leave_no_delta(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             _insert_epoch(cursor)
             cursor.execute("""
                 SELECT runtime_generation, activation_id, activated_at
@@ -340,7 +390,7 @@ def test_generation_append_only_trigger_is_always_enabled(migrated_postgres_dsn)
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             _insert_epoch(cursor)
             cursor.execute("SET LOCAL session_replication_role = replica")
             cursor.execute("SAVEPOINT before_replica_delete")
@@ -370,10 +420,10 @@ def test_epoch_requires_exact_account_opening_provenance(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             with pytest.raises(psycopg2.Error) as raised:
                 _insert_epoch(cursor, account=account, opening_sha=opening_sha)
-        assert raised.value.pgcode == "23503"
+        assert raised.value.pgcode == "55000"
     finally:
         connection.rollback()
         connection.close()
@@ -406,7 +456,7 @@ def test_manifest_generation_fk_binds_the_complete_opening_identity(
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
-            _insert_opening(cursor)
+            _insert_current_opening(connection, cursor, migrated_postgres_dsn)
             _insert_epoch(cursor)
             _insert_order_ack(cursor)
             _insert_legacy_manifest_without_external_refs(cursor)
@@ -420,17 +470,16 @@ def test_manifest_generation_fk_binds_the_complete_opening_identity(
                 """)
             assert cursor.fetchone() == (2, 1)
 
-            _insert_opening(cursor, account="paper-other")
             _insert_epoch(
                 cursor,
                 2,
                 activation_id="activation-2",
-                account="paper-other",
             )
+            _insert_opening(cursor, account="paper-other")
             with pytest.raises(psycopg2.Error) as raised:
                 cursor.execute("""
                     UPDATE np.paper_account_batch_manifests
-                    SET runtime_generation = 2
+                    SET account_key = 'paper-other', runtime_generation = 2
                     """)
             assert raised.value.pgcode == "23503"
     finally:

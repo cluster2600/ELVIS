@@ -20,7 +20,6 @@ from trading.application.legacy_snapshot_import import (
     LegacySnapshotRelationReceipt,
 )
 from trading.persistence.postgres_bootstrap import (
-    _AUTHORITY_TABLES,
     PostgresBootstrap,
     PostgresBootstrapContext,
     PostgresBootstrapDriftError,
@@ -48,13 +47,34 @@ _MAX_TOTAL_ROWS = 100_000
 _MAX_CANONICAL_BYTES = 512 * 1024 * 1024
 _MAX_CANONICAL_ROW_BYTES = 64 * 1024
 _POSTGRES_INTEGER_MAX = (1 << 31) - 1
+_HISTORICAL_HEAD6_AUTHORITY_TABLES = (
+    "account_balances",
+    "liquidations",
+    "margin_history",
+    "model_predictions",
+    "open_positions",
+    "order_events",
+    "orders",
+    "paper_account_balances",
+    "paper_account_batch_manifests",
+    "paper_account_postings",
+    "paper_account_settlements",
+    "paper_account_streams",
+    "paper_margin_reservations",
+    "paper_runtime_control",
+    "paper_runtime_generations",
+    "position_streams",
+    "schema_migrations",
+    "trades",
+    "trading_session_resets",
+)
 # Each target validation SELECT must acquire its snapshot after the SHARE locks.
 # READ COMMITTED prevents the pre-lock identity query from pinning stale rows.
 _TARGET_ISOLATION_SQL = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
 _LOCK_TIMEOUT_SQL = "SET LOCAL lock_timeout = '1s'"
 _LOCK_IMPORT_TABLES_SQL = (
     "LOCK TABLE "
-    + ", ".join(f"ONLY np.{table}" for table in _AUTHORITY_TABLES)
+    + ", ".join(f"ONLY np.{table}" for table in _HISTORICAL_HEAD6_AUTHORITY_TABLES)
     + " IN SHARE MODE NOWAIT"
 )
 _SELECT_MIGRATOR_TARGET_IDENTITY_SQL = """
@@ -591,7 +611,7 @@ class PostgresLegacySnapshotImport:
         try:
             inspection = PostgresBootstrap(
                 self._target_admin_connection_factory
-            ).inspect_terminal(bootstrap_context)
+            ).inspect_historical_terminal(bootstrap_context)
         except PostgresBootstrapStorageError:
             failed = True
         else:
@@ -643,7 +663,7 @@ class PostgresLegacySnapshotImport:
         identity_drift = False
         identity_storage_failed = False
         try:
-            PostgresBootstrap._require_migrator_connection_identity(
+            PostgresBootstrap._require_historical_migrator_connection_identity(
                 connection,
                 bootstrap_context,
             )

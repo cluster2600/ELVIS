@@ -160,10 +160,15 @@ def test_operator_image_is_python_314_source_only_and_non_runtime() -> None:
     for module in COMMANDS.values():
         script_name = module.rsplit(".", 1)[-1] + ".py"
         assert f"scripts/{script_name}" in dockerfile
+    assert "scripts/v2_opening_plan.py" in dockerfile
+    assert "trading/application/fresh_opening.py" in dockerfile
 
     requirements = _text(ROOT / "deploy" / "v2" / "requirements.operator.txt")
     assert requirements.count("psycopg2-binary==2.9.12") == 1
-    assert requirements.count("--hash=sha256:") == 2
+    assert requirements.count("cryptography==50.0.0") == 1
+    assert requirements.count("cffi==2.0.0") == 1
+    assert requirements.count("pycparser==3.0") == 1
+    assert requirements.count("--hash=sha256:") == 7
 
 
 def test_preview_compose_pulls_exact_image_and_is_hardened() -> None:
@@ -187,7 +192,16 @@ def test_preview_service_file_requires_verified_tls_for_every_service() -> None:
     service_file = _text(ROOT / "deploy/v2/pg_service.preview.conf.example")
     sections = re.findall(r"(?m)^\[[^]]+\]$", service_file)
 
-    assert len(sections) == 11
+    assert sections == [
+        "[elvis_v2_admin]",
+        "[elvis_v2_migrator]",
+        "[elvis_v2_readiness]",
+        "[elvis_v2_trainer]",
+        "[elvis_source_clone]",
+        "[elvis_fresh_target_admin]",
+        "[elvis_fresh_target_migrator]",
+        "[elvis_fresh_target_readiness]",
+    ]
     assert service_file.count("sslmode=verify-full") == len(sections)
     assert service_file.count("sslrootcert=/run/operator/ca.crt") == len(sections)
     assert "sslmode=prefer" not in service_file

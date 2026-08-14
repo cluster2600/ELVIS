@@ -20,6 +20,13 @@ from trading.persistence.postgres_bootstrap import (
     PostgresBootstrapRoles,
     PostgresBootstrapStatus,
     PostgresBootstrapStorageError,
+    PostgresFreshOpeningAdmission,
+)
+
+_OPENING_ADMISSION = PostgresFreshOpeningAdmission(
+    candidate_sha256="a" * 64,
+    pin_authority_record_sha256="b" * 64,
+    deployment_incarnation_id="deployment-test-001",
 )
 
 _AUTHORITY_TABLES = (
@@ -35,6 +42,9 @@ _AUTHORITY_TABLES = (
     "paper_account_postings",
     "paper_account_settlements",
     "paper_account_streams",
+    "paper_fresh_opening_admissions",
+    "paper_fresh_opening_nonces",
+    "paper_fresh_opening_provisionings",
     "paper_margin_reservations",
     "paper_runtime_control",
     "paper_runtime_generations",
@@ -52,26 +62,6 @@ _LEGACY_SEQUENCES = (
     "trades_id_seq",
     "trading_session_resets_id_seq",
 )
-_LEGACY_PRIVILEGES = {
-    "account_balances": ("SELECT", "INSERT", "UPDATE"),
-    "liquidations": ("SELECT", "INSERT"),
-    "margin_history": ("SELECT", "INSERT"),
-    "model_predictions": ("SELECT", "INSERT", "UPDATE"),
-    "open_positions": ("SELECT", "INSERT", "DELETE"),
-    "trades": ("SELECT", "INSERT", "DELETE"),
-    "trading_session_resets": ("SELECT", "INSERT"),
-}
-_ATOMIC_PRIVILEGES = {
-    "order_events": ("SELECT", "INSERT"),
-    "orders": ("SELECT", "INSERT", "UPDATE"),
-    "paper_account_balances": ("SELECT", "INSERT", "UPDATE"),
-    "paper_account_batch_manifests": ("SELECT", "INSERT"),
-    "paper_account_postings": ("SELECT", "INSERT"),
-    "paper_account_settlements": ("SELECT", "INSERT"),
-    "paper_account_streams": ("SELECT", "INSERT", "UPDATE"),
-    "paper_margin_reservations": ("SELECT", "INSERT", "DELETE"),
-    "position_streams": ("SELECT", "INSERT", "UPDATE"),
-}
 _PACKAGED_INDEXES = (
     "idx_model_predictions_scored",
     "idx_trades_symbol_ts",
@@ -82,6 +72,9 @@ _PACKAGED_INDEXES = (
     "orders_paper_account_batch_ref_uq",
     "orders_paper_account_symbol_ref_uq",
     "orders_venue_identity_uq",
+    "paper_fresh_opening_admissions_binding_uq",
+    "paper_fresh_opening_admissions_pkey",
+    "paper_fresh_opening_provisionings_opening_ref_uq",
 )
 
 
@@ -119,19 +112,21 @@ class BootstrapCluster:
         if with_credentials:
             factories = {
                 "migrator_connection_factory": self.role_factory(self.roles.migrator),
-                "legacy_runtime_connection_factory": self.role_factory(
-                    self.roles.legacy_runtime
-                ),
-                "atomic_runtime_connection_factory": self.role_factory(
-                    self.roles.atomic_runtime
-                ),
-                "activation_connection_factory": self.role_factory(
-                    self.roles.activation
-                ),
                 "readiness_connection_factory": self.role_factory(self.roles.readiness),
                 "trainer_connection_factory": self.role_factory(self.roles.trainer),
             }
-        return PostgresBootstrap(admin_factory or self.admin_factory, **factories)
+        bootstrap = PostgresBootstrap(admin_factory or self.admin_factory, **factories)
+        reconcile = bootstrap.reconcile
+
+        def reconcile_with_current_authority(context, /, **kwargs):
+            kwargs.setdefault(
+                "admission_authorizer",
+                lambda _evaluated_at: context.opening_admission.document_sha256,
+            )
+            return reconcile(context, **kwargs)
+
+        bootstrap.reconcile = reconcile_with_current_authority
+        return bootstrap
 
     def context(
         self,
@@ -143,13 +138,14 @@ class BootstrapCluster:
             admin_role=self.admin_role,
             roles=self.roles,
             adoption=adoption,
+            opening_admission=_OPENING_ADMISSION,
         )
 
     def provision_managed_passwords(self) -> None:
         connection = self.admin_factory()
         try:
             with connection.cursor() as cursor:
-                for role in self.roles.login_roles:
+                for role in self.roles.bootstrap_login_roles:
                     cursor.execute(
                         sql.SQL("ALTER ROLE {} LOGIN PASSWORD %s").format(
                             sql.Identifier(role)
@@ -265,6 +261,7 @@ def bootstrap_cluster(postgres_database_dsn, postgres_connection_allowlist):
     roles = PostgresBootstrapRoles(
         schema_owner=f"{prefix}_owner",
         migrator=f"{prefix}_migrator",
+        opening=f"{prefix}_opening",
         legacy_runtime=f"{prefix}_legacy",
         atomic_runtime=f"{prefix}_atomic",
         activation=f"{prefix}_activation",
@@ -273,14 +270,14 @@ def bootstrap_cluster(postgres_database_dsn, postgres_connection_allowlist):
     )
     old_runtime = f"{prefix}_old"
     outsider = f"{prefix}_outsider"
-    login_test_roles = roles.login_roles + (old_runtime, outsider)
+    connection_test_roles = roles.all + (old_runtime, outsider)
     passwords = {
         role: f"test-only-{suffix}-{index}"
-        for index, role in enumerate(login_test_roles, start=1)
+        for index, role in enumerate(connection_test_roles, start=1)
     }
     base_parameters = parse_dsn(postgres_database_dsn)
     role_dsns = {}
-    for role in login_test_roles:
+    for role in connection_test_roles:
         parameters = dict(base_parameters)
         parameters.update(user=role, password=passwords[role])
         role_dsn = make_dsn(**parameters)
@@ -363,6 +360,7 @@ def _logical_role(cluster: BootstrapCluster, role: str) -> str:
     return {
         cluster.roles.schema_owner: "schema_owner",
         cluster.roles.migrator: "migrator",
+        cluster.roles.opening: "opening",
         cluster.roles.legacy_runtime: "legacy_runtime",
         cluster.roles.atomic_runtime: "atomic_runtime",
         cluster.roles.activation: "activation",
@@ -376,6 +374,18 @@ def _complete_fresh_bootstrap(cluster: BootstrapCluster):
     assert first.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
     cluster.provision_managed_passwords()
     return cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
+
+
+def _authorized_reconcile(
+    bootstrap: PostgresBootstrap,
+    context: PostgresBootstrapContext,
+):
+    return bootstrap.reconcile(
+        context,
+        admission_authorizer=(
+            lambda _evaluated_at: context.opening_admission.document_sha256
+        ),
+    )
 
 
 def _stage_existing_adoption(cluster: BootstrapCluster):
@@ -402,6 +412,7 @@ def _stage_existing_adoption(cluster: BootstrapCluster):
             4,
             5,
             6,
+            7,
         )
     finally:
         old_connection.close()
@@ -426,31 +437,33 @@ def _stage_existing_adoption(cluster: BootstrapCluster):
 
 
 def _expected_table_grants(cluster: BootstrapCluster):
-    grants = {
-        (table, cluster.roles.legacy_runtime, privilege)
-        for table, privileges in _LEGACY_PRIVILEGES.items()
-        for privilege in privileges
-    }
-    grants.update(
-        (table, cluster.roles.atomic_runtime, privilege)
-        for table, privileges in _ATOMIC_PRIVILEGES.items()
-        for privilege in privileges
-    )
-    grants.update(
-        (table, cluster.roles.atomic_runtime, "SELECT")
-        for table in ("paper_runtime_control", "paper_runtime_generations")
-    )
+    grants = set()
     grants.update(
         (table, cluster.roles.readiness, "SELECT") for table in _AUTHORITY_TABLES
     )
     grants.add(("trades", cluster.roles.trainer, "SELECT"))
-    grants.update(
-        (table, cluster.roles.activation, privilege)
-        for table in _AUTHORITY_TABLES
-        for privilege in ("SELECT", "UPDATE")
-    )
-    grants.add(("paper_runtime_generations", cluster.roles.activation, "INSERT"))
     return grants
+
+
+def _terminal_schema_marker(cluster: BootstrapCluster) -> tuple[str, str]:
+    connection = cluster.admin_factory()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT obj_description(oid, 'pg_namespace') "
+                "FROM pg_namespace WHERE nspname = 'np'"
+            )
+            marker = cursor.fetchone()[0]
+            cursor.execute("SELECT np.paper_terminal_catalog_fingerprint()")
+            digest = cursor.fetchone()[0]
+        connection.rollback()
+    finally:
+        connection.close()
+    assert isinstance(digest, str)
+    assert len(digest) == 64
+    assert set(digest) <= set("0123456789abcdef")
+    assert marker == (f"elvis-postgres-bootstrap-schema:v2:{cluster.database}:{digest}")
+    return marker, digest
 
 
 def _authority_snapshot(cluster: BootstrapCluster):
@@ -645,7 +658,7 @@ def test_first_run_creates_only_marked_roles_and_stops_before_catalog(
 
     assert receipt.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
     assert receipt.verified_role_probes == ()
-    assert receipt.pending_role_credentials == cluster.roles.login_roles
+    assert receipt.pending_role_credentials == cluster.roles.bootstrap_login_roles
     rows = _role_rows(cluster)
     assert tuple(row[0] for row in rows) == tuple(sorted(cluster.roles.all))
     for row in rows:
@@ -653,7 +666,7 @@ def test_first_run_creates_only_marked_roles_and_stops_before_catalog(
         assert can_login is False
         assert attributes == [False, False, False, False, False, -1]
         assert marker == (
-            "elvis-postgres-bootstrap:v1:"
+            "elvis-postgres-bootstrap:v2:"
             f"{cluster.database}:{_logical_role(cluster, role)}"
         )
     for role in cluster.roles.login_roles:
@@ -690,6 +703,7 @@ def test_exact_existing_volume_is_admitted_before_role_staging(
             4,
             5,
             6,
+            7,
         )
     finally:
         connection.close()
@@ -706,7 +720,7 @@ def test_exact_existing_volume_is_admitted_before_role_staging(
 
     assert receipt.status is PostgresBootstrapStatus.CREDENTIALS_REQUIRED
     assert receipt.verified_role_probes == ()
-    assert receipt.pending_role_credentials == cluster.roles.login_roles
+    assert receipt.pending_role_credentials == cluster.roles.bootstrap_login_roles
     assert tuple(row[0] for row in _role_rows(cluster)) == tuple(
         sorted(cluster.roles.all)
     )
@@ -774,8 +788,8 @@ def test_fresh_database_owner_drift_fails_before_roles_or_schema_mutation(
     "wrong_marker",
     [
         None,
-        "elvis-postgres-bootstrap:v1:other_database:atomic_runtime",
-        "elvis-postgres-bootstrap:v1:database:readiness",
+        "elvis-postgres-bootstrap:v2:other_database:atomic_runtime",
+        "elvis-postgres-bootstrap:v2:database:readiness",
     ],
 )
 def test_preexisting_role_collision_fails_closed_without_partial_role_set(
@@ -817,19 +831,12 @@ def test_role_factory_must_authenticate_as_the_declared_authority(
     bootstrap = PostgresBootstrap(
         cluster.admin_factory,
         migrator_connection_factory=cluster.role_factory(cluster.roles.migrator),
-        legacy_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.legacy_runtime
-        ),
-        atomic_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.atomic_runtime
-        ),
-        activation_connection_factory=cluster.role_factory(cluster.roles.activation),
         readiness_connection_factory=cluster.admin_factory,
         trainer_connection_factory=cluster.role_factory(cluster.roles.trainer),
     )
 
     with pytest.raises(PostgresBootstrapDriftError, match="readiness"):
-        bootstrap.reconcile(cluster.context())
+        _authorized_reconcile(bootstrap, cluster.context())
 
     connection = cluster.admin_factory()
     try:
@@ -863,19 +870,12 @@ def test_role_factory_cannot_hide_an_admin_session_behind_set_role(
     bootstrap = PostgresBootstrap(
         cluster.admin_factory,
         migrator_connection_factory=cluster.role_factory(cluster.roles.migrator),
-        legacy_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.legacy_runtime
-        ),
-        atomic_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.atomic_runtime
-        ),
-        activation_connection_factory=cluster.role_factory(cluster.roles.activation),
         readiness_connection_factory=admin_as_readiness,
         trainer_connection_factory=cluster.role_factory(cluster.roles.trainer),
     )
 
     with pytest.raises(PostgresBootstrapDriftError, match="identity"):
-        bootstrap.reconcile(cluster.context())
+        _authorized_reconcile(bootstrap, cluster.context())
 
 
 def test_database_scoped_role_setting_is_rejected_even_when_rolconfig_is_null(
@@ -1006,19 +1006,12 @@ def test_factory_failure_redacts_exception_and_chained_cause(bootstrap_cluster):
     bootstrap = PostgresBootstrap(
         cluster.admin_factory,
         migrator_connection_factory=leaking_factory,
-        legacy_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.legacy_runtime
-        ),
-        atomic_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.atomic_runtime
-        ),
-        activation_connection_factory=cluster.role_factory(cluster.roles.activation),
         readiness_connection_factory=cluster.role_factory(cluster.roles.readiness),
         trainer_connection_factory=cluster.role_factory(cluster.roles.trainer),
     )
 
     with pytest.raises(PostgresBootstrapStorageError) as caught:
-        bootstrap.reconcile(cluster.context())
+        _authorized_reconcile(bootstrap, cluster.context())
 
     rendered = [repr(bootstrap), repr(caught.value), str(caught.value)]
     nested = [caught.value.__cause__, caught.value.__context__]
@@ -1040,10 +1033,11 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
     receipt = _complete_fresh_bootstrap(cluster)
 
     assert receipt.status is PostgresBootstrapStatus.COMPLETE
-    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6)
+    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6, 7)
     assert receipt.verified_role_probes == cluster.roles.login_roles
     assert receipt.pending_role_credentials == ()
     assert receipt.old_shared_runtime_demoted is False
+    expected_marker, _terminal_catalog_sha256 = _terminal_schema_marker(cluster)
     assert _public_schema_evidence(cluster) == (
         ("pg_database_owner", "PUBLIC", "USAGE", False),
         ("pg_database_owner", "pg_database_owner", "CREATE", False),
@@ -1112,9 +1106,7 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 """,
                 (list(cluster.roles.all), list(cluster.roles.all)),
             )
-            assert cursor.fetchall() == [
-                (cluster.roles.schema_owner, cluster.roles.migrator)
-            ]
+            assert cursor.fetchall() == []
 
             cursor.execute("""
                 SELECT relation_row.relname,
@@ -1144,10 +1136,7 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                   AND relation_acl.grantee <> relation_row.relowner
                 ORDER BY 1, 2, 3
                 """)
-            assert cursor.fetchall() == [
-                (sequence, cluster.roles.legacy_runtime, "USAGE")
-                for sequence in sorted(_LEGACY_SEQUENCES)
-            ]
+            assert cursor.fetchall() == []
 
             cursor.execute("""
                 SELECT COALESCE(grantee_row.rolname, 'PUBLIC'),
@@ -1172,7 +1161,7 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 """)
             assert cursor.fetchone() == (
                 cluster.roles.schema_owner,
-                f"elvis-postgres-bootstrap-schema:v1:{cluster.database}",
+                expected_marker,
             )
 
             cursor.execute("""
@@ -1187,7 +1176,13 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                   AND function_acl.grantee <> function_row.proowner
                 ORDER BY 1, 2, 3
                 """)
-            assert cursor.fetchall() == []
+            assert cursor.fetchall() == [
+                (
+                    "paper_fresh_opening_target_is_current",
+                    cluster.roles.readiness,
+                    "EXECUTE",
+                )
+            ]
 
             cursor.execute("""
                 SELECT COALESCE(grantee_row.rolname, 'PUBLIC'),
@@ -1227,26 +1222,9 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 ORDER BY proname
                 """)
             functions = tuple(cursor.fetchall())
-            activation_owners = {
-                owner
-                for name, _arguments, owner in functions
-                if name
-                in {
-                    "acquire_paper_runtime_activation_fence",
-                    "activate_paper_runtime_generation",
-                }
+            assert {owner for _name, _arguments, owner in functions} == {
+                cluster.roles.schema_owner
             }
-            other_owners = {
-                owner
-                for name, _arguments, owner in functions
-                if name
-                not in {
-                    "acquire_paper_runtime_activation_fence",
-                    "activate_paper_runtime_generation",
-                }
-            }
-            assert activation_owners == {cluster.roles.activation}
-            assert other_owners == {cluster.roles.schema_owner}
 
             cursor.execute(
                 """
@@ -1258,7 +1236,7 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 """,
                 (cluster.roles.activation,),
             )
-            assert cursor.fetchall() == [(table, True) for table in _AUTHORITY_TABLES]
+            assert cursor.fetchall() == [(table, False) for table in _AUTHORITY_TABLES]
 
             cursor.execute(
                 """
@@ -1290,40 +1268,12 @@ def test_fresh_bootstrap_installs_exact_ownership_and_runtime_boundaries(
                 """,
                 (cluster.roles.atomic_runtime,) * 5,
             )
-            assert cursor.fetchone() == (True, False, False, True, False)
+            assert cursor.fetchone() == (False, False, False, False, False)
     finally:
         connection.close()
 
-    atomic = cluster.role_factory(cluster.roles.atomic_runtime)()
-    atomic.autocommit = False
-    try:
-        with atomic.cursor() as cursor:
-            cursor.execute("SELECT control_key FROM np.paper_runtime_control FOR SHARE")
-            assert cursor.fetchone() == (True,)
-            cursor.execute(
-                "SELECT activation_id FROM np.paper_runtime_generations FOR SHARE"
-            )
-            assert cursor.fetchall() == []
-        atomic.rollback()
 
-        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-            with atomic.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE np.paper_runtime_control SET mode = 'ACTIVE' "
-                    "WHERE control_key IS TRUE"
-                )
-        atomic.rollback()
-        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-            with atomic.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE np.paper_runtime_control SET runtime_generation = 1 "
-                    "WHERE control_key IS TRUE"
-                )
-    finally:
-        atomic.close()
-
-
-def test_six_login_roles_enforce_representative_allow_and_deny_matrix(
+def test_two_login_roles_and_six_inert_roles_enforce_acl_matrix(
     bootstrap_cluster,
 ):
     cluster = bootstrap_cluster
@@ -1347,32 +1297,6 @@ def test_six_login_roles_enforce_representative_allow_and_deny_matrix(
         finally:
             connection.close()
 
-    execute(cluster.roles.legacy_runtime, "SELECT * FROM np.trades")
-    execute(
-        cluster.roles.legacy_runtime,
-        "INSERT INTO np.trades (id, symbol) VALUES (920001, 'BTCUSDT')",
-    )
-    execute(cluster.roles.legacy_runtime, "SELECT nextval('np.trades_id_seq')")
-    execute(cluster.roles.legacy_runtime, "SELECT * FROM np.orders", denied=True)
-    execute(
-        cluster.roles.legacy_runtime,
-        "UPDATE np.trades SET symbol = symbol WHERE FALSE",
-        denied=True,
-    )
-
-    execute(cluster.roles.atomic_runtime, "SELECT * FROM np.position_streams")
-    execute(
-        cluster.roles.atomic_runtime,
-        "INSERT INTO np.position_streams (position_key, execution_scope) "
-        "VALUES ('acl-matrix', 'paper:acl-matrix')",
-    )
-    execute(cluster.roles.atomic_runtime, "SELECT * FROM np.trades", denied=True)
-    execute(
-        cluster.roles.atomic_runtime,
-        "UPDATE np.paper_runtime_control SET mode = mode WHERE FALSE",
-        denied=True,
-    )
-
     execute(cluster.roles.readiness, "SELECT * FROM np.trades")
     execute(cluster.roles.readiness, "SELECT * FROM np.orders")
     execute(
@@ -1389,49 +1313,46 @@ def test_six_login_roles_enforce_representative_allow_and_deny_matrix(
         denied=True,
     )
 
-    execute(cluster.roles.activation, "SELECT * FROM np.schema_migrations")
-    execute(
-        cluster.roles.activation,
-        "SELECT np.acquire_paper_runtime_activation_fence()",
-    )
-    execute(
-        cluster.roles.activation,
-        "UPDATE np.trades SET symbol = symbol WHERE FALSE",
-    )
-    execute(
-        cluster.roles.activation,
-        "DELETE FROM np.trades WHERE FALSE",
-        denied=True,
-    )
-
-    migrator = cluster.role_factory(cluster.roles.migrator)()
-    migrator.autocommit = False
-    try:
-        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
-            with migrator.cursor() as cursor:
-                cursor.execute("SELECT * FROM np.trades")
-        migrator.rollback()
-        with migrator.cursor() as cursor:
-            cursor.execute(
-                sql.SQL("SET ROLE {}").format(
-                    sql.Identifier(cluster.roles.schema_owner)
-                )
-            )
-            cursor.execute("SELECT * FROM np.trades")
-            cursor.fetchall()
-        migrator.rollback()
-    finally:
-        migrator.close()
-
     admin = cluster.admin_factory()
     try:
         with admin.cursor() as cursor:
-            for role in (
-                cluster.roles.migrator,
-                cluster.roles.legacy_runtime,
-                cluster.roles.atomic_runtime,
-                cluster.roles.readiness,
-                cluster.roles.trainer,
+            cursor.execute(
+                """
+                SELECT auth_role.rolname,
+                       auth_role.rolcanlogin,
+                       auth_role.rolpassword IS NULL,
+                       role_view.rolconfig
+                FROM pg_authid auth_role
+                JOIN pg_roles role_view ON role_view.oid = auth_role.oid
+                WHERE auth_role.rolname = ANY(%s)
+                ORDER BY auth_role.rolname
+                """,
+                (
+                    [
+                        cluster.roles.schema_owner,
+                        cluster.roles.migrator,
+                        cluster.roles.opening,
+                        cluster.roles.legacy_runtime,
+                        cluster.roles.atomic_runtime,
+                        cluster.roles.activation,
+                    ],
+                ),
+            )
+            assert cursor.fetchall() == [
+                (role, False, True, None)
+                for role in sorted(
+                    (
+                        cluster.roles.schema_owner,
+                        cluster.roles.migrator,
+                        cluster.roles.opening,
+                        cluster.roles.legacy_runtime,
+                        cluster.roles.atomic_runtime,
+                        cluster.roles.activation,
+                    )
+                )
+            ]
+            for role in tuple(
+                role for role in cluster.roles.all if role != cluster.roles.schema_owner
             ):
                 cursor.execute(
                     "SELECT has_function_privilege("
@@ -1439,14 +1360,58 @@ def test_six_login_roles_enforce_representative_allow_and_deny_matrix(
                     (role,),
                 )
                 assert cursor.fetchone() == (False,)
+            opening_capabilities = (
+                "np.acquire_paper_fresh_opening_fence(text,text,text,text)",
+                (
+                    "np.commit_paper_fresh_opening("
+                    "text,text,text,text,text,text,text,text,text,text,text,text,"
+                    "text,text)"
+                ),
+                "np.read_paper_fresh_opening(text,text,text)",
+            )
+            for capability in opening_capabilities:
+                for role in (
+                    cluster.roles.migrator,
+                    cluster.roles.opening,
+                    cluster.roles.legacy_runtime,
+                    cluster.roles.atomic_runtime,
+                    cluster.roles.activation,
+                    cluster.roles.readiness,
+                    cluster.roles.trainer,
+                ):
+                    cursor.execute(
+                        "SELECT has_function_privilege(%s, %s, 'EXECUTE')",
+                        (role, capability),
+                    )
+                    assert cursor.fetchone() == (False,)
             cursor.execute(
                 "SELECT has_function_privilege("
-                "%s, 'np.acquire_paper_runtime_activation_fence()', 'EXECUTE')",
-                (cluster.roles.activation,),
+                "%s, 'np.paper_terminal_catalog_fingerprint()', 'EXECUTE')",
+                (cluster.roles.opening,),
             )
-            assert cursor.fetchone() == (True,)
+            assert cursor.fetchone() == (False,)
+            for role in cluster.roles.all:
+                cursor.execute(
+                    "SELECT has_function_privilege("
+                    "%s, 'np.paper_fresh_opening_target_is_current()', 'EXECUTE')",
+                    (role,),
+                )
+                assert cursor.fetchone() == (
+                    role in {cluster.roles.schema_owner, cluster.roles.readiness},
+                )
     finally:
         admin.close()
+
+    for role in (
+        cluster.roles.schema_owner,
+        cluster.roles.migrator,
+        cluster.roles.opening,
+        cluster.roles.legacy_runtime,
+        cluster.roles.atomic_runtime,
+        cluster.roles.activation,
+    ):
+        with pytest.raises(psycopg2.OperationalError):
+            cluster.role_factory(role)()
 
 
 def test_complete_catalog_reread_is_idempotent(bootstrap_cluster):
@@ -1464,9 +1429,12 @@ def test_complete_catalog_reread_is_idempotent(bootstrap_cluster):
 def test_schema_marker_tamper_is_rejected_without_repair(bootstrap_cluster):
     cluster = bootstrap_cluster
     assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
-    expected_marker = f"elvis-postgres-bootstrap-schema:v1:{cluster.database}"
+    expected_marker, _terminal_catalog_sha256 = _terminal_schema_marker(cluster)
     connection = cluster.admin_factory()
     connection.autocommit = True
+    tampered_marker = (
+        f"elvis-postgres-bootstrap-schema:v2:{cluster.database}:" + "0" * 64
+    )
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -1474,7 +1442,7 @@ def test_schema_marker_tamper_is_rejected_without_repair(bootstrap_cluster):
                 "FROM pg_namespace WHERE nspname = 'np'"
             )
             assert cursor.fetchone() == (expected_marker,)
-            cursor.execute("COMMENT ON SCHEMA np IS 'tampered-bootstrap-marker'")
+            cursor.execute("COMMENT ON SCHEMA np IS %s", (tampered_marker,))
     finally:
         connection.close()
 
@@ -1483,7 +1451,7 @@ def test_schema_marker_tamper_is_rejected_without_repair(bootstrap_cluster):
         cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
 
     assert _authority_snapshot(cluster) == before
-    assert before[3][0][2] == "tampered-bootstrap-marker"
+    assert before[3][0][2] == tampered_marker
 
 
 def test_adoption_schema_marker_is_exact_idempotent_and_tamper_evident(
@@ -1504,7 +1472,7 @@ def test_adoption_schema_marker_is_exact_idempotent_and_tamper_evident(
     assert completed.status is PostgresBootstrapStatus.COMPLETE
     assert completed.old_shared_runtime_demoted is True
 
-    expected_marker = f"elvis-postgres-bootstrap-schema:v1:{cluster.database}"
+    expected_marker, _terminal_catalog_sha256 = _terminal_schema_marker(cluster)
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
@@ -1570,6 +1538,7 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
             4,
             5,
             6,
+            7,
         )
     finally:
         old_connection.close()
@@ -1623,6 +1592,7 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
     completed = cluster.bootstrap(with_credentials=True).reconcile(context)
     assert completed.status is PostgresBootstrapStatus.COMPLETE
     assert completed.old_shared_runtime_demoted is True
+    expected_marker, _terminal_catalog_sha256 = _terminal_schema_marker(cluster)
 
     connection = cluster.admin_factory()
     try:
@@ -1640,7 +1610,7 @@ def test_legacy_database_owner_with_default_acl_adopts_in_two_demotion_runs(
                 """)
             assert cursor.fetchone() == (
                 cluster.roles.schema_owner,
-                f"elvis-postgres-bootstrap-schema:v1:{cluster.database}",
+                expected_marker,
             )
             cursor.execute(
                 "SELECT rolcanlogin, rolpassword IS NULL "
@@ -1759,7 +1729,7 @@ def test_managed_role_drift_after_probes_is_rechecked_before_catalog_mutation(
     )
 
     with pytest.raises(PostgresBootstrapDriftError, match="role|membership|catalog"):
-        bootstrap.reconcile(cluster.context())
+        _authorized_reconcile(bootstrap, cluster.context())
 
     assert _authority_snapshot(cluster) == injected_state["snapshot"]
     connection = cluster.admin_factory()
@@ -1785,15 +1755,15 @@ def test_managed_role_drift_after_probes_is_rechecked_before_catalog_mutation(
         connection.close()
 
 
-def test_safe_additional_plain_index_owned_by_schema_owner_is_accepted(
+def test_additional_plain_index_changes_terminal_catalog_without_repair(
     bootstrap_cluster,
 ):
     cluster = bootstrap_cluster
     assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
-    migrator = cluster.role_factory(cluster.roles.migrator)()
-    migrator.autocommit = False
+    admin = cluster.admin_factory()
+    admin.autocommit = False
     try:
-        with migrator.cursor() as cursor:
+        with admin.cursor() as cursor:
             cursor.execute(
                 sql.SQL("SET ROLE {}").format(
                     sql.Identifier(cluster.roles.schema_owner)
@@ -1802,13 +1772,16 @@ def test_safe_additional_plain_index_owned_by_schema_owner_is_accepted(
             cursor.execute(
                 "CREATE INDEX safe_additional_trades_side_idx ON np.trades (side)"
             )
-        migrator.commit()
+        admin.commit()
     finally:
-        migrator.close()
+        admin.close()
 
-    receipt = cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
+    with pytest.raises(
+        PostgresBootstrapDriftError,
+        match="unexpected np schema owner",
+    ):
+        cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
 
-    assert receipt.status is PostgresBootstrapStatus.COMPLETE
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
@@ -1833,6 +1806,37 @@ def test_safe_additional_plain_index_owned_by_schema_owner_is_accepted(
             )
     finally:
         connection.close()
+
+
+def test_database_name_underscores_are_literal_in_role_marker_fingerprint(
+    bootstrap_cluster,
+):
+    cluster = bootstrap_cluster
+    assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
+    _marker, before = _terminal_schema_marker(cluster)
+    similar_database = cluster.database.replace("_", "X")
+    assert similar_database != cluster.database
+
+    cluster.create_auxiliary_login(cluster.outsider)
+    admin = cluster.admin_factory()
+    admin.autocommit = True
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("COMMENT ON ROLE {} IS %s").format(
+                    sql.Identifier(cluster.outsider)
+                ),
+                ("elvis-postgres-bootstrap:v2:" f"{similar_database}:readiness",),
+            )
+            cursor.execute("SELECT np.paper_terminal_catalog_fingerprint()")
+            assert cursor.fetchone() == (before,)
+    finally:
+        admin.close()
+
+    assert (
+        cluster.bootstrap(with_credentials=True).reconcile(cluster.context()).status
+        is PostgresBootstrapStatus.COMPLETE
+    )
 
 
 @pytest.mark.parametrize(
@@ -1870,10 +1874,10 @@ def test_packaged_index_missing_or_definition_drift_is_rejected(
     assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
     expected_indexes = _index_snapshot(cluster)
     assert tuple(row[0] for row in expected_indexes) == _PACKAGED_INDEXES
-    migrator = cluster.role_factory(cluster.roles.migrator)()
-    migrator.autocommit = False
+    admin = cluster.admin_factory()
+    admin.autocommit = False
     try:
-        with migrator.cursor() as cursor:
+        with admin.cursor() as cursor:
             cursor.execute(
                 sql.SQL("SET ROLE {}").format(
                     sql.Identifier(cluster.roles.schema_owner)
@@ -1887,9 +1891,9 @@ def test_packaged_index_missing_or_definition_drift_is_rejected(
             cursor.execute(sql.SQL(drop_sql).format(sql.Identifier(index_name)))
             if replacement_sql is not None:
                 cursor.execute(replacement_sql)
-        migrator.commit()
+        admin.commit()
     finally:
-        migrator.close()
+        admin.close()
 
     with pytest.raises(PostgresBootstrapDriftError, match="catalog|index"):
         cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
@@ -1912,7 +1916,7 @@ def test_catalog_commit_failure_is_resolved_only_from_exact_readback(
         return NthCommitFaultConnection(
             cluster.admin_factory(),
             state,
-            target=2,
+            target=4,
             durable=durable,
         )
 
@@ -1921,12 +1925,12 @@ def test_catalog_commit_failure_is_resolved_only_from_exact_readback(
         admin_factory=fault_admin_factory,
     )
     if durable:
-        receipt = bootstrap.reconcile(cluster.context())
+        receipt = _authorized_reconcile(bootstrap, cluster.context())
         assert receipt.status is PostgresBootstrapStatus.COMPLETE
         assert _authority_snapshot(cluster)
     else:
         with pytest.raises(PostgresBootstrapCommitUnknownError) as caught:
-            bootstrap.reconcile(cluster.context())
+            _authorized_reconcile(bootstrap, cluster.context())
         assert caught.value.phase is PostgresBootstrapPhase.CATALOG
         assert caught.value.__cause__ is None
         connection = cluster.admin_factory()
@@ -1977,10 +1981,10 @@ def test_complete_is_not_returned_when_post_commit_readback_has_drifted(
         fault = NthCommitFaultConnection(
             base,
             state,
-            target=2,
+            target=4,
             durable=True,
         )
-        if state["commits"] >= 2 and not state["mutated"]:
+        if state["commits"] >= 4 and not state["mutated"]:
             state["mutated"] = True
             inject_drift()
         return fault
@@ -1991,7 +1995,7 @@ def test_complete_is_not_returned_when_post_commit_readback_has_drifted(
     )
 
     with pytest.raises(PostgresBootstrapCommitUnknownError) as caught:
-        bootstrap.reconcile(cluster.context())
+        _authorized_reconcile(bootstrap, cluster.context())
 
     assert caught.value.phase is PostgresBootstrapPhase.CATALOG
     assert state["fired"] is True
@@ -2027,7 +2031,7 @@ def test_demotion_commit_failure_preserves_or_proves_the_old_role_boundary(
         admin_factory=fault_admin_factory,
     )
     if durable:
-        receipt = bootstrap.reconcile(context)
+        receipt = _authorized_reconcile(bootstrap, context)
         assert receipt.status is PostgresBootstrapStatus.DEMOTION_REQUIRED
         assert receipt.old_shared_runtime_demoted is False
         completed = cluster.bootstrap(with_credentials=True).reconcile(context)
@@ -2035,7 +2039,7 @@ def test_demotion_commit_failure_preserves_or_proves_the_old_role_boundary(
         assert completed.old_shared_runtime_demoted is True
     else:
         with pytest.raises(PostgresBootstrapCommitUnknownError) as caught:
-            bootstrap.reconcile(context)
+            _authorized_reconcile(bootstrap, context)
         assert caught.value.phase is PostgresBootstrapPhase.DEMOTION
         connection = cluster.admin_factory()
         try:
@@ -2088,12 +2092,12 @@ def test_post_drain_cutover_commit_failure_requires_exact_demotion_readback(
         admin_factory=fault_admin_factory,
     )
     if durable:
-        receipt = bootstrap.reconcile(context)
+        receipt = _authorized_reconcile(bootstrap, context)
         assert receipt.status is PostgresBootstrapStatus.COMPLETE
         assert receipt.old_shared_runtime_demoted is True
     else:
         with pytest.raises(PostgresBootstrapCommitUnknownError) as caught:
-            bootstrap.reconcile(context)
+            _authorized_reconcile(bootstrap, context)
         assert caught.value.phase is PostgresBootstrapPhase.DEMOTION
         recovered = cluster.bootstrap(with_credentials=True).reconcile(context)
         assert recovered.status is PostgresBootstrapStatus.COMPLETE
@@ -2143,15 +2147,6 @@ def test_hostile_session_search_path_catalog_is_rejected_without_mutation(
             migrator_connection_factory=lambda: psycopg2.connect(
                 role_dsns[cluster.roles.migrator]
             ),
-            legacy_runtime_connection_factory=lambda: psycopg2.connect(
-                role_dsns[cluster.roles.legacy_runtime]
-            ),
-            atomic_runtime_connection_factory=lambda: psycopg2.connect(
-                role_dsns[cluster.roles.atomic_runtime]
-            ),
-            activation_connection_factory=lambda: psycopg2.connect(
-                role_dsns[cluster.roles.activation]
-            ),
             readiness_connection_factory=lambda: psycopg2.connect(
                 role_dsns[cluster.roles.readiness]
             ),
@@ -2161,7 +2156,7 @@ def test_hostile_session_search_path_catalog_is_rejected_without_mutation(
         )
 
         with pytest.raises(PostgresBootstrapDriftError, match="catalog|schema"):
-            bootstrap.reconcile(cluster.context())
+            _authorized_reconcile(bootstrap, cluster.context())
     finally:
         for dsn in hostile_dsns:
             postgres_connection_allowlist.discard(_dsn_identity(dsn))
@@ -2616,7 +2611,7 @@ def test_prepared_fresh_schema_object_is_rejected_before_role_mutation(
     with pytest.raises(SimulatedProcessStop):
         interrupted.reconcile(context)
 
-    expected_marker = f"elvis-postgres-bootstrap-schema:v1:{cluster.database}"
+    expected_marker = f"elvis-postgres-bootstrap-schema:v2:{cluster.database}:pending"
     exact_roles = _role_rows(cluster)
     connection = cluster.admin_factory()
     connection.autocommit = True
@@ -2817,50 +2812,131 @@ def test_unexpected_user_schema_or_public_routine_is_rejected_without_repair(
         connection.close()
 
 
-def test_runtime_created_large_object_is_rejected_without_repair(bootstrap_cluster):
+def test_read_only_logins_cannot_invoke_persistent_mutation_builtins(
+    bootstrap_cluster,
+):
     cluster = bootstrap_cluster
     assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
-    runtime = cluster.role_factory(cluster.roles.readiness)()
-    runtime.autocommit = False
-    try:
-        with runtime.cursor() as cursor:
-            cursor.execute("SELECT lo_create(0)")
-            large_object_oid = cursor.fetchone()[0]
-        runtime.commit()
-    finally:
-        runtime.close()
-
-    def large_object_evidence():
-        connection = cluster.admin_factory()
+    statements = (
+        "SELECT pg_catalog.lo_create(0)",
+        "SELECT pg_catalog.lo_creat(0)",
+        "SELECT pg_catalog.lo_from_bytea(0, decode('00', 'hex'))",
+        "SELECT pg_catalog.pg_logical_emit_message(false, 'elvis', 'blocked')",
+        (
+            "SELECT pg_catalog.pg_logical_emit_message("
+            "false, 'elvis', decode('00', 'hex'))"
+        ),
+    )
+    for role in (cluster.roles.readiness, cluster.roles.trainer):
+        for statement in statements:
+            runtime = cluster.role_factory(role)()
+            runtime.autocommit = False
+            try:
+                with pytest.raises(psycopg2.errors.InsufficientPrivilege):
+                    with runtime.cursor() as cursor:
+                        cursor.execute(statement)
+                runtime.rollback()
+            finally:
+                runtime.close()
+        runtime = cluster.role_factory(role)()
+        runtime.autocommit = False
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT oid, pg_get_userbyid(lomowner), lomacl::text "
-                    "FROM pg_largeobject_metadata WHERE oid = %s",
-                    (large_object_oid,),
-                )
-                return cursor.fetchone()
+            with runtime.cursor() as cursor:
+                cursor.execute("SHOW max_prepared_transactions")
+                assert cursor.fetchone() == ("0",)
+                cursor.execute("SELECT 1")
+                with pytest.raises(psycopg2.Error) as caught:
+                    cursor.execute(
+                        "PREPARE TRANSACTION %s",
+                        (f"elvis-pr3-disabled-{role}",),
+                    )
+                assert caught.value.pgcode == "55000"
+            runtime.rollback()
         finally:
-            connection.close()
+            runtime.close()
 
-    before = _authority_snapshot(cluster)
-    evidence = large_object_evidence()
-    assert evidence == (large_object_oid, cluster.roles.readiness, None)
+    admin = cluster.admin_factory()
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM pg_catalog.pg_largeobject_metadata")
+            assert cursor.fetchone() == (0,)
+            cursor.execute(
+                "SELECT "
+                "pg_catalog.current_setting('max_prepared_transactions')::INTEGER, "
+                "COUNT(*) FROM pg_catalog.pg_prepared_xacts "
+                "WHERE database = pg_catalog.current_database()"
+            )
+            assert cursor.fetchone() == (0, 0)
+            for role in (cluster.roles.readiness, cluster.roles.trainer):
+                for signature in (
+                    "pg_catalog.lo_create(oid)",
+                    "pg_catalog.lo_creat(integer)",
+                    "pg_catalog.lo_from_bytea(oid,bytea)",
+                    "pg_catalog.pg_logical_emit_message(boolean,text,text)",
+                    "pg_catalog.pg_logical_emit_message(boolean,text,bytea)",
+                ):
+                    cursor.execute(
+                        "SELECT has_function_privilege("
+                        "%s, %s::regprocedure, 'EXECUTE')",
+                        (role, signature),
+                    )
+                    assert cursor.fetchone() == (False,)
+    finally:
+        admin.close()
 
-    with pytest.raises(PostgresBootstrapDriftError, match="catalog|large object"):
+    assert (
+        cluster.bootstrap(with_credentials=True).reconcile(cluster.context()).status
+        is PostgresBootstrapStatus.COMPLETE
+    )
+
+
+@pytest.mark.parametrize("grantee_kind", ["managed", "public"])
+def test_explicit_pg_catalog_execute_acl_is_terminal_drift(
+    bootstrap_cluster,
+    grantee_kind,
+):
+    cluster = bootstrap_cluster
+    assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
+    admin = cluster.admin_factory()
+    admin.autocommit = True
+    try:
+        with admin.cursor() as cursor:
+            grantee = (
+                sql.Identifier(cluster.roles.readiness)
+                if grantee_kind == "managed"
+                else sql.SQL("PUBLIC")
+            )
+            cursor.execute(
+                sql.SQL(
+                    "GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO {}"
+                ).format(grantee)
+            )
+    finally:
+        admin.close()
+
+    with pytest.raises(PostgresBootstrapDriftError, match="catalog"):
         cluster.bootstrap(with_credentials=True).reconcile(cluster.context())
 
-    assert _authority_snapshot(cluster) == before
-    assert large_object_evidence() == evidence
+    admin = cluster.admin_factory()
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute(
+                "SELECT has_function_privilege("
+                "%s, 'pg_catalog.pg_read_file(text)', 'EXECUTE')",
+                (cluster.roles.readiness,),
+            )
+            assert cursor.fetchone() == (True,)
+    finally:
+        admin.close()
 
 
 def test_standalone_enum_in_np_is_rejected_without_repair(bootstrap_cluster):
     cluster = bootstrap_cluster
     assert _complete_fresh_bootstrap(cluster).status is PostgresBootstrapStatus.COMPLETE
-    migrator = cluster.role_factory(cluster.roles.migrator)()
-    migrator.autocommit = False
+    admin = cluster.admin_factory()
+    admin.autocommit = False
     try:
-        with migrator.cursor() as cursor:
+        with admin.cursor() as cursor:
             cursor.execute(
                 sql.SQL("SET ROLE {}").format(
                     sql.Identifier(cluster.roles.schema_owner)
@@ -2870,9 +2946,9 @@ def test_standalone_enum_in_np_is_rejected_without_repair(bootstrap_cluster):
                 "CREATE TYPE np.hidden_bootstrap_enum "
                 "AS ENUM ('sentinel_first', 'sentinel_second')"
             )
-        migrator.commit()
+        admin.commit()
     finally:
-        migrator.close()
+        admin.close()
 
     def enum_evidence():
         connection = cluster.admin_factory()
@@ -3124,10 +3200,18 @@ def test_existing_volume_rejects_pending_or_drifted_migration_history(
     connection = cluster.admin_factory()
     connection.autocommit = False
     try:
-        assert apply_migrations(connection, load_migrations()) == (1, 2, 3, 4, 5, 6)
+        assert apply_migrations(connection, load_migrations()) == (
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+        )
         with connection.cursor() as cursor:
             if ledger_drift == "pending":
-                cursor.execute("DELETE FROM np.schema_migrations WHERE version = 6")
+                cursor.execute("DELETE FROM np.schema_migrations WHERE version = 7")
             else:
                 cursor.execute(
                     "UPDATE np.schema_migrations "
@@ -3180,6 +3264,7 @@ def test_migration_authority_cannot_own_plpgsql_before_role_staging(
             4,
             5,
             6,
+            7,
         )
     finally:
         old_connection.close()
@@ -3297,6 +3382,7 @@ def test_adoption_requires_migration_authority_to_own_schema_and_ledger(
             4,
             5,
             6,
+            7,
         )
     finally:
         old_connection.close()
@@ -3372,7 +3458,15 @@ def test_allowed_historical_owner_cannot_retain_surplus_authority(
     connection = cluster.admin_factory()
     connection.autocommit = False
     try:
-        assert apply_migrations(connection, load_migrations()) == (1, 2, 3, 4, 5, 6)
+        assert apply_migrations(connection, load_migrations()) == (
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+        )
         connection.commit()
     finally:
         connection.close()
@@ -3554,8 +3648,27 @@ def test_fresh_bootstrap_resumes_after_migration_authority_commit(
     receipt = cluster.bootstrap(with_credentials=True).reconcile(context)
 
     assert receipt.status is PostgresBootstrapStatus.COMPLETE
-    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6)
-    assert _role_rows(cluster) == exact_roles
+    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6, 7)
+    terminal_roles = _role_rows(cluster)
+    staged_by_name = {row[0]: row for row in exact_roles}
+    terminal_by_name = {row[0]: row for row in terminal_roles}
+    assert staged_by_name.keys() == terminal_by_name.keys()
+    for role, staged in staged_by_name.items():
+        terminal = terminal_by_name[role]
+        if role == cluster.roles.migrator:
+            assert staged[1] is True
+            assert terminal[1] is False
+            assert terminal[2:] == staged[2:]
+        elif role == cluster.roles.opening:
+            assert terminal[:-1] == staged[:-1]
+            assert staged[-1] == (
+                "elvis-postgres-bootstrap:v2:" f"{cluster.database}:opening"
+            )
+            assert terminal[-1] == (
+                f"{staged[-1]}:{_OPENING_ADMISSION.document_sha256}"
+            )
+        else:
+            assert terminal == staged
 
 
 def test_existing_volume_requires_explicit_quiescence_before_old_role_demotion(
@@ -3585,6 +3698,7 @@ def test_existing_volume_requires_explicit_quiescence_before_old_role_demotion(
             4,
             5,
             6,
+            7,
         )
         with old_connection.cursor() as cursor:
             cursor.execute(
@@ -3779,10 +3893,22 @@ def test_old_membership_injected_at_cutover_is_drift_without_catalog_mutation(
     monkeypatch.setattr(bootstrap, "_demote_old_role", inject_membership)
 
     with pytest.raises(PostgresBootstrapDriftError, match="memberships.*cutover"):
-        bootstrap.reconcile(context)
+        _authorized_reconcile(bootstrap, context)
 
     assert injected["done"] is True
-    assert _authority_snapshot(cluster) == before
+    after = _authority_snapshot(cluster)
+    assert after[1:] == before[1:]
+    before_roles = {row[0]: row for row in before[0]}
+    after_roles = {row[0]: row for row in after[0]}
+    assert before_roles.keys() == after_roles.keys()
+    for role, previous in before_roles.items():
+        current = after_roles[role]
+        if role == cluster.roles.migrator:
+            assert previous[1] is True
+            assert current[1] is False
+            assert current[2:] == previous[2:]
+        else:
+            assert current == previous
     admin = cluster.admin_factory()
     try:
         with admin.cursor() as cursor:
@@ -3942,26 +4068,27 @@ def test_migration_commit_then_raise_is_resolved_from_the_durable_ledger(
     bootstrap = PostgresBootstrap(
         cluster.admin_factory,
         migrator_connection_factory=uncertain_migrator_factory,
-        legacy_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.legacy_runtime
-        ),
-        atomic_runtime_connection_factory=cluster.role_factory(
-            cluster.roles.atomic_runtime
-        ),
-        activation_connection_factory=cluster.role_factory(cluster.roles.activation),
         readiness_connection_factory=cluster.role_factory(cluster.roles.readiness),
         trainer_connection_factory=cluster.role_factory(cluster.roles.trainer),
     )
 
-    receipt = bootstrap.reconcile(cluster.context())
+    receipt = _authorized_reconcile(bootstrap, cluster.context())
 
     assert commit_state == {"raised": True}
     assert receipt.status is PostgresBootstrapStatus.COMPLETE
-    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6)
+    assert receipt.migration_versions == (1, 2, 3, 4, 5, 6, 7)
     connection = cluster.admin_factory()
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT version FROM np.schema_migrations ORDER BY version")
-            assert cursor.fetchall() == [(1,), (2,), (3,), (4,), (5,), (6,)]
+            assert cursor.fetchall() == [
+                (1,),
+                (2,),
+                (3,),
+                (4,),
+                (5,),
+                (6,),
+                (7,),
+            ]
     finally:
         connection.close()

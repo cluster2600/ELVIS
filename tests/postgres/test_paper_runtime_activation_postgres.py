@@ -8,7 +8,12 @@ from time import monotonic, sleep
 
 import psycopg2
 import pytest
+from psycopg2 import sql
 
+from tests.postgres.test_paper_account_readiness_postgres import (
+    _readiness_opening_role,
+    _seed_fresh_opening_provenance,
+)
 from trading.application.paper_account_readiness import (
     PaperAccountReadinessContext,
     PaperAccountReadinessDisposition,
@@ -37,6 +42,9 @@ from trading.domain.positions import (
 )
 from trading.persistence.order_position_journal import PostgresOrderPositionJournal
 from trading.persistence.paper_account_journal import PostgresPaperAccountJournal
+from trading.persistence.paper_account_journal_codec import (
+    encode_paper_account_opening,
+)
 from trading.persistence.paper_runtime_activation import (
     PaperRuntimeActivationStorageError,
     PostgresPaperRuntimeActivation,
@@ -54,16 +62,44 @@ def _connect(dsn):
     return connection
 
 
-def _provision(dsn, *, account_key=ACCOUNT_KEY):
+@pytest.fixture(autouse=True)
+def _cleanup_activation_opening_role(postgres_database_dsn):
+    yield
+    connection = _connect(postgres_database_dsn)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_database()")
+            role_name = _readiness_opening_role(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s)",
+                (role_name,),
+            )
+            if cursor.fetchone()[0]:
+                cursor.execute(
+                    sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role_name))
+                )
+                cursor.execute(
+                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name))
+                )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _provision(dsn, *, account_key=ACCOUNT_KEY, with_provenance=False):
     account = new_paper_account(
         PaperAccountPolicy(account_key, "USDT", Decimal("0.01")),
         (PaperAccountBalance("USDT", Decimal("100.00"), Decimal("0.00")),),
     )
-    return PostgresPaperAccountJournal(lambda: _connect(dsn)).provision_account(
+    encoded = encode_paper_account_opening(SCOPE, OWNER_GENERATION, account)
+    opening = PostgresPaperAccountJournal(lambda: _connect(dsn)).provision_account(
         execution_scope=SCOPE,
         owner_generation=OWNER_GENERATION,
         account=account,
     )
+    if with_provenance:
+        _seed_fresh_opening_provenance(dsn, encoded)
+    return opening
 
 
 def _context(
@@ -304,7 +340,7 @@ def _instruction(suffix):
 def test_legacy_zero_activation_commits_epoch_one_and_exact_retry_rolls_back(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     context = _context(opening)
     first_factory = _TrackingFactory(migrated_postgres_dsn)
 
@@ -332,10 +368,26 @@ def test_legacy_zero_activation_commits_epoch_one_and_exact_retry_rolls_back(
     assert len(_runtime_snapshot(migrated_postgres_dsn)[1]) == 1
 
 
+def test_missing_fresh_opening_provenance_blocks_without_runtime_delta(
+    migrated_postgres_dsn,
+):
+    opening = _provision(migrated_postgres_dsn, with_provenance=False)
+    before = _runtime_snapshot(migrated_postgres_dsn)
+
+    result = _activation(migrated_postgres_dsn).activate(_context(opening))
+
+    assert type(result) is PaperRuntimeActivationBlocked
+    assert result.assessment.disposition is PaperAccountReadinessDisposition.BLOCKED
+    assert {finding.kind for finding in result.assessment.findings} == {
+        PaperAccountReadinessFindingKind.OPENING_PROVISIONING_ABSENT
+    }
+    assert _runtime_snapshot(migrated_postgres_dsn) == before
+
+
 def test_activation_trace_uses_one_cursor_and_capabilities_in_boundary_order(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     statements = []
     factory = _TrackingFactory(migrated_postgres_dsn, statements=statements)
 
@@ -372,7 +424,7 @@ def test_activation_trace_uses_one_cursor_and_capabilities_in_boundary_order(
 def test_blocked_trace_acquires_fence_before_reads_without_activation_call(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     PostgresOrderPositionJournal(
         lambda: _connect(migrated_postgres_dsn)
     ).reserve_instruction(
@@ -402,7 +454,7 @@ def test_blocked_trace_acquires_fence_before_reads_without_activation_call(
 def test_paused_generation_reactivation_appends_exact_next_epoch(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     first = _context(opening)
     _activation(migrated_postgres_dsn).activate(first)
     _set_paused(migrated_postgres_dsn, 1)
@@ -439,7 +491,7 @@ def test_paused_generation_reactivation_appends_exact_next_epoch(
 def test_stale_generation_or_reused_activation_identity_conflicts_without_delta(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     _activation(migrated_postgres_dsn).activate(_context(opening))
     before = _runtime_snapshot(migrated_postgres_dsn)
     conflicts = (
@@ -466,7 +518,7 @@ def test_stale_generation_or_reused_activation_identity_conflicts_without_delta(
 def test_stray_matching_activation_id_under_legacy_zero_is_never_replayed(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     context = _context(opening)
     connection = _connect(migrated_postgres_dsn)
     try:
@@ -500,7 +552,7 @@ def test_stray_matching_activation_id_under_legacy_zero_is_never_replayed(
 def test_readiness_blocked_rolls_back_without_epoch_or_control_delta(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     writer = _connect(migrated_postgres_dsn)
     try:
         with writer.cursor() as cursor:
@@ -530,7 +582,7 @@ def test_missing_control_and_catalog_drift_return_blocked_without_activation_dml
     migrated_postgres_dsn,
     corruption,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     connection = _connect(migrated_postgres_dsn)
     try:
         with connection.cursor() as cursor:
@@ -560,7 +612,7 @@ def test_missing_control_and_catalog_drift_return_blocked_without_activation_dml
 def test_commit_unknown_is_resolved_by_exact_read_only_replay(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     context = _context(opening)
     failing_factory = _TrackingFactory(
         migrated_postgres_dsn,
@@ -587,7 +639,7 @@ def test_failure_after_capability_or_precommit_check_rolls_back_transition(
     migrated_postgres_dsn,
     fail_stage,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     before = _runtime_snapshot(migrated_postgres_dsn)
     factory = _MutationFailureFactory(migrated_postgres_dsn, fail_stage)
 
@@ -616,7 +668,7 @@ def test_concurrent_authority_writer_makes_activation_busy_without_delta(
     migrated_postgres_dsn,
     relation,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     holder = _connect(migrated_postgres_dsn)
     try:
         with holder.cursor() as cursor:
@@ -637,7 +689,7 @@ def test_real_dormant_writer_cannot_create_a_phantom_during_activation(
     migrated_postgres_dsn,
     writer_kind,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     factory = _BlockingCommitFactory(migrated_postgres_dsn)
 
     def write():
@@ -680,7 +732,7 @@ def test_held_account_or_position_row_returns_bounded_busy_without_delta(
     migrated_postgres_dsn,
     relation,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     if relation == "position_streams":
         journal = PostgresOrderPositionJournal(lambda: _connect(migrated_postgres_dsn))
         journal.reserve_instruction(
@@ -705,7 +757,7 @@ def test_held_account_or_position_row_returns_bounded_busy_without_delta(
 def test_two_activators_produce_one_activation_and_one_exact_replay(
     migrated_postgres_dsn,
 ):
-    opening = _provision(migrated_postgres_dsn)
+    opening = _provision(migrated_postgres_dsn, with_provenance=True)
     context = _context(opening)
     gate = Event()
 

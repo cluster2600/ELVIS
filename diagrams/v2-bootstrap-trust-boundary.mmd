@@ -1,12 +1,25 @@
-flowchart LR
-    OP["operator"] --> CFG["non-secret bootstrap-v1 JSON"]
-    OP --> LPQ["external libpq files"]
-    CFG --> CLI["offline bootstrap CLI"]
+flowchart TD
+    accTitle: ELVIS V2 bootstrap trust boundary
+    accDescr: Offline bootstrap-v2 uses approved opening evidence, a database-owner control plane, and three temporary login probes to seal a dormant terminal catalog with two logins and six inert roles; legacy and atomic runtime remain future labels without target capability in PR3, while the V1 source stays elsewhere.
+
+    OP["Operator<br/>private ceremony"] --> CFG["Private bootstrap-v2 config"]
+    OP --> DOCS["Signed opening documents<br/>approved candidate and pins"]
+    OP --> LPQ["External libpq files"]
+
+    CFG --> CLI["Offline bootstrap CLI"]
+    DOCS --> CLI
     LPQ --> CLI
-    CLI --> ADMIN["admin connection"]
-    CLI --> PROBES["six role probes"]
-    ADMIN --> BOOT["PostgresBootstrap"]
+    CLI --> ADMIT["Verify candidate and pin authority<br/>before terminal state"]
+    CLI --> ADMIN["DB-owner admin<br/>trusted control plane"]
+    CLI --> PROBES["3 managed-login probes<br/>migrator · readiness · trainer"]
+
+    ADMIT --> BOOT["PostgresBootstrap"]
+    ADMIN -->|"only mutator"| BOOT
     PROBES --> BOOT
-    BOOT --> DB["one PostgreSQL database"]
-    BOOT --> OUT["secret-free JSON receipt"]
-    RUNTIME["ELVIS runtime"] -. "not connected" .-> CLI
+    BOOT --> DB["Dedicated PostgreSQL target<br/>sealed head-7 catalog<br/>secret-free COMPLETE receipt"]
+
+    DB --> LOGIN["2 terminal LOGIN roles<br/>readiness · trainer"]
+    DB --> INERT["6 inert NOLOGIN roles<br/>schema_owner · migrator · opening<br/>legacy_runtime · atomic_runtime · activation"]
+    INERT --> ANCHOR["opening anchor<br/>no service, HBA, ACL, or capability"]
+    INERT --> FUTURE["legacy_runtime and atomic_runtime<br/>future role labels only<br/>no target service, HBA, ACL, or capability in PR3<br/>V1 source remains elsewhere"]
+    DB -. "does not activate or start" .-> RUNTIME["Activation and ELVIS runtime"]

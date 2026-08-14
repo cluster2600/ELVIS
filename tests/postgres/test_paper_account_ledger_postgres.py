@@ -802,7 +802,7 @@ def test_manifest_freezes_the_exact_opening_envelope(migrated_postgres_dsn):
         _insert_manifest(connection, facts)
         connection.commit()
 
-        with pytest.raises(psycopg2.IntegrityError):
+        with pytest.raises(psycopg2.Error) as raised:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -814,6 +814,7 @@ def test_manifest_freezes_the_exact_opening_envelope(migrated_postgres_dsn):
                     ("f" * 64, facts["account_key"]),
                 )
             connection.commit()
+        assert raised.value.pgcode == "55000"
         connection.rollback()
     finally:
         connection.close()
